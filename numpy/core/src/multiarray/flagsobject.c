@@ -62,24 +62,16 @@ PyArray_NewFlagsObject(PyObject *obj)
 NPY_NO_EXPORT void
 PyArray_UpdateFlags(PyArrayObject *ret, int flagmask)
 {
-
-    if (flagmask & NPY_ARRAY_F_CONTIGUOUS) {
+    /* Always update both, as its not trivial to guess one from the other */
+    if (flagmask & (NPY_ARRAY_F_CONTIGUOUS | NPY_ARRAY_C_CONTIGUOUS)) {
         if (_IsFortranContiguous(ret)) {
             PyArray_ENABLEFLAGS(ret, NPY_ARRAY_F_CONTIGUOUS);
-            if (PyArray_NDIM(ret) > 1) {
-                PyArray_CLEARFLAGS(ret, NPY_ARRAY_C_CONTIGUOUS);
-            }
         }
         else {
             PyArray_CLEARFLAGS(ret, NPY_ARRAY_F_CONTIGUOUS);
         }
-    }
-    if (flagmask & NPY_ARRAY_C_CONTIGUOUS) {
         if (_IsContiguous(ret)) {
             PyArray_ENABLEFLAGS(ret, NPY_ARRAY_C_CONTIGUOUS);
-            if (PyArray_NDIM(ret) > 1) {
-                PyArray_CLEARFLAGS(ret, NPY_ARRAY_F_CONTIGUOUS);
-            }
         }
         else {
             PyArray_CLEARFLAGS(ret, NPY_ARRAY_C_CONTIGUOUS);
@@ -112,7 +104,7 @@ PyArray_UpdateFlags(PyArrayObject *ret, int flagmask)
  * Check whether the given array is stored contiguously
  * (row-wise) in memory.
  *
- * 0-strided arrays are not contiguous (even if dimension == 1)
+ * 0-strided arrays are not contiguous. A dimension == 1 is always ok.
  */
 static int
 _IsContiguous(PyArrayObject *ap)
@@ -134,16 +126,18 @@ _IsContiguous(PyArrayObject *ap)
         if (dim == 0) {
             return 1;
         }
-        if (PyArray_STRIDES(ap)[i] != sd) {
-            return 0;
+        if (dim != 1) {
+            if (PyArray_STRIDES(ap)[i] != sd) {
+                return 0;
+            }
+            sd *= dim;
         }
-        sd *= dim;
     }
     return 1;
 }
 
 
-/* 0-strided arrays are not contiguous (even if dimension == 1) */
+/* 0-strided arrays are not contiguous. A dimension == 1 is always ok. */
 static int
 _IsFortranContiguous(PyArrayObject *ap)
 {
@@ -164,10 +158,12 @@ _IsFortranContiguous(PyArrayObject *ap)
         if (dim == 0) {
             return 1;
         }
-        if (PyArray_STRIDES(ap)[i] != sd) {
-            return 0;
+        if (dim != 1) {
+            if (PyArray_STRIDES(ap)[i] != sd) {
+                return 0;
+            }
+            sd *= dim;
         }
-        sd *= dim;
     }
     return 1;
 }
