@@ -1824,9 +1824,6 @@ PyArray_FromArray(PyArrayObject *arr, PyArray_Descr *newtype, int flags)
     }
 
     arrflags = PyArray_FLAGS(arr);
-    if (PyArray_NDIM(arr) <= 1 && (flags & NPY_ARRAY_F_CONTIGUOUS)) {
-        flags |= NPY_ARRAY_C_CONTIGUOUS;
-    }
            /* If a guaranteed copy was requested */
     copy = (flags & NPY_ARRAY_ENSURECOPY) ||
            /* If C contiguous was requested, and arr is not */
@@ -1836,9 +1833,8 @@ PyArray_FromArray(PyArrayObject *arr, PyArray_Descr *newtype, int flags)
            ((flags & NPY_ARRAY_ALIGNED) &&
                    (!(arrflags & NPY_ARRAY_ALIGNED))) ||
            /* If a Fortran contiguous array was requested, and arr is not */
-           (PyArray_NDIM(arr) > 1 &&
-                   ((flags & NPY_ARRAY_F_CONTIGUOUS) &&
-                   (!(arrflags & NPY_ARRAY_F_CONTIGUOUS)))) ||
+           ((flags & NPY_ARRAY_F_CONTIGUOUS) &&
+                   (!(arrflags & NPY_ARRAY_F_CONTIGUOUS))) ||
            /* If a writeable array was requested, and arr is not */
            ((flags & NPY_ARRAY_WRITEABLE) &&
                    (!(arrflags & NPY_ARRAY_WRITEABLE))) ||
