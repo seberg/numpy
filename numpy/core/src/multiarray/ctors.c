@@ -3528,6 +3528,20 @@ _array_fill_strides(npy_intp *strides, npy_intp *dims, int nd, size_t itemsize,
                     int inflag, int *objflags)
 {
     int i;
+    npy_bool not_cf_contig = 0;
+    npy_bool nod = 0; /* A dim != 1 was found */
+
+    /* Check if new array is both F- and C-contiguous */
+    for (i = 0; i < nd; i++) {
+        if (dims[i] != 1) {
+            if (nod) {
+                not_cf_contig = 1;
+                break;
+            }
+            nod = 1;
+        }
+    }
+
     /* Only make Fortran strides if not contiguous as well */
     if ((inflag & (NPY_ARRAY_F_CONTIGUOUS|NPY_ARRAY_C_CONTIGUOUS)) ==
                                             NPY_ARRAY_F_CONTIGUOUS) {
@@ -3535,7 +3549,7 @@ _array_fill_strides(npy_intp *strides, npy_intp *dims, int nd, size_t itemsize,
             strides[i] = itemsize;
             itemsize *= dims[i] ? dims[i] : 1;
         }
-        if (nd > 1) {
+        if (not_cf_contig) {
             *objflags = ((*objflags)|NPY_ARRAY_F_CONTIGUOUS) &
                                             ~NPY_ARRAY_C_CONTIGUOUS;
         }
@@ -3548,7 +3562,7 @@ _array_fill_strides(npy_intp *strides, npy_intp *dims, int nd, size_t itemsize,
             strides[i] = itemsize;
             itemsize *= dims[i] ? dims[i] : 1;
         }
-        if (nd > 1) {
+        if (not_cf_contig) {
             *objflags = ((*objflags)|NPY_ARRAY_C_CONTIGUOUS) &
                                             ~NPY_ARRAY_F_CONTIGUOUS;
         }
