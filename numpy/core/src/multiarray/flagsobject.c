@@ -112,6 +112,7 @@ _IsContiguous(PyArrayObject *ap)
     npy_intp sd;
     npy_intp dim;
     int i;
+    int is_contig = 1;
 
     if (PyArray_NDIM(ap) == 0) {
         return 1;
@@ -128,12 +129,12 @@ _IsContiguous(PyArrayObject *ap)
         }
         if (dim != 1) {
             if (PyArray_STRIDES(ap)[i] != sd) {
-                return 0;
+                is_contig = 0;
             }
             sd *= dim;
         }
     }
-    return 1;
+    return is_contig;
 }
 
 
@@ -144,6 +145,7 @@ _IsFortranContiguous(PyArrayObject *ap)
     npy_intp sd;
     npy_intp dim;
     int i;
+    int is_contig = 1;
 
     if (PyArray_NDIM(ap) == 0) {
         return 1;
@@ -160,12 +162,12 @@ _IsFortranContiguous(PyArrayObject *ap)
         }
         if (dim != 1) {
             if (PyArray_STRIDES(ap)[i] != sd) {
-                return 0;
+                is_contig = 0;
             }
             sd *= dim;
         }
     }
-    return 1;
+    return is_contig;
 }
 
 static void
