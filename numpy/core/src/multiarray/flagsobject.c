@@ -15,11 +15,8 @@
 
 #include "common.h"
 
-static int
-_IsContiguous(PyArrayObject *ap);
-
-static int
-_IsFortranContiguous(PyArrayObject *ap);
+static void
+_UpdateContiguousFlags(PyArrayObject *ap);
 
 /*NUMPY_API
  *
@@ -64,18 +61,7 @@ PyArray_UpdateFlags(PyArrayObject *ret, int flagmask)
 {
     /* Always update both, as its not trivial to guess one from the other */
     if (flagmask & (NPY_ARRAY_F_CONTIGUOUS | NPY_ARRAY_C_CONTIGUOUS)) {
-        if (_IsFortranContiguous(ret)) {
-            PyArray_ENABLEFLAGS(ret, NPY_ARRAY_F_CONTIGUOUS);
-        }
-        else {
-            PyArray_CLEARFLAGS(ret, NPY_ARRAY_F_CONTIGUOUS);
-        }
-        if (_IsContiguous(ret)) {
-            PyArray_ENABLEFLAGS(ret, NPY_ARRAY_C_CONTIGUOUS);
-        }
-        else {
-            PyArray_CLEARFLAGS(ret, NPY_ARRAY_C_CONTIGUOUS);
-        }
+        _UpdateContiguousFlags(ret);
     }
     if (flagmask & NPY_ARRAY_ALIGNED) {
         if (_IsAligned(ret)) {
@@ -102,72 +88,71 @@ PyArray_UpdateFlags(PyArrayObject *ret, int flagmask)
 
 /*
  * Check whether the given array is stored contiguously
- * (row-wise) in memory.
+ * in memory. And update the passed in ap apropriately.
  *
  * 0-strided arrays are not contiguous. A dimension == 1 is always ok.
  */
-static int
-_IsContiguous(PyArrayObject *ap)
+static void
+_UpdateContiguousFlags(PyArrayObject *ap)
 {
     npy_intp sd;
     npy_intp dim;
     int i;
-    int is_contig = 1;
+    int is_c_contig = 1;
 
     if (PyArray_NDIM(ap) == 0) {
-        return 1;
+        PyArray_ENABLEFLAGS(ap, NPY_ARRAY_C_CONTIGUOUS);
+        PyArray_ENABLEFLAGS(ap, NPY_ARRAY_F_CONTIGUOUS);
+        return;
     }
     sd = PyArray_DESCR(ap)->elsize;
     if (PyArray_NDIM(ap) == 1) {
-        return PyArray_DIMS(ap)[0] == 1 || sd == PyArray_STRIDES(ap)[0];
+        if (PyArray_DIMS(ap)[0] == 1 || sd == PyArray_STRIDES(ap)[0]) {
+            PyArray_ENABLEFLAGS(ap, NPY_ARRAY_C_CONTIGUOUS);
+            PyArray_ENABLEFLAGS(ap, NPY_ARRAY_F_CONTIGUOUS);
+            return;
+        }
+        PyArray_CLEARFLAGS(ap, NPY_ARRAY_C_CONTIGUOUS);
+        PyArray_CLEARFLAGS(ap, NPY_ARRAY_F_CONTIGUOUS);
+        return;
     }
+
     for (i = PyArray_NDIM(ap) - 1; i >= 0; --i) {
         dim = PyArray_DIMS(ap)[i];
         /* contiguous by definition */
         if (dim == 0) {
-            return 1;
+            PyArray_ENABLEFLAGS(ap, NPY_ARRAY_C_CONTIGUOUS);
+            PyArray_ENABLEFLAGS(ap, NPY_ARRAY_F_CONTIGUOUS);
+            return;
         }
         if (dim != 1) {
             if (PyArray_STRIDES(ap)[i] != sd) {
-                is_contig = 0;
+                is_c_contig = 0;
             }
             sd *= dim;
         }
     }
-    return is_contig;
-}
-
-
-/* 0-strided arrays are not contiguous. A dimension == 1 is always ok. */
-static int
-_IsFortranContiguous(PyArrayObject *ap)
-{
-    npy_intp sd;
-    npy_intp dim;
-    int i;
-    int is_contig = 1;
-
-    if (PyArray_NDIM(ap) == 0) {
-        return 1;
+    if (is_c_contig) {
+        PyArray_ENABLEFLAGS(ap, NPY_ARRAY_C_CONTIGUOUS);
     }
+    else {
+        PyArray_CLEARFLAGS(ap, NPY_ARRAY_C_CONTIGUOUS);
+    }
+
+    /* check if fortran contiguous */
     sd = PyArray_DESCR(ap)->elsize;
-    if (PyArray_NDIM(ap) == 1) {
-        return PyArray_DIMS(ap)[0] == 1 || sd == PyArray_STRIDES(ap)[0];
-    }
     for (i = 0; i < PyArray_NDIM(ap); ++i) {
         dim = PyArray_DIMS(ap)[i];
-        /* fortran contiguous by definition */
-        if (dim == 0) {
-            return 1;
-        }
         if (dim != 1) {
             if (PyArray_STRIDES(ap)[i] != sd) {
-                is_contig = 0;
+                PyArray_CLEARFLAGS(ap, NPY_ARRAY_F_CONTIGUOUS);
+                return;
             }
             sd *= dim;
         }
     }
-    return is_contig;
+    PyArray_ENABLEFLAGS(ap, NPY_ARRAY_F_CONTIGUOUS);
+    return;
 }
 
 static void
