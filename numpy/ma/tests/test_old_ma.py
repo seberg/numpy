@@ -279,7 +279,7 @@ class TestMa(TestCase):
         self.assertTrue(y1.mask is m)
 
         y1a = array(y1, copy=0)
-        self.assertTrue(y1a.mask is y1.mask)
+        self.assertTrue(y1a.mask.__array_interface__ == y1.mask.__array_interface__)
 
         y2 = array(x1, mask=m, copy=0)
         self.assertTrue(y2.mask is m)

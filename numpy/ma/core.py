@@ -2788,10 +2788,15 @@ class MaskedArray(ndarray):
                 _mask = getattr(obj, '_mask', nomask)
         else:
             _mask = nomask
+        if self.flags.owndata:
+            _mask = _mask.copy()
+            self._sharedmask = False
         self._mask = _mask
         # Finalize the mask ...........
         if self._mask is not nomask:
             try:
+                # Create a view in case mask is now or later reshaped in-place.
+                self._mask = self._mask.view()
                 self._mask.shape = self.shape
             except ValueError:
                 self._mask = nomask
@@ -4081,6 +4086,23 @@ class MaskedArray(ndarray):
         if mask is not nomask:
             result._mask = mask.reshape(*s, **kwargs)
         return result
+    #
+    def get_shape(self):
+        return self._data.shape
+    def set_shape(self, shape):
+        old_shape = self._data.shape
+        np.ndarray.shape.__set__(self, shape)
+        if self._mask is not nomask:
+            try:
+                self._mask.shape = shape
+            except (TypeError, AttributeError):
+                pass
+            except:
+                self._data.shape = old_shape
+                raise
+    # Ideally this should not be necessary if ndaray.shape setter would call
+    # finalize on itself instead of an intermediate reshape array.
+    shape = property(get_shape, set_shape)
     #
     def resize(self, newshape, refcheck=True, order=False):
         """

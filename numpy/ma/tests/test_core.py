@@ -305,7 +305,7 @@ class TestMaskedArray(TestCase):
 
         y1a = array(y1)
         self.assertTrue(y1a._data.__array_interface__ == y1._data.__array_interface__)
-        self.assertTrue(y1a.mask is y1.mask)
+        self.assertTrue(y1a.mask.__array_interface__ == y1.mask.__array_interface__)
 
         y2 = array(x1, mask=m)
         self.assertTrue(y2._data.__array_interface__ == x1.__array_interface__)
