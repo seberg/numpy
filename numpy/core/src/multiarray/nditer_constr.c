@@ -156,8 +156,12 @@ NpyIter_AdvancedNew(int nop, PyArrayObject **op_in, npy_uint32 flags,
         return NULL;
     }
 
-    /* Fix oa_ndim if it is 0 and NPY_ITER_USE_ZERO_OA_NDIM is not passed */
-    if ((oa_ndim == 0) && !(flags & NPY_ITER_USE_ZERO_OA_NDIM)) {
+    /*
+     * Fix oa_ndim to -1 if it is 0 and op_axes is not given. Before 1.8
+     * this was an error. Now it enforces a 0-d iterator and oa_ndim == -1
+     * is allowed to get the old behaviour.
+     */
+    if ((oa_ndim == 0) && (op_axes == NULL)) {
         oa_ndim = -1;
     }
 
@@ -754,6 +758,11 @@ npyiter_check_op_axes(int nop, int oa_ndim, int **op_axes,
     int iop, idim;
 
     if (oa_ndim < 0) {
+        /*
+         * Before NumPy 1.8 this was the case for oa_ndim == 0, now
+         * oa_ndim == 0 is fixed to -1 if op_axes is NULL. This means that
+         * instead of an error, a 0-d iteration is forced for that case.
+         */
         if (op_axes != NULL || itershape != NULL) {
             PyErr_Format(PyExc_ValueError,
                     "If 'op_axes' or 'itershape' is not NULL in the iterator "
@@ -815,7 +824,7 @@ npyiter_calculate_ndim(int nop, PyArrayObject **op_in,
                        int oa_ndim)
 {
     /* If 'op_axes' is being used, force 'ndim' */
-    if (oa_ndim >= 0 ) {
+    if (oa_ndim >= 0) {
         return oa_ndim;
     }
     /* Otherwise it's the maximum 'ndim' from the operands */
