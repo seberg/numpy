@@ -1139,6 +1139,7 @@ static PyObject *dotblas_vdot(PyObject *NPY_UNUSED(dummy), PyObject *args) {
     PyArrayObject *ap1=NULL, *ap2=NULL, *ret=NULL;
     int l;
     int typenum;
+    npy_intp step1, step2;
     npy_intp dimensions[NPY_MAXDIMS];
     PyArray_Descr *type;
 
@@ -1156,20 +1157,20 @@ static PyObject *dotblas_vdot(PyObject *NPY_UNUSED(dummy), PyObject *args) {
     Py_INCREF(type);
     ap1 = (PyArrayObject *)PyArray_FromAny(op1, type, 0, 0, 0, NULL);
     if (ap1==NULL) {Py_DECREF(type); goto fail;}
-    op1 = PyArray_Flatten(ap1, 0);
+    op1 = PyArray_Ravel(ap1, NPY_ANYORDER);
     if (op1==NULL) {Py_DECREF(type); goto fail;}
     Py_DECREF(ap1);
     ap1 = (PyArrayObject *)op1;
 
     ap2 = (PyArrayObject *)PyArray_FromAny(op2, type, 0, 0, 0, NULL);
     if (ap2==NULL) goto fail;
-    op2 = PyArray_Flatten(ap2, 0);
+    op2 = PyArray_Ravel(ap2, NPY_ANYORDER);
     if (op2 == NULL) goto fail;
     Py_DECREF(ap2);
     ap2 = (PyArrayObject *)op2;
 
     if (typenum != NPY_FLOAT && typenum != NPY_DOUBLE &&
-        typenum != NPY_CFLOAT && typenum != NPY_CDOUBLE) {
+                typenum != NPY_CFLOAT && typenum != NPY_CDOUBLE) {
         if (!altered) {
             /* need to alter dot product */
             PyObject *tmp1, *tmp2;
@@ -1191,6 +1192,29 @@ static PyObject *dotblas_vdot(PyObject *NPY_UNUSED(dummy), PyObject *args) {
         return PyArray_Return(ret);
     }
 
+    step1 = PyArray_STRIDE(ap1, 0) / PyArray_ITEMSIZE(ap1);
+    step2 = PyArray_STRIDE(ap2, 0) / PyArray_ITEMSIZE(ap2);
+    if ((step1 * PyArray_ITEMSIZE(ap1) != PyArray_STRIDE(ap1, 0))
+            || (step1 > NPY_MAX_INT)) {
+        op1 = PyArray_Flatten(ap1, 0);
+        if (op1 == NULL) {
+            goto fail;
+        }
+        Py_DECREF(ap1);
+        ap1 = (PyArrayObject *)op1;
+        step1 = 1;
+    }
+    if ((step2 * PyArray_ITEMSIZE(ap2) != PyArray_STRIDE(ap2, 0))
+            || (step2 > NPY_MAX_INT)) {
+        op2 = PyArray_Flatten(ap2, 0);
+        if (op2 == NULL) {
+            goto fail;
+        }
+        Py_DECREF(ap2);
+        ap2 = (PyArrayObject *)op2;
+        step2 = 1;
+    }
+
     if (PyArray_DIM(ap2, 0) != PyArray_DIM(ap1, PyArray_NDIM(ap1)-1)) {
         PyErr_SetString(PyExc_ValueError, "vectors have different lengths");
         goto fail;
@@ -1204,20 +1228,24 @@ static PyObject *dotblas_vdot(PyObject *NPY_UNUSED(dummy), PyObject *args) {
 
     /* Dot product between two vectors -- Level 1 BLAS */
     if (typenum == NPY_DOUBLE) {
-        *((double *)PyArray_DATA(ret)) = cblas_ddot(l, (double *)PyArray_DATA(ap1), 1,
-                                            (double *)PyArray_DATA(ap2), 1);
+        *((double *)PyArray_DATA(ret)) = cblas_ddot(l,
+                                            (float *)PyArray_DATA(ap1), (int)step1,
+                                            (float *)PyArray_DATA(ap2), (int)step2);
     }
     else if (typenum == NPY_FLOAT) {
-        *((float *)PyArray_DATA(ret)) = cblas_sdot(l, (float *)PyArray_DATA(ap1), 1,
-                                           (float *)PyArray_DATA(ap2), 1);
+        *((float *)PyArray_DATA(ret)) = cblas_sdot(l,
+                                            (float *)PyArray_DATA(ap1), (int)step1,
+                                            (float *)PyArray_DATA(ap2), (int)step2);
     }
     else if (typenum == NPY_CDOUBLE) {
-        cblas_zdotc_sub(l, (double *)PyArray_DATA(ap1), 1,
-                        (double *)PyArray_DATA(ap2), 1, (double *)PyArray_DATA(ret));
+        cblas_zdotc_sub(l, (double *)PyArray_DATA(ap1), (int)step1,
+                            (double *)PyArray_DATA(ap2), (int)step2,
+                            (double *)PyArray_DATA(ret));
     }
     else if (typenum == NPY_CFLOAT) {
-        cblas_cdotc_sub(l, (float *)PyArray_DATA(ap1), 1,
-                        (float *)PyArray_DATA(ap2), 1, (float *)PyArray_DATA(ret));
+        cblas_cdotc_sub(l, (float *)PyArray_DATA(ap1), (int)step1,
+                            (float *)PyArray_DATA(ap2), (int)step2,
+                            (float *)PyArray_DATA(ret));
     }
 
     NPY_END_ALLOW_THREADS
