@@ -798,17 +798,19 @@ _descriptor_from_pep3118_format(char *s)
     if (buf == NULL) {
         return NULL;
     }
+
     p = buf;
     while (*s != '\0') {
         if (*s == ':') {
             in_name = !in_name;
             *p = *s;
+            p++;
         }
         else if (in_name || !NumPyOS_ascii_isspace(*s)) {
             *p = *s;
+            p++;
         }
-        ++p;
-        ++s;
+        s++;
     }
     *p = '\0';
 
