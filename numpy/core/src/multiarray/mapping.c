@@ -1569,7 +1569,7 @@ array_subscript(PyArrayObject *self, PyObject *op)
                                       PyArray_SHAPE(tmp_arr),
                                       PyArray_STRIDES(tmp_arr),
                                       PyArray_BYTES(tmp_arr),
-                                      0, /* TODO: Flags? */
+                                      PyArray_FLAGS(self),
                                       (PyObject *)self);
 
         if (result == NULL) {
