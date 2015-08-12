@@ -559,7 +559,18 @@ solve_diophantine(unsigned int n, diophantine_term_t *E, npy_int64 b,
 static int
 diophantine_sort_A(const void *xp, const void *yp)
 {
-    return ((diophantine_term_t*)yp)->a - ((diophantine_term_t*)xp)->a;
+    npy_int64 xa = ((diophantine_term_t*)xp)->a;
+    npy_int64 ya = ((diophantine_term_t*)yp)->a;
+
+    if (xa < ya) {
+        return 1;
+    }
+    else if (ya < xa) {
+        return -1;
+    }
+    else {
+        return 0;
+    }
 }
 
 
