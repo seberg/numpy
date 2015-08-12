@@ -11,11 +11,11 @@
       ==
       base_b - base_a
 
-      0 <= x_a[i] <= shape_a[i]
-      0 <= x_b[i] <= shape_b[i]
+      0 <= x_a[i] < shape_a[i]
+      0 <= x_b[i] < shape_b[i]
 
   for some integer x_a, x_b.  Itemsize needs to be considered as an additional
-  dimension with stride 1 and size itemsize-1.
+  dimension with stride 1 and size itemsize.
 
   Negative strides can be changed to positive (and vice versa) by changing
   variables x[i] -> shape[i] - 1 - x[i], and zero strides can be dropped, so
