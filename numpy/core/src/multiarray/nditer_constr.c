@@ -13,6 +13,9 @@
 
 /* Indicate that this .c file is allowed to include the header */
 #define NPY_ITERATOR_IMPLEMENTATION_CODE
+
+#include "mem_overlap.h"
+
 #include "nditer_impl.h"
 
 #include "arrayobject.h"
@@ -2703,6 +2706,7 @@ npyiter_allocate_arrays(NpyIter *iter,
     int iop, nop = NIT_NOP(iter);
 
     int check_writemasked_reductions = 0;
+    int may_share_memory, iother
 
     NpyIter_BufferData *bufferdata = NULL;
     PyArrayObject **op = NIT_OPERANDS(iter);
@@ -2712,6 +2716,8 @@ npyiter_allocate_arrays(NpyIter *iter,
     }
 
     for (iop = 0; iop < nop; ++iop) {
+        may_share_memory = 0;
+
         /*
          * Check whether there are any WRITEMASKED REDUCE operands
          * which should be validated after all the strides are filled
@@ -2756,13 +2762,41 @@ npyiter_allocate_arrays(NpyIter *iter,
             /* New arrays are aligned and need no cast */
             op_itflags[iop] |= NPY_OP_ITFLAG_ALIGNED;
             op_itflags[iop] &= ~NPY_OP_ITFLAG_CAST;
+
+            goto finish;
         }
+        /*
+         * If this is an output operand, check if there is memory overlap
+         * possible.
+         */
+        else if (op_itflags[iop] & NPY_OP_ITFLAG_WRITE) ==
+                    NPY_OP_ITFLAG_WRITE) {
+            for (iother = 0; iother < nop; ++iother) {
+                /*
+                 * We may have allocated other, but seems unlikely for read
+                 */
+                if ((op_itflags[iother] & NPY_OP_ITFLAG_READ ==
+                            NPY_OP_ITFLAG_READ) &&
+                            op[iother] != NULL && iother != iop) {
+                    /*
+                     * Use max work = 1. If the arrays are large, it might
+                     * make sense to go further.
+                     */
+                    may_share_memory = solve_may_share_memory(
+                        op[iop], op[iother], 1);
+                    if (may_share_memory) {
+                        break;
+                    }
+                }
+            }
+        }
+
         /*
          * If casting is required, the operand is read-only, and
          * it's an array scalar, make a copy whether or not the
          * copy flag is enabled.
          */
-        else if ((op_itflags[iop] & (NPY_OP_ITFLAG_CAST |
+        if ((op_itflags[iop] & (NPY_OP_ITFLAG_CAST |
                          NPY_OP_ITFLAG_READ |
                          NPY_OP_ITFLAG_WRITE)) == (NPY_OP_ITFLAG_CAST |
                                                    NPY_OP_ITFLAG_READ) &&
@@ -2800,9 +2834,14 @@ npyiter_allocate_arrays(NpyIter *iter,
                 NBF_STRIDES(bufferdata)[iop] = 0;
             }
         }
-        /* If casting is required and permitted */
-        else if ((op_itflags[iop] & NPY_OP_ITFLAG_CAST) &&
-                   (op_flags[iop] & (NPY_ITER_COPY|NPY_ITER_UPDATEIFCOPY))) {
+        /*
+         * 1. If casting is required and permitted
+         * 2. If it is an output array it may share memory with another.
+         */
+        else if (((op_itflags[iop] & NPY_OP_ITFLAG_CAST) &&
+                        (op_flags[iop] &
+                        (NPY_ITER_COPY|NPY_ITER_UPDATEIFCOPY))) ||
+                   may_share_memory) {
             PyArrayObject *temp;
             int ondim = PyArray_NDIM(op[iop]);
 
@@ -2949,6 +2988,8 @@ npyiter_allocate_arrays(NpyIter *iter,
             }
         }
     }
+
+  finish:
 
     if (check_writemasked_reductions) {
         for (iop = 0; iop < nop; ++iop) {
