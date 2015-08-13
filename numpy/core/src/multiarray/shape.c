@@ -17,6 +17,9 @@
 
 #include "shape.h"
 
+#include "mem_overlap.h"
+
+
 static int
 _fix_unknown_dimension(PyArray_Dims *newshape, npy_intp s_original);
 
@@ -1133,3 +1136,15 @@ PyArray_RemoveAxesInPlace(PyArrayObject *arr, npy_bool *flags)
     /* May not be necessary for NPY_RELAXED_STRIDES_CHECKING (see comment) */
     PyArray_UpdateFlags(arr, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_F_CONTIGUOUS);
 }
+
+
+/*NUMPY_API
+ *
+ * Checks if memory overlap exists
+ */
+NPY_NO_EXPORT int
+PyArray_ArraysShareMemory(PyArrayObject *arr1, PyArrayObject *arr2, int work) {
+    return solve_may_share_memory(arr1, arr2, work);
+}
+
+

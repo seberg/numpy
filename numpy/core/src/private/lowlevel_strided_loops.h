@@ -668,9 +668,11 @@ npy_bswap8_unaligned(char * x)
                                              PyArray_DIMS(arr2), \
                                              PyArray_NDIM(arr1)) && \
                         (PyArray_FLAGS(arr1)&(NPY_ARRAY_C_CONTIGUOUS| \
-                                      NPY_ARRAY_F_CONTIGUOUS)) & \
+                                      NPY_ARRAY_F_CONTIGUOUS)) == \
                                 (PyArray_FLAGS(arr2)&(NPY_ARRAY_C_CONTIGUOUS| \
-                                              NPY_ARRAY_F_CONTIGUOUS)) \
+                                              NPY_ARRAY_F_CONTIGUOUS)) && \
+                        /* Too strict, as readonly is fine, need new macro */ \
+                        PyArray_ArraysShareMemory(arr1, arr2, 1) == 0 \
                         )
 
 #define PyArray_TRIVIALLY_ITERABLE(arr) ( \

@@ -14,12 +14,11 @@
 /* Indicate that this .c file is allowed to include the header */
 #define NPY_ITERATOR_IMPLEMENTATION_CODE
 
-#include "mem_overlap.h"
-
 #include "nditer_impl.h"
 
 #include "arrayobject.h"
 #include "templ_common.h"
+
 
 /* Internal helper functions private to this file */
 static int
@@ -2706,7 +2705,7 @@ npyiter_allocate_arrays(NpyIter *iter,
     int iop, nop = NIT_NOP(iter);
 
     int check_writemasked_reductions = 0;
-    int may_share_memory, iother
+    int may_share_memory, iother;
 
     NpyIter_BufferData *bufferdata = NULL;
     PyArrayObject **op = NIT_OPERANDS(iter);
@@ -2769,21 +2768,24 @@ npyiter_allocate_arrays(NpyIter *iter,
          * If this is an output operand, check if there is memory overlap
          * possible.
          */
-        else if (op_itflags[iop] & NPY_OP_ITFLAG_WRITE) ==
+        else if ((op_itflags[iop] & NPY_OP_ITFLAG_WRITE) ==
                     NPY_OP_ITFLAG_WRITE) {
+            printf("checking %d\n", iop);
             for (iother = 0; iother < nop; ++iother) {
                 /*
                  * We may have allocated other, but seems unlikely for read
                  */
-                if ((op_itflags[iother] & NPY_OP_ITFLAG_READ ==
+                if (((op_itflags[iother] & NPY_OP_ITFLAG_READ) ==
                             NPY_OP_ITFLAG_READ) &&
-                            op[iother] != NULL && iother != iop) {
+                        (op[iother] != NULL) && (iother != iop)) {
                     /*
                      * Use max work = 1. If the arrays are large, it might
                      * make sense to go further.
                      */
-                    may_share_memory = solve_may_share_memory(
+                    may_share_memory = PyArray_ArraysShareMemory(
                         op[iop], op[iother], 1);
+                    printf("may share with: %d is %d\n",
+                           iother, may_share_memory);
                     if (may_share_memory) {
                         break;
                     }

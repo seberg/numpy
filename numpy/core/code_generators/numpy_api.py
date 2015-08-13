@@ -344,6 +344,8 @@ multiarray_funcs_api = {
     # End 1.9 API
     'PyArray_CheckAnyScalarExact':          (300, NonNull(1)),
     # End 1.10 API
+    'PyArray_ArraysShareMemory':            (301,),
+    # End 1.11 API
 }
 
 ufunc_types_api = {
