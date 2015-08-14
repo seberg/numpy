@@ -2787,6 +2787,7 @@ npyiter_allocate_arrays(NpyIter *iter,
                     printf("may share with: %d is %d\n",
                            iother, may_share_memory);
                     if (may_share_memory) {
+                        op_itflags[iop] &= NPY_ITER_UPDATEIFCOPY;
                         break;
                     }
                 }

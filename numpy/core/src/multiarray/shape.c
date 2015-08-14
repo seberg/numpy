@@ -1143,7 +1143,8 @@ PyArray_RemoveAxesInPlace(PyArrayObject *arr, npy_bool *flags)
  * Checks if memory overlap exists
  */
 NPY_NO_EXPORT int
-PyArray_ArraysShareMemory(PyArrayObject *arr1, PyArrayObject *arr2, int work) {
+PyArray_ArraysShareMemory(PyArrayObject *arr1, PyArrayObject *arr2, int work)
+{
     return solve_may_share_memory(arr1, arr2, work);
 }
 
