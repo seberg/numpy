@@ -2768,15 +2768,15 @@ npyiter_allocate_arrays(NpyIter *iter,
          * If this is an output operand, check if there is memory overlap
          * possible.
          */
-        else if ((op_itflags[iop] & NPY_OP_ITFLAG_WRITE) ==
-                    NPY_OP_ITFLAG_WRITE) {
-            printf("checking %d\n", iop);
+        else if ((op_itflags[iop] & NPY_OP_ITFLAG_READ) ==
+                    NPY_OP_ITFLAG_READ) {
+            /* printf("checking %d\n", iop); */
             for (iother = 0; iother < nop; ++iother) {
                 /*
                  * We may have allocated other, but seems unlikely for read
                  */
-                if (((op_itflags[iother] & NPY_OP_ITFLAG_READ) ==
-                            NPY_OP_ITFLAG_READ) &&
+                if (((op_itflags[iother] & NPY_OP_ITFLAG_WRITE) ==
+                            NPY_OP_ITFLAG_WRITE) &&
                         (op[iother] != NULL) && (iother != iop)) {
                     /*
                      * Use max work = 1. If the arrays are large, it might
@@ -2784,10 +2784,10 @@ npyiter_allocate_arrays(NpyIter *iter,
                      */
                     may_share_memory = PyArray_ArraysShareMemory(
                         op[iop], op[iother], 1);
-                    printf("may share with: %d is %d\n",
-                           iother, may_share_memory);
+                    /* printf("may share with: %d is %d\n",
+                           iother, may_share_memory); */
                     if (may_share_memory) {
-                        op_itflags[iop] &= NPY_ITER_UPDATEIFCOPY;
+                        printf("Should be forcing copy of op %d\n", iop);
                         break;
                     }
                 }
@@ -2847,6 +2847,12 @@ npyiter_allocate_arrays(NpyIter *iter,
                    may_share_memory) {
             PyArrayObject *temp;
             int ondim = PyArray_NDIM(op[iop]);
+
+            if (op_dtype[iop] == NULL) {
+                printf("op dtype was NULL\n");
+                op_dtype[iop] = PyArray_DESCR(op[iop]);
+                Py_INCREF(op_dtype[iop]);
+            }
 
             /* Allocate the temporary array, if possible */
             temp = npyiter_new_temp_array(iter, &PyArray_Type,
@@ -2914,6 +2920,8 @@ npyiter_allocate_arrays(NpyIter *iter,
                 op_itflags[iop] |= NPY_OP_ITFLAG_ALIGNED;
             }
         }
+
+  finish:
 
         /* Here we can finally check for contiguous iteration */
         if (op_flags[iop] & NPY_ITER_CONTIG) {
@@ -2991,8 +2999,6 @@ npyiter_allocate_arrays(NpyIter *iter,
             }
         }
     }
-
-  finish:
 
     if (check_writemasked_reductions) {
         for (iop = 0; iop < nop; ++iop) {
