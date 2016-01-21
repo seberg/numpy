@@ -4070,6 +4070,38 @@ array_may_share_memory(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *
     return array_shares_memory_impl(args, kwds, NPY_MAY_SHARE_BOUNDS, 0);
 }
 
+static PyObject *
+arr_set_warn_on_write(PyObject *NPY_UNUSED(ignored),
+                      PyObject *args, PyObject *kwds)
+{
+    PyObject *arr = NULL;
+    char *flag;
+    char *as_strided = "as_strided";
+    static char *kwlist[] = {"arr", "flag", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist,
+                                     &arr, &flag)) {
+        return NULL;
+    }
+
+    if (!PyArray_Check(arr)) {
+        PyErr_SetString(PyExc_ValueError, "`arr` must be an ndarray.");
+        return NULL;
+    }
+
+    if (strcmp(flag, as_strided) == 0) {
+        PyArray_ENABLEFLAGS((PyArrayObject *)arr,
+                            NPY_ARRAY_WARN_ON_WRITE_AS_STRIDED);
+    }
+    else {
+        printf("%s\n", flag);
+        PyErr_SetString(PyExc_ValueError, "unknown `flag` given.");
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+
 
 static struct PyMethodDef array_module_methods[] = {
     {"_get_ndarray_c_version",
@@ -4242,6 +4274,8 @@ static struct PyMethodDef array_module_methods[] = {
     {"packbits", (PyCFunction)io_pack,
         METH_VARARGS | METH_KEYWORDS, NULL},
     {"unpackbits", (PyCFunction)io_unpack,
+        METH_VARARGS | METH_KEYWORDS, NULL},
+    {"_set_warn_on_write", (PyCFunction)arr_set_warn_on_write,
         METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL, NULL, 0, NULL}                /* sentinel */
 };

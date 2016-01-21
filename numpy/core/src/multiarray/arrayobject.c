@@ -731,21 +731,37 @@ PyArray_CompareString(char *s1, char *s2, size_t len)
 NPY_NO_EXPORT int
 array_might_be_written(PyArrayObject *obj)
 {
-    const char *msg =
+    const char *msg_default =
         "Numpy has detected that you (may be) writing to an array returned\n"
-        "by numpy.diagonal or by selecting multiple fields in a structured\n"
-        "array. This code will likely break in a future numpy release --\n"
-        "see numpy.diagonal or arrays.indexing reference docs for details.\n"
-        "The quick fix is to make an explicit copy (e.g., do\n"
-        "arr.diagonal().copy() or arr[['f0','f1']].copy()).";
+        "by selecting multiple fields in a structured array. This code will\n"
+        "likely break in a future numpy release --\n"
+        "arrays.indexing reference docs for details. The quick fix is to\n"
+        "make an explicit copy (e.g., do arr[['f0','f1']].copy()).";
+    const char *msg_as_strided =
+        "Numpy has detected that you (may be) writing to an array returned\n"
+        "by as_strided. This is deprecated, because the array may have\n"
+        "self overlapping memory and the results of writing can be\n"
+        "unexpected. You may set the `readonly` flag if necessary, see\n"
+        "also the function documentation.";
+
+    const char *msg = msg_default;
+    int clear = NPY_ARRAY_WARN_ON_WRITE;
+
     if (PyArray_FLAGS(obj) & NPY_ARRAY_WARN_ON_WRITE) {
+        if ((PyArray_FLAGS(obj) & NPY_ARRAY_WARN_ON_WRITE_AS_STRIDED) ==
+                NPY_ARRAY_WARN_ON_WRITE_AS_STRIDED) {
+            msg = msg_as_strided;
+            clear = NPY_ARRAY_WARN_ON_WRITE_AS_STRIDED;
+        }
+
         /* 2012-07-17, 1.7 */
+        /* as_strided 2015-01-23, 1.12 */
         if (DEPRECATE_FUTUREWARNING(msg) < 0) {
             return -1;
         }
         /* Only warn once per array */
         while (1) {
-            PyArray_CLEARFLAGS(obj, NPY_ARRAY_WARN_ON_WRITE);
+            PyArray_CLEARFLAGS(obj, clear);
             if (!PyArray_BASE(obj) || !PyArray_Check(PyArray_BASE(obj))) {
                 break;
             }

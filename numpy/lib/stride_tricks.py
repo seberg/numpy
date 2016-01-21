@@ -7,7 +7,10 @@ NumPy reference guide.
 """
 from __future__ import division, absolute_import, print_function
 
+import warnings
+
 import numpy as np
+from numpy.core.multiarray import _set_warn_on_write
 
 __all__ = ['broadcast_to', 'broadcast_arrays']
 
@@ -35,8 +38,46 @@ def _maybe_view_as_subclass(original_array, new_array):
     return new_array
 
 
-def as_strided(x, shape=None, strides=None, subok=False):
-    """ Make an ndarray from the given array with the given shape and strides.
+def as_strided(x, shape=None, strides=None, subok=False, readonly="warn"):
+    """
+    Create a view into the array with the given shape and strides.
+
+    .. warning:: This function has to be used with extreme care, see notes.
+
+    Parameters
+    ----------
+    x : ndarray
+        Array to create a new.
+    shape : sequence of ints or None
+        The shape of the new array. If None ``x.shape`` will be used.
+    strides : sequence of ints or None
+        The strides of the new array. If None ``x.strides`` will be used.
+    subok : boolean
+        If true, subclasses are preserved.
+
+    .. versionadded:: 1.12
+
+    readonly : boolean
+        Whether or not the returned array should be readonly (if possible).
+
+        .. note::
+            As of Numpy 1.12 writing to the returned array is deprecated,
+            and the default will be changed to False in the future.
+
+    Returns
+    -------
+    view : ndarray
+
+    See also
+    --------
+    broadcast_to, broadcast_arrays
+
+    Notes
+    -----
+    This function creates a view into the array giving the exact strides
+    and shape. This means it manipulates the internal data structure of
+    ndarray and, if done incorrectly, the array elements can point to
+    invalid memory.
     """
     # first convert input to array, possibly keeping subclass
     x = np.array(x, copy=False, subok=subok)
@@ -45,13 +86,21 @@ def as_strided(x, shape=None, strides=None, subok=False):
         interface['shape'] = tuple(shape)
     if strides is not None:
         interface['strides'] = tuple(strides)
+
     array = np.asarray(DummyArray(interface, base=x))
 
     if array.dtype.fields is None and x.dtype.fields is not None:
         # This should only happen if x.dtype is [('', 'Vx')]
         array.dtype = x.dtype
 
-    return _maybe_view_as_subclass(x, array)
+    view = _maybe_view_as_subclass(x, array)
+
+    if readonly == 'warn':
+        _set_warn_on_write(view, "as_strided")
+    elif readonly and view.flags.writable:
+        view.flags.writable = False
+
+    return view
 
 
 def _broadcast_to(array, shape, subok, readonly):

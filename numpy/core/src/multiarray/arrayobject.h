@@ -25,5 +25,7 @@ array_might_be_written(PyArrayObject *obj);
  * on arrays returned by ndarray.diagonal.
  */
 static const int NPY_ARRAY_WARN_ON_WRITE = (1 << 31);
+static const int NPY_ARRAY_WARN_ON_WRITE_AS_STRIDED = (1 << 31) | (1 << 30);
+
 
 #endif

@@ -1,9 +1,11 @@
 from __future__ import division, absolute_import, print_function
 
+import warnings
+
 import numpy as np
 from numpy.testing import (
     run_module_suite, assert_equal, assert_array_equal,
-    assert_raises, assert_
+    assert_raises, assert_, assert_warns, assert_raises
     )
 from numpy.lib.stride_tricks import (
     as_strided, broadcast_arrays, _broadcast_shape, broadcast_to
@@ -318,6 +320,29 @@ def test_as_strided():
     assert_equal(a.dtype, a_view.dtype)
 
 
+def test_as_strided_writable_deprecation():
+    arr = np.ones((2, 3))
+    res = as_strided(arr, shape=arr.shape, strides=arr.strides)
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("always", category=FutureWarning,
+                                message=".*as_strided")
+        assert_warns(FutureWarning, res.__setitem__, Ellipsis, 3)
+        warnings.simplefilter("error", FutureWarning)
+        # The flag should be unset, so we can just do it again:
+        res[...] = 3  # should work fine
+
+        res = as_strided(arr, shape=arr.shape, strides=arr.strides)
+        assert_raises(FutureWarning, res.__setitem__, Ellipsis, 3)
+
+
+def test_as_strided_writable():
+    arr = np.ones((2, 3))
+    res = as_strided(arr, shape=arr.shape, strides=arr.strides, readonly=False)
+    res[...] = 3
+    assert_array_equal(res, np.full_like(res, 3))
+
+
 class VerySimpleSubClass(np.ndarray):
     def __new__(cls, *args, **kwargs):
         kwargs['subok'] = True
@@ -393,7 +418,7 @@ def test_writeable():
     # regresssion test for GH6491
     shape = (2,)
     strides = [0]
-    tricky_array = as_strided(np.array(0), shape, strides)
+    tricky_array = as_strided(np.array(0), shape, strides, readonly=False)
     other = np.zeros((1,))
     first, second = broadcast_arrays(tricky_array, other)
     assert_(first.shape == second.shape)
