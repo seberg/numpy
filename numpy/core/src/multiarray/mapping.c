@@ -334,39 +334,31 @@ prepare_index(PyArrayObject *self, PyObject *index,
         }
 
         /*
-         * Special case to allow 0-d boolean indexing with scalars.
-         * Should be removed after boolean as integer deprecation.
-         * Since this is always an error if it was not a boolean, we can
-         * allow the 0-d special case before the rest.
+         * Single integer index, there are two cases here.
+         * It could be an array, a 0-d array is handled
+         * a bit weird however, so need to special case it.
+         *
+         * Check for integers first, purely for performance
          */
-        else if (PyArray_NDIM(self) != 0) {
-            /*
-             * Single integer index, there are two cases here.
-             * It could be an array, a 0-d array is handled
-             * a bit weird however, so need to special case it.
-             *
-             * Check for integers first, purely for performance
-             */
 #if !defined(NPY_PY3K)
-            if (PyInt_CheckExact(obj) || !PyArray_Check(obj)) {
+        if (PyInt_CheckExact(obj) || !PyArray_Check(obj)) {
 #else
-            if (PyLong_CheckExact(obj) || !PyArray_Check(obj)) {
+        if (PyLong_CheckExact(obj) || !PyArray_Check(obj)) {
 #endif
-                npy_intp ind = PyArray_PyIntAsIntp(obj);
+            npy_intp ind = PyArray_PyIntAsIntp(obj);
 
-                if ((ind == -1) && PyErr_Occurred()) {
-                    PyErr_Clear();
-                }
-                else {
-                    index_type |= HAS_INTEGER;
-                    indices[curr_idx].object = NULL;
-                    indices[curr_idx].value = ind;
-                    indices[curr_idx].type = HAS_INTEGER;
-                    used_ndim += 1;
-                    new_ndim += 0;
-                    curr_idx += 1;
-                    continue;
-                }
+            if ((ind == -1) && PyErr_Occurred()) {
+                PyErr_Clear();
+            }
+            else {
+                index_type |= HAS_INTEGER;
+                indices[curr_idx].object = NULL;
+                indices[curr_idx].value = ind;
+                indices[curr_idx].type = HAS_INTEGER;
+                used_ndim += 1;
+                new_ndim += 0;
+                curr_idx += 1;
+                continue;
             }
         }
 
