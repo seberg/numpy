@@ -7,12 +7,6 @@ PyArray_Item_INCREF(char *data, PyArray_Descr *descr);
 NPY_NO_EXPORT void
 PyArray_Item_XDECREF(char *data, PyArray_Descr *descr);
 
-NPY_NO_EXPORT void
-_PyArray_Item_CLEAR(char *data, PyArray_Descr *descr);
-
-NPY_NO_EXPORT void
-_PyArray_Item_VISIT(char *data, PyArray_Descr *descr);
-
 NPY_NO_EXPORT int
 PyArray_INCREF(PyArrayObject *mp);
 
@@ -20,7 +14,7 @@ NPY_NO_EXPORT int
 PyArray_XDECREF(PyArrayObject *mp);
 
 NPY_NO_EXPORT int
-_PyArray_VISIT(PyArrayObject *mp);
+_PyArray_VISIT(PyArrayObject *mp, visitproc visit, void *arg);
 
 NPY_NO_EXPORT int
 _PyArray_CLEAR(PyArrayObject *mp);

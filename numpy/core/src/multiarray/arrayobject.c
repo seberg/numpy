@@ -1829,7 +1829,8 @@ array_traverse(PyArrayObject *self, visitproc visit, void *arg)
         return 0;
     }
 
-    return _PyArray_VISIT(self);    
+    _PyArray_VISIT(self, visit, arg);
+    return 0;
 }
 
 
