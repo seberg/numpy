@@ -53,6 +53,7 @@ maintainer email:  oliphant.travis@ieee.org
 #include "alloc.h"
 #include "mem_overlap.h"
 #include "numpyos.h"
+#include "refcount.h"
 #include "strfuncs.h"
 
 #include "binop_override.h"
@@ -480,7 +481,7 @@ array_dealloc(PyArrayObject *self)
      */
     Py_TRASHCAN_SAFE_BEGIN(self);
 
-    _dealloc_cached_buffer_info(self);
+    _dealloc_cached_buffer_info((PyObject*)self);
 
     if (fa->weakreflist != NULL) {
         PyObject_ClearWeakRefs((PyObject *)self);
@@ -1781,60 +1782,16 @@ array_iter(PyArrayObject *arr)
     return PySeqIter_New((PyObject *)arr);
 }
 
+
 /*
- * traverse all objects found at this record, adapted from PyArray_Item_INCREF
+ * Impelement traversal for cyclic garbage collection. There are two main
+ * cases. Arrays that do not own their own data, must VISIT their base.
+ * Arrays which hold the actual data own the references and have to visit
+ * all items.
  */
-static int
-array_item_traverse(char *data, PyArray_Descr *descr, visitproc visit,
-        void *arg)
-{
-    PyObject *temp;
-    int result;
-
-    if (!PyDataType_REFCHK(descr)) {
-        return 0;
-    }
-    if (descr->type_num == NPY_OBJECT) {
-        /*
-         * XXX the memcpy is only required if "data" is misaligned. Is that
-         * possible, given that this is a pointer to an object in a record
-         * array that owns its data? If not, array_item_clear can also be
-         * simplified
-         */
-        NPY_COPY_PYOBJECT_PTR(&temp, data);
-        Py_VISIT(temp);
-    }
-    else if (PyDataType_HASFIELDS(descr)) {
-        PyObject *key, *value, *title = NULL;
-        PyArray_Descr *new;
-        int offset;
-        Py_ssize_t pos = 0;
-
-        while (PyDict_Next(descr->fields, &pos, &key, &value)) {
-            if NPY_TITLE_KEY(key, value) {
-                continue;
-            }
-            if (!PyArg_ParseTuple(value, "Oi|O", &new, &offset, &title)) {
-                return -1;
-            }
-            result = array_item_traverse(data + offset, new, visit, arg);
-            if (result) {
-                return result;
-            }
-        }
-    }
-    return 0;
-}
-
 static int
 array_traverse(PyArrayObject *self, visitproc visit, void *arg)
 {
-    npy_intp i, n;
-    PyObject **data;
-    PyObject *temp;
-    PyArrayIterObject *it;
-    int result;
-    PyArrayObject_fields *fa = (PyArrayObject_fields *)self;
     PyArray_Descr *descr = PyArray_DESCR(self);
 
     /*
@@ -1844,195 +1801,51 @@ array_traverse(PyArrayObject *self, visitproc visit, void *arg)
     if (!descr || !PyDataType_REFCHK(descr)) {
         return 0;
     }
-    /* if the array doesn't own its data, visiting fa->base is sufficient */
-    Py_VISIT(fa->base);
-    if (!(fa->flags & NPY_ARRAY_OWNDATA) || !(fa->data)) {
+
+    if (!PyArray_CHKFLAGS(self, NPY_ARRAY_OWNDATA)) {
+        /* if the array doesn't own its data, visiting fa->base is sufficient */
+        Py_VISIT(((PyArrayObject_fields *)self)->base);
         return 0;
     }
-    /* visit all objects in the array, adapted from PyArray_INCREF */
-    if (descr->type_num != NPY_OBJECT) {
-        it = (PyArrayIterObject *)PyArray_IterNew((PyObject *)self);
-        if (it == NULL) {
-            return -1;
-        }
-        while(it->index < it->size) {
-            result = array_item_traverse(it->dataptr, descr, visit, arg);
-            if (result) {
-                Py_DECREF(it);
-                return result;
-            }
-            PyArray_ITER_NEXT(it);
-        }
-        Py_DECREF(it);
-        return 0;
-    }
-
-    if (PyArray_ISONESEGMENT(self)) {
-        data = (PyObject **)PyArray_DATA(self);
-        n = PyArray_SIZE(self);
-        if (PyArray_ISALIGNED(self)) {
-            for (i = 0; i < n; i++, data++) {
-                Py_VISIT(*data);
-            }
-        }
-        else {
-            /*
-             * XXX this is only reached for misaligned object arrays that own
-             * their data - is that even possible? If not, array_clear can also
-             * be simplified
-             */
-            for (i = 0; i < n; i++, data++) {
-                NPY_COPY_PYOBJECT_PTR(&temp, data);
-                Py_VISIT(temp);
-            }
-        }
-    }
-    else { /* handles misaligned data too */
-        /*
-         * XXX this is only reached for discontiguous object arrays that own
-         * their data - is that even possible? If not, array_clear can also be
-         * simplified
-         */
-        it = (PyArrayIterObject *)PyArray_IterNew((PyObject *)self);
-        if (it == NULL) {
-            return -1;
-        }
-        while(it->index < it->size) {
-            NPY_COPY_PYOBJECT_PTR(&temp, it->dataptr);
-            if (temp) {
-                result = visit(temp, arg);
-                if (result) {
-                    Py_DECREF(it);
-                    return result;
-                }
-            }
-            PyArray_ITER_NEXT(it);
-        }
-        Py_DECREF(it);
-    }
-    return 0;
-}
-
-/*
- * set all objects found at this record to None, adapted from
- * PyArray_Item_INCREF
- */
-static int
-array_item_clear(char *data, PyArray_Descr *descr)
-{
-    PyObject *temp, *none;
-
-    if (!PyDataType_REFCHK(descr)) {
-        return 0;
-    }
-    if (descr->type_num == NPY_OBJECT) {
-        NPY_COPY_PYOBJECT_PTR(&temp, data);
-        /* Py_None expands to (&something), so we can't just do &Py_None */
-        none = Py_None;
-        NPY_COPY_PYOBJECT_PTR(data, &none);
-        Py_INCREF(Py_None);
-        Py_XDECREF(temp);
-    }
-    else if (PyDataType_HASFIELDS(descr)) {
-        PyObject *key, *value, *title = NULL;
-        PyArray_Descr *new;
-        int offset;
-        Py_ssize_t pos = 0;
-
-        while (PyDict_Next(descr->fields, &pos, &key, &value)) {
-            if NPY_TITLE_KEY(key, value) {
-                continue;
-            }
-            if (!PyArg_ParseTuple(value, "Oi|O", &new, &offset,
-                                  &title)) {
-                PyErr_Print();
-                PyErr_Clear();
-            }
-            else {
-                array_item_clear(data + offset, new);
-            }
-        }
-    }
-    return 0;
-}
-
-static int
-array_clear(PyArrayObject *self)
-{
-    npy_intp i, n;
-    PyObject **data;
-    PyObject *temp, *none;
-    PyArrayIterObject *it;
-    PyArrayObject_fields *fa = (PyArrayObject_fields *)self;
+    /* NOTE: In the future, user dtypes could in principle be visited */
 
     /*
-     * clearing references in arrays that own their data is enough to break
-     * any reference cycles
+     * Visit all objects in the array. Except for hypothetical cases and
+     * structured types, the array will be a continuous chunk of well behaved
+     * objects. If not, fall back to a structured type version.
      */
-    if (!(fa->flags & NPY_ARRAY_OWNDATA)) {
-        return 0;
-    }
-    /* replace all objects in array with None, adapted from PyArray_INCREF */
-    if (PyArray_DESCR(self)->type_num != NPY_OBJECT) {
-        it = (PyArrayIterObject *)PyArray_IterNew((PyObject *)self);
-        if (it == NULL) {
-            PyErr_Print();
-            PyErr_Clear();
-        }
-        else {
-            while(it->index < it->size) {
-                array_item_clear(it->dataptr, PyArray_DESCR(self));
-                PyArray_ITER_NEXT(it);
-            }
-            Py_DECREF(it);
+    if ((descr->type_num == NPY_OBJECT) &&
+            PyArray_ISONESEGMENT(self) && PyArray_ISALIGNED(self)) {
+        npy_intp i, size;
+        PyObject ** data = PyArray_DATA(self);
+
+        assert(PyArray_ISNBO(self));  /* objects are always NBO */
+        size = PyArray_SIZE(self) / sizeof(PyObject *);
+
+        for (i=0; i < size; i++) {
+            Py_VISIT(*data);  /* Should be able to handle NULL */
+            data++;
         }
         return 0;
     }
 
-    if (PyArray_ISONESEGMENT(self)) {
-        data = (PyObject **)PyArray_DATA(self);
-        n = PyArray_SIZE(self);
-        if (PyArray_ISALIGNED(self)) {
-            for (i = 0; i < n; i++, data++) {
-                temp = *data;
-                *data = Py_None;
-                Py_INCREF(Py_None);
-                Py_XDECREF(temp);
-            }
-        }
-        else {
-            for (i = 0; i < n; i++, data++) {
-                NPY_COPY_PYOBJECT_PTR(&temp, data);
-                *data = Py_None;
-                Py_INCREF(Py_None);
-                Py_XDECREF(temp);
-            }
-        }
-    }
-    else { /* handles misaligned data too */
-        it = (PyArrayIterObject *)PyArray_IterNew((PyObject *)self);
-        if (it == NULL) {
-            PyErr_Print();
-            PyErr_Clear();
-        }
-        else {
-            while(it->index < it->size) {
-                NPY_COPY_PYOBJECT_PTR(&temp, it->dataptr);
-                /*
-                 * Py_None expands to (&something), so we can't just do
-                 * &Py_None
-                 */
-                none = Py_None;
-                NPY_COPY_PYOBJECT_PTR(it->dataptr, &none);
-                Py_INCREF(Py_None);
-                Py_XDECREF(temp);
-                PyArray_ITER_NEXT(it);
-            }
-            Py_DECREF(it);
-        }
-    }
-    return 0;
+    return _PyArray_VISIT(self);    
 }
+
+
+/*
+ * To break cycles, tp_clear is implemented in PyArray_ClearAndFillNone,
+ * which sets all items to None. This is sufficient to break any cycle. It
+ * is not necessary to overwrite the base attribute of arrays not owning their
+ * data.
+ * We do not implement any special paths, since clearing will occur very rarely.
+ */
+static int
+array_clear(PyArrayObject *self) {
+    return _PyArray_CLEAR(self);
+}
+
+
 
 NPY_NO_EXPORT PyTypeObject PyArray_Type = {
 #if defined(NPY_PY3K)

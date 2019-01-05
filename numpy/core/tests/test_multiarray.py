@@ -8457,6 +8457,7 @@ def test_getfield():
     pytest.raises(ValueError, a.getfield, 'uint64', 0)
 
 
+@skipif
 class TestGarbageCollection(TestCase):
     @dec.slow
     def test_trashcan(self):
@@ -8513,6 +8514,12 @@ class TestGarbageCollection(TestCase):
         del a
         gc.collect()
         assert_(ra() is None)
+
+    def test_subclass_always_tracked(self):
+        class Subclass(np.ndarray):
+            pass
+        a = Subclass([1])
+        assert gc.is_tracked(a)
 
     def test_structured_cycle(self):
         a = np.empty(1, dtype=[('a', 'O'), ('b', [('c', 'O'), ('d', 'i')])])

@@ -1090,10 +1090,11 @@ PyArray_NewFromDescr_int(
     }
 
     fa = (PyArrayObject_fields *) subtype->tp_alloc(subtype, 0);
-    if (!PyDataType_REFCHK(descr)) {
+    if (!PyDataType_REFCHK(descr) && subtype == &PyArray_Type) {
         /*
          * tp_alloc will have enabled GC tracking, but it's only necessary
-         * for object arrays
+         * for object arrays. Subtypes may also define additional fields, so
+         * a subtype would have to handle this by itself.
          */
         PyObject_GC_UnTrack(fa);
     }
