@@ -4997,8 +4997,92 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
             return NULL;
         }
     }
+
+    ufunc->resolvers = PyDict_New();
+    if (ufunc->resolvers == NULL) {
+        Py_DECREF(ufunc);
+        return NULL;
+    }
+
     return (PyObject *)ufunc;
 }
+
+
+/*UFUNC_API*/
+NPY_NO_EXPORT PyObject *
+PyUFunc_NewStyle_New(
+    int nin, int nout,
+    const char *name, const char *doc,
+    int unused, const char *signature)
+{
+    PyUFuncObject *ufunc;
+    if (nin + nout > NPY_MAXARGS) {
+        PyErr_Format(PyExc_ValueError,
+                     "Cannot construct a ufunc with more than %d operands "
+                     "(requested number were: inputs = %d and outputs = %d)",
+                     NPY_MAXARGS, nin, nout);
+        return NULL;
+    }
+
+    ufunc = PyObject_GC_New(PyUFuncObject, &PyUFunc_Type);
+    /*
+     * We use GC_New here for ufunc->obj, but do not use GC_Track since
+     * ufunc->obj is still NULL at the end of this function.
+     * See ufunc_frompyfunc where ufunc->obj is set and GC_Track is called.
+     */
+    if (ufunc == NULL) {
+        return NULL;
+    }
+
+    ufunc->nin = nin;
+    ufunc->nout = nout;
+    ufunc->nargs = nin+nout;
+    ufunc->identity = 0;  // not used
+    ufunc->identity_value = NULL;  // not used
+
+    ufunc->functions = NULL;  // not used
+    ufunc->data = NULL;  // not used
+    ufunc->types = NULL;  // not used
+    ufunc->ntypes = ntypes;
+    ufunc->core_signature = NULL;
+    ufunc->core_enabled = 0;
+    ufunc->obj = NULL;
+    ufunc->core_num_dims = NULL;
+    ufunc->core_num_dim_ix = 0;
+    ufunc->core_offsets = NULL;
+    ufunc->core_dim_ixs = NULL;
+    ufunc->core_dim_sizes = NULL;
+    ufunc->core_dim_flags = NULL;
+    ufunc->userloops = NULL;  // not used
+    ufunc->ptr = NULL;  // not used
+    ufunc->reserved2 = NULL;
+    ufunc->reserved1 = 0;
+    ufunc->iter_flags = 0;
+
+    /* Type resolution and inner loop selection functions */
+    ufunc->type_resolver = NULL;  // not used
+    ufunc->legacy_inner_loop_selector = NULL;  // not used
+    ufunc->masked_inner_loop_selector = NULL;  // not used
+
+    if (name == NULL) {
+        ufunc->name = "?";
+    }
+    else {
+        ufunc->name = name;
+    }
+    ufunc->doc = doc;
+
+    ufunc->op_flags = NULL;
+
+    if (signature != NULL) {
+        if (_parse_signature(ufunc, signature) != 0) {
+            Py_DECREF(ufunc);
+            return NULL;
+        }
+    }
+    return (PyObject *)ufunc;
+}
+
 
 /* Specify that the loop specified by the given index should use the array of
  * input and arrays as the data pointer to the loop.
@@ -5348,7 +5432,9 @@ ufunc_dealloc(PyUFuncObject *ufunc)
     PyArray_free(ufunc->core_offsets);
     PyArray_free(ufunc->core_signature);
     PyArray_free(ufunc->ptr);
-    PyArray_free(ufunc->op_flags);
+    if (ufunc->op_flags) {
+        PyArray_free(ufunc->op_flags);
+    }
     Py_XDECREF(ufunc->userloops);
     if (ufunc->identity == PyUFunc_IdentityValue) {
         Py_DECREF(ufunc->identity_value);
@@ -5356,6 +5442,7 @@ ufunc_dealloc(PyUFuncObject *ufunc)
     if (ufunc->obj != NULL) {
         Py_DECREF(ufunc->obj);
     }
+    Py_XDECREF(ufunc->resolvers);
     PyObject_GC_Del(ufunc);
 }
 
