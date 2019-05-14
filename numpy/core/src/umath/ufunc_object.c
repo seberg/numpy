@@ -4998,11 +4998,7 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
         }
     }
 
-    ufunc->resolvers = PyDict_New();
-    if (ufunc->resolvers == NULL) {
-        Py_DECREF(ufunc);
-        return NULL;
-    }
+    ufunc->resolvers = NULL;
 
     return (PyObject *)ufunc;
 }
@@ -5043,7 +5039,7 @@ PyUFunc_NewStyle_New(
     ufunc->functions = NULL;  // not used
     ufunc->data = NULL;  // not used
     ufunc->types = NULL;  // not used
-    ufunc->ntypes = ntypes;
+    ufunc->ntypes = 0;
     ufunc->core_signature = NULL;
     ufunc->core_enabled = 0;
     ufunc->obj = NULL;
@@ -5080,6 +5076,13 @@ PyUFunc_NewStyle_New(
             return NULL;
         }
     }
+
+    ufunc->resolvers = PyDict_New();
+    if (ufunc->resolvers == NULL) {
+        Py_DECREF(ufunc);
+        return NULL;
+    }
+
     return (PyObject *)ufunc;
 }
 
@@ -5975,6 +5978,37 @@ fail:
 }
 
 
+static PyObject *
+ufunc_newstyle_register_resolver(PyUFuncObject *ufunc, PyObject *args)
+{
+    if (ufunc->resolvers == NULL) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "cannot add a resolver to an old-style ufunc.");
+        return NULL;
+    }
+
+    if (PyTuple_GET_SIZE(args) != 2) {
+        PyErr_SetString(PyExc_ValueError,
+            "need to register key value pair.");
+        return NULL;
+    }
+    if (!PyTuple_CheckExact(PyTuple_GET_ITEM(args, 0))) {
+        PyErr_SetString(PyExc_ValueError,
+            "first argument must be a tuple.");
+        return NULL;
+    }
+    if (!PyTuple_GET_SIZE(PyTuple_GET_ITEM(args, 0)) != ufunc->nin + ufunc->nout) {
+        PyErr_SetString(PyExc_ValueError,
+            "number of types given must match ufunc signature.");
+        return NULL;
+    }
+    /* TODO: more checks, such as dtypes (args[1] when we have it)... */
+
+    return PyDict_SetItem(ufunc->resolvers,
+                PyTuple_GET_ITEM(args, 0), PyTuple_GET_ITEM(args, 1));
+}
+
+
 static struct PyMethodDef ufunc_methods[] = {
     {"reduce",
         (PyCFunction)ufunc_reduce,
@@ -5990,6 +6024,9 @@ static struct PyMethodDef ufunc_methods[] = {
         METH_VARARGS | METH_KEYWORDS, NULL},
     {"at",
         (PyCFunction)ufunc_at,
+        METH_VARARGS, NULL},
+    {"register_resolver",
+        (PyCFunction)ufunc_newstyle_register_resolver,
         METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}           /* sentinel */
 };
@@ -6122,6 +6159,7 @@ ufunc_get_signature(PyUFuncObject *ufunc)
     }
     return PyUString_FromString(ufunc->core_signature);
 }
+
 
 #undef _typecharfromnum
 

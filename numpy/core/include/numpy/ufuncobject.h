@@ -230,6 +230,7 @@ typedef struct _tagPyUFuncObject {
         /* Identity for reduction, when identity == PyUFunc_IdentityValue */
         PyObject *identity_value;
 
+        PyObject *resolvers;
 } PyUFuncObject;
 
 #include "arrayobject.h"
