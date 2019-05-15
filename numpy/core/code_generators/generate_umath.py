@@ -224,6 +224,7 @@ chartoname = {
     # '.' is like 'O', but calls a method of the object instead
     # of a function
     'P': 'OBJECT',
+    'S': 'STRING',
 }
 
 all = '?bBhHiIlLqQefdgFDGOMm'
@@ -280,6 +281,7 @@ defdict = {
           [TypeDescription('M', FullTypeDescr, 'Mm', 'M'),
            TypeDescription('m', FullTypeDescr, 'mm', 'm'),
            TypeDescription('M', FullTypeDescr, 'mM', 'M'),
+           TypeDescription('S', FullTypeDescr, 'SS', 'S'),
           ],
           TD(O, f='PyNumber_Add'),
           ),

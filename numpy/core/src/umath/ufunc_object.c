@@ -3174,6 +3174,17 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
         goto fail;
     }
 
+    if (subok) {
+        if (make_full_arg_tuple(&full_args, nin, nout, args, kwds) < 0) {
+            goto fail;
+        }
+        /*
+         * Get the appropriate __array_prepare__ function to call
+         * for each output
+         */
+        _find_array_prepare(full_args, arr_prep, nin, nout);
+    }
+
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
     if (ufunc->resolvers != NULL) {
@@ -3187,8 +3198,8 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
             goto fail;
         }
 
-        printf("Calling py-side resolver function... %ld %ld %ld\n",
-               (long)ufunc, (long)ufunc->resolvers, (long)type_tup);
+        // printf("Calling py-side resolver function... %ld %ld %ld\n",
+        //        (long)ufunc, (long)ufunc->resolvers, (long)type_tup);
 
         PyObject *ops_tuple = PyTuple_New(nop);
         if (ops_tuple == NULL) {
@@ -3205,7 +3216,7 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
             (type_tup != NULL) ? type_tup : Py_None,
             ops_tuple);
         Py_DECREF(ops_tuple);
-        printf("   Done calling into python.\n");
+        // printf("   Done calling into python.\n");
         if (resolved_tup == NULL) {
             goto fail;
         }
@@ -3227,7 +3238,7 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
 
             new_dtypes = PyTuple_GET_ITEM(resolved_tup, 0);
             ufunc_impl = PyTuple_GET_ITEM(resolved_tup, 1);
-            printf("fetched ufunc impl %ld %ld\n", (long)ufunc_impl, (long)Py_None);
+            // printf("fetched ufunc impl %ld %ld\n", (long)ufunc_impl, (long)Py_None);
             Py_INCREF(ufunc_impl);
 
             if (!PyTuple_CheckExact(new_dtypes) ||
@@ -3255,13 +3266,13 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
             }
         }
         else {
-            printf("falling back to old behaviour because of None return.\n");
+            // printf("falling back to old behaviour because of None return.\n");
             Py_DECREF(resolved_tup);
         }
     }
 
     if (ufunc_impl == NULL) {
-        printf("Using the normal type resolver %ld!\n", (long)ufunc_impl);
+        // printf("Using the normal type resolver %ld!\n", (long)ufunc_impl);
         retval = ufunc->type_resolver(ufunc, casting,
                                 op, type_tup, dtypes);
         if (retval < 0) {
@@ -3269,7 +3280,7 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
         }
     }
     else {
-        printf("meant to provide some extra bells and whistles here...\n");
+        // printf("meant to provide some extra bells and whistles here...\n");
     }
 
     if (wheremask != NULL) {
@@ -3301,18 +3312,6 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
     }
     printf("\n");
 #endif
-
-    if (subok) {
-        if (make_full_arg_tuple(&full_args, nin, nout, args, kwds) < 0) {
-            goto fail;
-        }
-        /*
-         * Get the appropriate __array_prepare__ function to call
-         * for each output
-         */
-        _find_array_prepare(full_args, arr_prep, nin, nout);
-    }
-
 
     /* Do the ufunc loop */
     if (wheremask != NULL) {
@@ -6378,5 +6377,82 @@ NPY_NO_EXPORT PyTypeObject PyUFunc_Type = {
     0,                                          /* tp_del */
     0,                                          /* tp_version_tag */
 };
+
+/******************************************************************************/
+
+
+static void
+ufuncimpl_dealloc(PyUFuncImplObject *ufuncimpl)
+{
+    /* May need cyclic GC support? */
+    if (ufuncimpl->identity == PyUFunc_IdentityValue) {
+        Py_DECREF(ufuncimpl->identity_value);
+    }
+}
+
+/******************************************************************************
+ ***                        UFUNC IMPL Type OBJECT                          ***
+ *****************************************************************************/
+
+NPY_NO_EXPORT PyTypeObject PyUFuncImpl_Type = {
+#if defined(NPY_PY3K)
+    PyVarObject_HEAD_INIT(NULL, 0)
+#else
+    PyObject_HEAD_INIT(NULL)
+    0,                                          /* ob_size */
+#endif
+    "numpy._ufuncimpl",                         /* tp_name */
+    sizeof(PyUFuncImplObject),                  /* tp_basicsize */
+    0,                                          /* tp_itemsize */
+    /* methods */
+    (destructor)ufuncimpl_dealloc,              /* tp_dealloc */
+    0,                                          /* tp_print */
+    0,                                          /* tp_getattr */
+    0,                                          /* tp_setattr */
+#if defined(NPY_PY3K)
+    0,                                          /* tp_reserved */
+#else
+    0,                                          /* tp_compare */
+#endif
+    0,                                          /* tp_repr */
+    0,                                          /* tp_as_number */
+    0,                                          /* tp_as_sequence */
+    0,                                          /* tp_as_mapping */
+    0,                                          /* tp_hash */
+    0,                                          /* tp_call */
+    0,                                          /* tp_str */
+    0,                                          /* tp_getattro */
+    0,                                          /* tp_setattro */
+    0,                                          /* tp_as_buffer */
+    0,                                          /* tp_flags */
+    0,                                          /* tp_doc */
+    0,                                          /* tp_traverse */
+    0,                                          /* tp_clear */
+    0,                                          /* tp_richcompare */
+    0,                                          /* tp_weaklistoffset */
+    0,                                          /* tp_iter */
+    0,                                          /* tp_iternext */
+    0,                                          /* tp_methods */
+    0,                                          /* tp_members */
+    0,                                          /* tp_getset */
+    0,                                          /* tp_base */
+    0,                                          /* tp_dict */
+    0,                                          /* tp_descr_get */
+    0,                                          /* tp_descr_set */
+    0,                                          /* tp_dictoffset */
+    0,                                          /* tp_init */
+    0,                                          /* tp_alloc */
+    0,                                          /* tp_new */
+    0,                                          /* tp_free */
+    0,                                          /* tp_is_gc */
+    0,                                          /* tp_bases */
+    0,                                          /* tp_mro */
+    0,                                          /* tp_cache */
+    0,                                          /* tp_subclasses */
+    0,                                          /* tp_weaklist */
+    0,                                          /* tp_del */
+    0,                                          /* tp_version_tag */
+};
+
 
 /* End of code for ufunc objects */

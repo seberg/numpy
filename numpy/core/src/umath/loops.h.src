@@ -558,4 +558,8 @@ PyUFunc_OOO_O(char **args, npy_intp *dimensions, npy_intp *steps, void *func);
  *****************************************************************************
  */
 
+NPY_NO_EXPORT void
+STRING_SS_S_add(char **args, npy_intp *dimensions, npy_intp *steps, void *NPY_UNUSED(func));
+
+
 #endif

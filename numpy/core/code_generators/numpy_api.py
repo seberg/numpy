@@ -353,7 +353,8 @@ multiarray_funcs_api = {
 }
 
 ufunc_types_api = {
-    'PyUFunc_Type':                             (0,)
+    'PyUFunc_Type':                             (0,),
+    'PyUFuncImpl_Type':                         (44,),
 }
 
 ufunc_funcs_api = {

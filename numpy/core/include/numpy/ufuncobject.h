@@ -233,6 +233,7 @@ typedef struct _tagPyUFuncObject {
         PyObject *resolvers;
 } PyUFuncObject;
 
+
 #include "arrayobject.h"
 /* Generalized ufunc; 0x0001 reserved for possible use as CORE_ENABLED */
 /* the core dimension's size will be determined by the operands. */

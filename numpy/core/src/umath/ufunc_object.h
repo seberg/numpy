@@ -31,4 +31,33 @@ NPY_VISIBILITY_HIDDEN extern PyObject *npy_um_str_array_finalize;
 NPY_VISIBILITY_HIDDEN extern PyObject *npy_um_str_ufunc;
 NPY_VISIBILITY_HIDDEN extern PyObject *npy_um_str_pyvals_name;
 
+
+typedef struct {
+        PyObject_HEAD
+        /*
+         * Identity for reduction, any of PyUFunc_One, PyUFunc_Zero
+         * PyUFunc_MinusOne, PyUFunc_None, PyUFunc_ReorderableNone,
+         * PyUFunc_IdentityValue.
+         */
+        int identity;
+
+        /*
+         * List of flags for each operand when ufunc is called by nditer object.
+         * These flags will be used in addition to the default flags for each
+         * operand set by nditer object.
+         */
+        npy_uint32 *op_flags;
+
+        /*
+         * List of global flags used when ufunc is called by nditer object.
+         * These flags will be used in addition to the default global flags
+         * set by nditer object.
+         */
+        npy_uint32 iter_flags;
+
+        /* Identity for reduction, when identity == PyUFunc_IdentityValue */
+        PyObject *identity_value;
+
+} PyUFuncImplObject;
+
 #endif

@@ -48,3 +48,6 @@
 # Add fields core_dim_flags and core_dim_sizes to PyUFuncObject.
 # Add PyUFunc_FromFuncAndDataAndSignatureAndIdentity to ufunc_funcs_api.
 0x0000000d = 5b0e8bbded00b166125974fc71e80a33
+
+# Version 14 (NumPy 1.18)
+0x0000000e = acd0de5026ef8421d86f16b2f3cc490f

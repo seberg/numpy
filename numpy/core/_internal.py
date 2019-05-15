@@ -912,7 +912,6 @@ class recursive(object):
 
 
 def resolve_ufunc_loop(ufunc, resolvers, type_tup, arrs):
-
     best = None
     best_distance = float("inf")
 
@@ -951,6 +950,6 @@ def resolve_ufunc_loop(ufunc, resolvers, type_tup, arrs):
 
     if best is None:
         return None
-    using = best(type_tup)
-    print("  Python side resolving got:", using, [dt.metadata for dt in using[0]])
+    using = best(dtypes)
+    # print("  Python side resolving got:", using, [dt.metadata for dt in using[0]])
     return using
