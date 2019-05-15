@@ -3111,6 +3111,7 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
     npy_intp default_op_out_flags;
 
     PyArray_Descr *dtypes[NPY_MAXARGS];
+    PyObject *ufunc_impl = NULL;
 
     /* These parameters come from extobj= or from a TLS global */
     int buffersize = 0, errormask = 0;
@@ -3175,10 +3176,100 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
 
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
-    retval = ufunc->type_resolver(ufunc, casting,
-                            op, type_tup, dtypes);
-    if (retval < 0) {
-        goto fail;
+    if (ufunc->resolvers != NULL) {
+        /* Use new style type resolution, yay! */
+        static PyObject *resolve_ufunc_loop;
+        PyObject *resolved_tup, *new_dtypes;
+
+        npy_cache_import("numpy.core._internal", "resolve_ufunc_loop",
+                         &resolve_ufunc_loop);
+        if (resolve_ufunc_loop == NULL) {
+            goto fail;
+        }
+
+        printf("Calling py-side resolver function... %ld %ld %ld\n",
+               (long)ufunc, (long)ufunc->resolvers, (long)type_tup);
+
+        PyObject *ops_tuple = PyTuple_New(nop);
+        if (ops_tuple == NULL) {
+            goto fail;
+        }
+        for (Py_ssize_t i = 0; i < nop; i++) {
+            PyObject *tmp = (op[i] != NULL) ? (PyObject *)op[i] : Py_None;
+            Py_INCREF(tmp);
+            PyTuple_SET_ITEM(ops_tuple, i, tmp);
+        }
+        resolved_tup = PyObject_CallFunction(
+            resolve_ufunc_loop, "OOOO",
+            ufunc, ufunc->resolvers,
+            (type_tup != NULL) ? type_tup : Py_None,
+            ops_tuple);
+        Py_DECREF(ops_tuple);
+        printf("   Done calling into python.\n");
+        if (resolved_tup == NULL) {
+            goto fail;
+        }
+
+        if (resolved_tup != Py_None) {
+            /* TODO: Refactor it so that it is no nested if. */
+            if (!PyTuple_CheckExact(resolved_tup)) {
+                Py_DECREF(resolved_tup);
+                PyErr_SetString(PyExc_RuntimeError,
+                    "type resolver function must return a tuple.");
+                goto fail;
+            }
+            if (PyTuple_GET_SIZE(resolved_tup) != 2) {
+                Py_DECREF(resolved_tup);
+                PyErr_SetString(PyExc_RuntimeError,
+                    "type resolver function must return a tuple of length 2.");
+                goto fail;
+            }
+
+            new_dtypes = PyTuple_GET_ITEM(resolved_tup, 0);
+            ufunc_impl = PyTuple_GET_ITEM(resolved_tup, 1);
+            printf("fetched ufunc impl %ld %ld\n", (long)ufunc_impl, (long)Py_None);
+            Py_INCREF(ufunc_impl);
+
+            if (!PyTuple_CheckExact(new_dtypes) ||
+                    (PyTuple_GET_SIZE(new_dtypes) != nop)) {
+                Py_DECREF(resolved_tup);
+                PyErr_SetString(PyExc_RuntimeError,
+                    "dtype info must be tuple of correct length.");
+                goto fail;
+            }
+
+            for (Py_ssize_t i = 0; i < nop; i++) {
+                dtypes[i] = (PyArray_Descr *)PyTuple_GET_ITEM(new_dtypes, i);
+                Py_INCREF(dtypes[i]);
+                if (!PyArray_DescrCheck(dtypes[i])) {
+                    Py_DECREF(resolved_tup);
+                    PyErr_SetString(PyExc_RuntimeError,
+                        "dtype info contained non-dtype!");
+                    goto fail;
+                }
+            }
+            Py_DECREF(resolved_tup);
+
+            if (PyUFunc_ValidateCasting(ufunc, casting, op, dtypes) < 0) {
+                goto fail;
+            }
+        }
+        else {
+            printf("falling back to old behaviour because of None return.\n");
+            Py_DECREF(resolved_tup);
+        }
+    }
+
+    if (ufunc_impl == NULL) {
+        printf("Using the normal type resolver %ld!\n", (long)ufunc_impl);
+        retval = ufunc->type_resolver(ufunc, casting,
+                                op, type_tup, dtypes);
+        if (retval < 0) {
+            goto fail;
+        }
+    }
+    else {
+        printf("meant to provide some extra bells and whistles here...\n");
     }
 
     if (wheremask != NULL) {
@@ -3285,6 +3376,7 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
     Py_XDECREF(wheremask);
+    Py_XDECREF(ufunc_impl);
 
     NPY_UF_DBG_PRINT("Returning success code 0\n");
 
@@ -3303,6 +3395,7 @@ fail:
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
     Py_XDECREF(wheremask);
+    Py_XDECREF(ufunc_impl);
 
     return retval;
 }
@@ -5982,9 +6075,28 @@ static PyObject *
 ufunc_newstyle_register_resolver(PyUFuncObject *ufunc, PyObject *args)
 {
     if (ufunc->resolvers == NULL) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "cannot add a resolver to an old-style ufunc.");
-        return NULL;
+        /*
+         * Old style ufunc, add a None type resolver to fallback to old
+         * behaviour.
+         */
+        PyObject *key;
+        ufunc->resolvers = PyDict_New();
+        if (ufunc->resolvers == NULL) {
+            return NULL;
+        }
+        key = PyTuple_New(ufunc->nin + ufunc->nout);
+        if (key == NULL){
+            return NULL;
+        }
+        for (Py_ssize_t i = 0; i < ufunc->nin + ufunc->nout; i++) {
+            Py_INCREF(Py_None);
+            PyTuple_SET_ITEM(key, i, Py_None);
+        }
+        if (PyDict_SetItem(ufunc->resolvers, key, Py_None) < 0) {
+            Py_DECREF(key);
+            return NULL;
+        }
+        Py_DECREF(key);
     }
 
     if (PyTuple_GET_SIZE(args) != 2) {
@@ -5997,15 +6109,19 @@ ufunc_newstyle_register_resolver(PyUFuncObject *ufunc, PyObject *args)
             "first argument must be a tuple.");
         return NULL;
     }
-    if (!PyTuple_GET_SIZE(PyTuple_GET_ITEM(args, 0)) != ufunc->nin + ufunc->nout) {
+    if (PyTuple_GET_SIZE(PyTuple_GET_ITEM(args, 0)) != ufunc->nin + ufunc->nout) {
         PyErr_SetString(PyExc_ValueError,
             "number of types given must match ufunc signature.");
         return NULL;
     }
     /* TODO: more checks, such as dtypes (args[1] when we have it)... */
 
-    return PyDict_SetItem(ufunc->resolvers,
-                PyTuple_GET_ITEM(args, 0), PyTuple_GET_ITEM(args, 1));
+    if (PyDict_SetItem(ufunc->resolvers,
+                PyTuple_GET_ITEM(args, 0), PyTuple_GET_ITEM(args, 1)) < 0) {
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
 }
 
 

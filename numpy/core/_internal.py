@@ -910,3 +910,47 @@ class recursive(object):
     def __call__(self, *args, **kwargs):
         return self.func(self, *args, **kwargs)
 
+
+def resolve_ufunc_loop(ufunc, resolvers, type_tup, arrs):
+
+    best = None
+    best_distance = float("inf")
+
+    # Did not think about what to do with type_tup yet, these are specified
+    # types. For normal ufuncs one dtype, for reductions can be more.
+    # (there is also code for a string here, not sure where that can happen).
+    assert type_tup is None
+
+    dtypes = []
+    for arr in arrs:
+        if arr is None:
+            dtypes.append(None)
+        else:
+            dtypes.append(arr.dtype)
+
+    for dt_categories, resolver in resolvers.items():
+        distance = 0
+        assert len(dtypes) == len(dt_categories)
+        for given, expected in zip(dtypes, dt_categories):
+            if given is None or expected is None:
+                distance += 3
+                continue
+
+            if given.kind in "SU" and not expected.kind in "SU":
+                # Put string types into a different category then rest!
+                distance += 1
+            if given.metadata is None and not expected.metadata is None:
+                # Use "Metadata" to mean "we are subclassing"! ;).
+                distance += 1
+
+        if distance == best_distance:
+            raise RuntimeError("could not find a best loop.")
+        elif distance < best_distance:
+            best_distance = distance
+            best = resolver
+
+    if best is None:
+        return None
+    using = best(type_tup)
+    print("  Python side resolving got:", using, [dt.metadata for dt in using[0]])
+    return using
