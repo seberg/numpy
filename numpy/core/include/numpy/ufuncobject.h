@@ -231,6 +231,7 @@ typedef struct _tagPyUFuncObject {
         PyObject *identity_value;
 
         PyObject *resolvers;
+        PyObject *ufunc_impl_cache;
 } PyUFuncObject;
 
 

@@ -31,8 +31,13 @@ NPY_VISIBILITY_HIDDEN extern PyObject *npy_um_str_array_finalize;
 NPY_VISIBILITY_HIDDEN extern PyObject *npy_um_str_ufunc;
 NPY_VISIBILITY_HIDDEN extern PyObject *npy_um_str_pyvals_name;
 
+/* Forward declaration for the dtype adaption function typedef */
+struct _tagPyUFuncImplObject;
 
-typedef struct {
+typedef int (PyUfuncAdaptFlexibleDTypes) (
+        struct _tagPyUFuncImplObject *ufunc_impl, PyArray_Descr **dtypes);
+
+typedef struct _tagPyUFuncImplObject {
         PyObject_HEAD
         /*
          * Identity for reduction, any of PyUFunc_One, PyUFunc_Zero
@@ -40,6 +45,15 @@ typedef struct {
          * PyUFunc_IdentityValue.
          */
         int identity;
+
+        int nin;
+        int nout;
+
+        int needs_api;
+        /*
+         * TODO: Probably needs most/all ufunc slots to assert compatibility
+         *       for the python side API.
+         */
 
         /*
          * List of flags for each operand when ufunc is called by nditer object.
@@ -57,6 +71,15 @@ typedef struct {
 
         /* Identity for reduction, when identity == PyUFunc_IdentityValue */
         PyObject *identity_value;
+
+        PyUFuncGenericFunction innerloop;
+        void *innerloopdata;
+
+        /*
+         * For flexible dtypes, the output data type cannot be cached,
+         * so it needs to be set after caching is done.
+         */
+        PyUfuncAdaptFlexibleDTypes *adapt_dtype_func;
 
 } PyUFuncImplObject;
 

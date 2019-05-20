@@ -2,6 +2,9 @@
 #define _NPY_PRIVATE__UFUNC_TYPE_RESOLUTION_H_
 
 NPY_NO_EXPORT int
+should_use_min_scalar(PyArrayObject **op, int nop);
+
+NPY_NO_EXPORT int
 PyUFunc_SimpleBinaryComparisonTypeResolver(PyUFuncObject *ufunc,
                                            NPY_CASTING casting,
                                            PyArrayObject **operands,

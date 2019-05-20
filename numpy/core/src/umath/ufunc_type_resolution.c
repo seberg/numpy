@@ -1957,7 +1957,7 @@ dtype_kind_to_simplified_ordering(char kind)
     }
 }
 
-static int
+NPY_NO_EXPORT int
 should_use_min_scalar(PyArrayObject **op, int nop)
 {
     int i, use_min_scalar, kind;
