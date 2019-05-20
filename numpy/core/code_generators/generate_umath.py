@@ -24,6 +24,9 @@ ReorderableNone = "(Py_INCREF(Py_None), Py_None)"
 class FullTypeDescr(object):
     pass
 
+class FullTypeDescrUsingArraysInLoop(object):
+    pass
+
 class FuncNameSuffix(object):
     """Stores the suffix to append when generating functions names.
     """
@@ -281,7 +284,7 @@ defdict = {
           [TypeDescription('M', FullTypeDescr, 'Mm', 'M'),
            TypeDescription('m', FullTypeDescr, 'mm', 'm'),
            TypeDescription('M', FullTypeDescr, 'mM', 'M'),
-           TypeDescription('S', FullTypeDescr, 'SS', 'S'),
+           TypeDescription('S', FullTypeDescrUsingArraysInLoop, 'SS', 'S'),
           ],
           TD(O, f='PyNumber_Add'),
           ),
@@ -1002,6 +1005,11 @@ def make_arrays(funcdict):
             if t.func_data is FullTypeDescr:
                 tname = english_upper(chartoname[t.type])
                 datalist.append('(void *)NULL')
+                funclist.append(
+                        '%s_%s_%s_%s' % (tname, t.in_, t.out, name))
+            elif t.func_data is FullTypeDescrUsingArraysInLoop:
+                tname = english_upper(chartoname[t.type])
+                datalist.append('(void *)PyUFunc_SetUsesArraysAsData')
                 funclist.append(
                         '%s_%s_%s_%s' % (tname, t.in_, t.out, name))
             elif isinstance(t.func_data, FuncNameSuffix):

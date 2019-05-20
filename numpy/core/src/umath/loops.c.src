@@ -2925,12 +2925,51 @@ OBJECT_sign(char **args, npy_intp *dimensions, npy_intp *steps, void *NPY_UNUSED
  */
 
 
-
 NPY_NO_EXPORT void
-STRING_SS_S_add(char **args, npy_intp *dimensions, npy_intp *steps, void *NPY_UNUSED(func))
+STRING_SS_S_add(char **args, npy_intp *dimensions, npy_intp *steps,
+                PyArrayObject **arrs)
 {
+    int max_len1 = PyArray_ITEMSIZE(arrs[0]);
+    int max_len2 = PyArray_ITEMSIZE(arrs[1]);
+    int max_len_out =  PyArray_ITEMSIZE(arrs[1]);
+    int str_len1, str_len2;
+    char *in_ptr;
+    char *out_ptr;
+
+    assert(max_len_out == max_len1 + max_len2);
+
     BINARY_LOOP {
-        op1[0] = ip1[0];
-        op1[1] = ip2[0];
+        out_ptr = op1;
+
+        str_len1 = max_len1;
+        in_ptr = &ip1[str_len1 - 1];
+        while ((in_ptr > ip1) && (*in_ptr == '\0')) {
+            str_len1--;
+            in_ptr--;
+        }
+        out_ptr += str_len1 - 1;
+        while (in_ptr >= ip1) {
+            *out_ptr = *in_ptr;
+            in_ptr--;
+            out_ptr--;
+        }
+        /* Move out_ptr to first uninitialized item */
+        out_ptr = &op1[str_len1];
+
+        str_len2 = max_len2;
+        in_ptr = &ip2[str_len2 - 1];
+        while ((in_ptr > ip2) && (*in_ptr == '\0')) {
+            str_len2--;
+            in_ptr--;
+        }
+        out_ptr += str_len2 - 1;
+        while (in_ptr >= ip2) {
+            *out_ptr = *in_ptr;
+            in_ptr--;
+            out_ptr--;
+        }
+
+        out_ptr += str_len2;
+        memset(out_ptr, 0, max_len_out - str_len1 - str_len2);
     }
 }

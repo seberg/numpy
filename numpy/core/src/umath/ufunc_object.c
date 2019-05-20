@@ -3112,7 +3112,7 @@ ufunc_resolve_ufunc_impl(
     /* If min scalar is used, we cannot cache the result :(! */
     int not_cacheable = should_use_min_scalar(op, ufunc->nin);
     // TODO: For testing, limit to same kind casting (which is the default)
-    not_cacheable = not_cacheable && (casting == NPY_SAME_KIND_CASTING)
+    not_cacheable = not_cacheable && (casting == NPY_SAME_KIND_CASTING);
 
     if (!not_cacheable) {
         /* Try to load from cache */
@@ -3133,7 +3133,7 @@ ufunc_resolve_ufunc_impl(
             for (Py_ssize_t i = 0; i < nop; i++) {
                 PyObject *tmp = PyTuple_GET_ITEM(PyTuple_GET_ITEM(cached, 0), i);
                 Py_INCREF(tmp);
-                dtypes[i] = tmp;
+                dtypes[i] = (PyArray_Descr *)tmp;
             }
 
             ufunc_impl = (PyUFuncImplObject *)PyTuple_GET_ITEM(cached, 1);
@@ -3287,7 +3287,7 @@ ufunc_resolve_ufunc_impl(
         }
         for (Py_ssize_t i = 0; i < nop; i++) {
             Py_INCREF(dtypes[i]);
-            PyTuple_SET_ITEM(out_dtypes, i, dtypes[i]);
+            PyTuple_SET_ITEM(out_dtypes, i, (PyObject *)dtypes[i]);
         }
         cached = PyTuple_Pack(2, out_dtypes, ufunc_impl);
         Py_DECREF(out_dtypes);
@@ -3326,10 +3326,14 @@ fail:
 static PyObject *
 ufunc_resolve_ufunc_impl_python(PyUFuncObject *ufunc, PyObject *args)
 {
-    PyErr_SetString(PyExc_RuntimeError, "not implemented currently");
-    return NULL;
+
+
+
+    return ufunc_resolve_ufunc_impl(
+            ufunc, casting, op, type_tup, dtypes);
 }
 */
+
 
 
 /*UFUNC_API
