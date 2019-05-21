@@ -3304,18 +3304,6 @@ ufunc_resolve_ufunc_impl(
         }
     }
 
-    if (ufunc_impl->adapt_dtype_func != NULL) {
-        /* Call a (user) supplied dtype adaptation function */
-        /* TODO: If ufunc impls get more logic, this part might move? */
-        if (ufunc_impl->adapt_dtype_func(ufunc_impl, dtypes) < 0) {
-            goto fail;
-        }
-        // TODO: Should be necessary to validate casting the first time around!
-        if (PyUFunc_ValidateCasting(ufunc, casting, op, dtypes) < 0) {
-            goto fail;
-        }
-    }
-
     return ufunc_impl;
 
 fail:
@@ -3331,7 +3319,7 @@ ufunc_resolve_ufunc_impl_python(PyUFuncObject *ufunc, PyObject *args,
     NPY_CASTING casting;
     PyObject *arr_tuple, *type_tuple;
     PyUFuncImplObject *ufunc_impl;
-    PyArrayObject **op[NPY_MAXARGS];
+    PyArrayObject *op[NPY_MAXARGS];
     PyArray_Descr *dtypes[NPY_MAXARGS];
     int nop = ufunc->nargs;
 
@@ -3488,6 +3476,18 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
     if (ufunc_impl == NULL) {
         retval = -1;
         goto fail;
+    }
+
+    if (ufunc_impl->adapt_dtype_func != NULL) {
+        /* Call a (user) supplied dtype adaptation function */
+        /* TODO: If ufunc impls get more logic, this part might move? */
+        if (ufunc_impl->adapt_dtype_func(ufunc_impl, dtypes) < 0) {
+            goto fail;
+        }
+        // TODO: Should be necessary to validate casting the first time around!
+        if (PyUFunc_ValidateCasting(ufunc, casting, op, dtypes) < 0) {
+            goto fail;
+        }
     }
 
     if (wheremask != NULL) {
@@ -6621,6 +6621,112 @@ ufuncimpl_dealloc(PyUFuncImplObject *ufuncimpl)
     Py_XDECREF(ufuncimpl->adapt_dtype_pyfunc);
 }
 
+
+static int
+ufuncimpl_adapt_dtype_from_pyfunc(PyUFuncImplObject *ufunc_impl,
+                                  PyArray_Descr **dtypes) {
+    PyObject *dtypes_tuple;
+    PyObject *new_tuple;
+    int nop = ufunc_impl->nin + ufunc_impl->nout;
+
+
+    dtypes_tuple = PyTuple_New(nop);
+    // TODO: Error Check.
+    for (Py_ssize_t i = 0; i < nop; i++) {
+        PyObject *tmp = (dtypes[i] != NULL) ? (PyObject *)dtypes[i] : Py_None;
+        Py_INCREF(tmp);
+        PyTuple_SET_ITEM(dtypes_tuple, i, tmp);
+    }
+
+    new_tuple = PyObject_CallFunctionObjArgs(
+            ufunc_impl->adapt_dtype_pyfunc,
+            ufunc_impl, dtypes_tuple, NULL);
+    Py_DECREF(dtypes_tuple);
+    if (new_tuple == NULL) {
+        return -1;
+    }
+
+    if (!PyTuple_CheckExact(new_tuple)) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "ufunc dtype adaption returned must return a tuple.");
+        return -1;
+    }
+
+    if (PyTuple_Size(new_tuple) != nop) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "ufunc dtype adaption returned wrong number of arguments.");
+        return -1;
+    }
+
+    for (int i = 0; i < nop; i++) {
+        if (!PyArray_DescrCheck(PyTuple_GET_ITEM(new_tuple, i))) {
+            PyErr_SetString(PyExc_RuntimeError,
+                "ufunc dtype adaption returned returned non-dtype.");
+            return -1;
+        }
+        Py_SETREF(dtypes[i], PyTuple_GET_ITEM(new_tuple, i));
+        Py_INCREF(dtypes[i]);
+    }
+    return 0;
+}
+
+
+static PyUFuncImplObject *
+ufuncimpl_copy(PyUFuncImplObject *ufunc_impl) {
+    PyUFuncImplObject *new_ufunc_impl;
+    int nops = ufunc_impl->nin + ufunc_impl->nout;
+
+    new_ufunc_impl = PyObject_New(PyUFuncImplObject, &PyUFuncImpl_Type);
+
+    new_ufunc_impl->nin = ufunc_impl->nin;
+    new_ufunc_impl->nout = ufunc_impl->nout;
+
+    new_ufunc_impl->identity = ufunc_impl->identity;
+    Py_XINCREF(ufunc_impl->identity_value);
+    new_ufunc_impl->identity_value = ufunc_impl->identity_value;
+    if (ufunc_impl->op_flags != NULL) {
+        // TODO: Can error:
+        new_ufunc_impl->op_flags = PyArray_malloc(sizeof(npy_uint32) * nops);
+        memcpy(new_ufunc_impl->op_flags, ufunc_impl->op_flags,
+               sizeof(npy_uint32) * nops);
+    }
+    else {
+        new_ufunc_impl->op_flags = NULL;
+    }
+    new_ufunc_impl->iter_flags = ufunc_impl->iter_flags;
+
+    new_ufunc_impl->innerloop = ufunc_impl->innerloop;
+    new_ufunc_impl->innerloopdata = ufunc_impl->innerloopdata;
+    new_ufunc_impl->needs_api = ufunc_impl->needs_api;
+
+    /* Default is not to have one (we do not currently) */
+    new_ufunc_impl->adapt_dtype_func = ufunc_impl->adapt_dtype_func;
+    new_ufunc_impl->adapt_dtype_pyfunc = ufunc_impl->adapt_dtype_pyfunc;
+    Py_XINCREF(new_ufunc_impl->adapt_dtype_pyfunc);
+
+    return new_ufunc_impl;
+}
+
+
+static PyObject *
+ufuncimpl_replaced_dtype_adapt(PyUFuncImplObject *self, PyObject *callable)
+{
+    PyUFuncImplObject *new_impl = ufuncimpl_copy(self);
+
+    Py_INCREF(callable);
+    new_impl->adapt_dtype_func = ufuncimpl_adapt_dtype_from_pyfunc;
+    new_impl->adapt_dtype_pyfunc = callable;
+    return (PyObject *)new_impl;
+}
+
+
+static struct PyMethodDef ufuncimpl_methods[] = {
+    {"replaced_dtype_adapt",
+        (PyCFunction)ufuncimpl_replaced_dtype_adapt,
+        METH_O, NULL },
+    {NULL, NULL, 0, NULL}           /* sentinel */
+};
+
 /******************************************************************************
  ***                        UFUNC IMPL Type OBJECT                          ***
  *****************************************************************************/
@@ -6663,7 +6769,7 @@ NPY_NO_EXPORT PyTypeObject PyUFuncImpl_Type = {
     0,                                          /* tp_weaklistoffset */
     0,                                          /* tp_iter */
     0,                                          /* tp_iternext */
-    0,                                          /* tp_methods */
+    ufuncimpl_methods,                          /* tp_methods */
     0,                                          /* tp_members */
     0,                                          /* tp_getset */
     0,                                          /* tp_base */
