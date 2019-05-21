@@ -2931,7 +2931,7 @@ STRING_SS_S_add(char **args, npy_intp *dimensions, npy_intp *steps,
 {
     int max_len1 = PyArray_ITEMSIZE(arrs[0]);
     int max_len2 = PyArray_ITEMSIZE(arrs[1]);
-    int max_len_out =  PyArray_ITEMSIZE(arrs[1]);
+    int max_len_out =  PyArray_ITEMSIZE(arrs[2]);
     int str_len1, str_len2;
     char *in_ptr;
     char *out_ptr;
@@ -2969,7 +2969,7 @@ STRING_SS_S_add(char **args, npy_intp *dimensions, npy_intp *steps,
             out_ptr--;
         }
 
-        out_ptr += str_len2;
+        out_ptr += str_len2 + 1;
         memset(out_ptr, 0, max_len_out - str_len1 - str_len2);
     }
 }

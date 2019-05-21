@@ -80,6 +80,7 @@ typedef struct _tagPyUFuncImplObject {
          * so it needs to be set after caching is done.
          */
         PyUfuncAdaptFlexibleDTypes *adapt_dtype_func;
+        PyObject *adapt_dtype_pyfunc;
 
 } PyUFuncImplObject;
 

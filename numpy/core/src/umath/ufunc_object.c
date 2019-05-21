@@ -3099,7 +3099,8 @@ static PyUFuncImplObject *
 ufunc_resolve_ufunc_impl(
         PyUFuncObject *ufunc,
         NPY_CASTING casting, PyArrayObject **op,
-        PyObject *type_tup, PyArray_Descr **dtypes)
+        PyObject *type_tup, PyArray_Descr **dtypes,
+        int get_legacy_impl)
 {
     /*
      * TODO: The result of this function should be cacheable (normally).
@@ -3112,7 +3113,8 @@ ufunc_resolve_ufunc_impl(
     /* If min scalar is used, we cannot cache the result :(! */
     int not_cacheable = should_use_min_scalar(op, ufunc->nin);
     // TODO: For testing, limit to same kind casting (which is the default)
-    not_cacheable = not_cacheable && (casting == NPY_SAME_KIND_CASTING);
+    not_cacheable = not_cacheable && (casting != NPY_SAME_KIND_CASTING);
+    not_cacheable = not_cacheable || get_legacy_impl;
 
     if (!not_cacheable) {
         /* Try to load from cache */
@@ -3144,7 +3146,7 @@ ufunc_resolve_ufunc_impl(
         /* cache miss, continue */
     }
 
-    if (ufunc->resolvers != NULL) {
+    if ((ufunc->resolvers != NULL) && !get_legacy_impl) {
         /* Use new style type resolution, yay! */
         static PyObject *resolve_ufunc_loop;
         PyObject *resolved_tup, *new_dtypes;
@@ -3200,12 +3202,6 @@ ufunc_resolve_ufunc_impl(
             // printf("fetched ufunc impl %ld %ld\n", (long)ufunc_impl, (long)Py_None);
             Py_INCREF(ufunc_impl);
 
-            if (Py_TYPE(ufunc_impl) != &PyUFuncImpl_Type) {
-                PyErr_SetString(PyExc_RuntimeError,
-                    "returned ufunc implementation not a ufunc impl object.");
-                goto fail;
-            }
-
             if (!PyTuple_CheckExact(new_dtypes) ||
                     (PyTuple_GET_SIZE(new_dtypes) != nop)) {
                 Py_DECREF(resolved_tup);
@@ -3223,6 +3219,11 @@ ufunc_resolve_ufunc_impl(
                         "dtype info contained non-dtype!");
                     goto fail;
                 }
+            }
+            if (Py_TYPE(ufunc_impl) != &PyUFuncImpl_Type) {
+                PyErr_SetString(PyExc_RuntimeError,
+                    "returned ufunc implementation not a ufunc impl object.");
+                goto fail;
             }
         }
         Py_DECREF(resolved_tup);
@@ -3265,6 +3266,7 @@ ufunc_resolve_ufunc_impl(
 
         /* Default is not to have one (we do not currently) */
         ufunc_impl->adapt_dtype_func = NULL;
+        ufunc_impl->adapt_dtype_pyfunc = NULL;
     }
 
     /* Add caching logic here! :) */
@@ -3322,18 +3324,67 @@ fail:
 }
 
 
-/*
 static PyObject *
-ufunc_resolve_ufunc_impl_python(PyUFuncObject *ufunc, PyObject *args)
+ufunc_resolve_ufunc_impl_python(PyUFuncObject *ufunc, PyObject *args,
+                                PyObject *kwds)
 {
+    NPY_CASTING casting;
+    PyObject *arr_tuple, *type_tuple;
+    PyUFuncImplObject *ufunc_impl;
+    PyArrayObject **op[NPY_MAXARGS];
+    PyArray_Descr *dtypes[NPY_MAXARGS];
+    int nop = ufunc->nargs;
 
+    int get_legacy_impl = 0;
 
+    if (!PyArg_ParseTuple(args, "O&O!O|i:resolve_ufunc_impl",
+                          PyArray_CastingConverter, &casting,
+                          &PyTuple_Type, &arr_tuple,
+                          &type_tuple,
+                          &get_legacy_impl)) {
+        return NULL;
+    }
 
-    return ufunc_resolve_ufunc_impl(
-            ufunc, casting, op, type_tup, dtypes);
+    /* TODO: Lots of error checking! */
+
+    for (int i = 0; i < nop; i++) {
+        if (PyTuple_GET_ITEM(arr_tuple, i) == Py_None) {
+            op[i] = NULL;
+        }
+        else {
+            op[i] = PyTuple_GET_ITEM(arr_tuple, i);
+        }
+    }
+
+    ufunc_impl = ufunc_resolve_ufunc_impl(
+            ufunc, casting,
+            op, (type_tuple != Py_None) ? type_tuple : NULL,
+            dtypes,
+            get_legacy_impl);
+
+    if (ufunc_impl == NULL) {
+        return NULL;
+    }
+
+    // TODO: Refactor, code block identical to caching!:
+    PyObject *out_dtypes = PyTuple_New(nop);
+    if (out_dtypes == NULL) {
+        Py_DECREF(ufunc_impl);
+        return NULL;
+    }
+    for (int i = 0; i < nop; i++) {
+        Py_INCREF(dtypes[i]);
+        PyTuple_SET_ITEM(out_dtypes, i, (PyObject *)dtypes[i]);
+    }
+    PyObject *cached = PyTuple_Pack(2, out_dtypes, ufunc_impl);
+    Py_DECREF(out_dtypes);
+    Py_DECREF(ufunc_impl);
+    if (cached == NULL) {
+        return NULL;
+    }
+
+    return cached;
 }
-*/
-
 
 
 /*UFUNC_API
@@ -3433,7 +3484,7 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
     ufunc_impl = ufunc_resolve_ufunc_impl(
-            ufunc, casting, op, type_tup, dtypes);
+            ufunc, casting, op, type_tup, dtypes, 0);
     if (ufunc_impl == NULL) {
         retval = -1;
         goto fail;
@@ -6292,6 +6343,9 @@ ufunc_newstyle_register_resolver(PyUFuncObject *ufunc, PyObject *args)
         return NULL;
     }
 
+    /* Clear the cache. Now dtypes should not rely on this, but just in case. */
+    PyDict_Clear(ufunc->ufunc_impl_cache);
+
     Py_RETURN_NONE;
 }
 
@@ -6315,6 +6369,9 @@ static struct PyMethodDef ufunc_methods[] = {
     {"register_resolver",
         (PyCFunction)ufunc_newstyle_register_resolver,
         METH_VARARGS, NULL},
+    {"resolve_ufunc_impl",
+        (PyCFunction)ufunc_resolve_ufunc_impl_python,
+        METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL, NULL, 0, NULL}           /* sentinel */
 };
 
@@ -6556,10 +6613,12 @@ NPY_NO_EXPORT PyTypeObject PyUFunc_Type = {
 static void
 ufuncimpl_dealloc(PyUFuncImplObject *ufuncimpl)
 {
-    /* May need cyclic GC support? */
+    /* TODO: May need cyclic GC support? */
+
     if (ufuncimpl->identity == PyUFunc_IdentityValue) {
         Py_DECREF(ufuncimpl->identity_value);
     }
+    Py_XDECREF(ufuncimpl->adapt_dtype_pyfunc);
 }
 
 /******************************************************************************
