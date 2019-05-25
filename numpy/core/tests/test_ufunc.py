@@ -1883,7 +1883,7 @@ def test_ufunc_types(ufunc):
     '''
     for typ in ufunc.types:
         # types is a list of strings like ii->i
-        if 'O' in typ or '?' in typ:
+        if 'O' in typ or '?' in typ or "S" in typ:
             continue
         inp, out = typ.split('->')
         args = [np.ones((3, 3), t) for t in inp]

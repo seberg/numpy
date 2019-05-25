@@ -3113,7 +3113,7 @@ ufunc_resolve_ufunc_impl(
     /* If min scalar is used, we cannot cache the result :(! */
     int not_cacheable = should_use_min_scalar(op, ufunc->nin);
     // TODO: For testing, limit to same kind casting (which is the default)
-    not_cacheable = not_cacheable && (casting != NPY_SAME_KIND_CASTING);
+    not_cacheable = not_cacheable || (casting != NPY_SAME_KIND_CASTING);
     not_cacheable = not_cacheable || get_legacy_impl;
 
     if (!not_cacheable) {
