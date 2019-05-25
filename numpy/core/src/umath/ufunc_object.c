@@ -3257,16 +3257,16 @@ ufunc_resolve_ufunc_impl(
         }
         ufunc_impl->iter_flags = ufunc->iter_flags;
 
+        /* Default is not to have one (we do not currently) */
+        ufunc_impl->adapt_dtype_func = NULL;
+        ufunc_impl->adapt_dtype_pyfunc = NULL;
+
         if (ufunc->legacy_inner_loop_selector(
                 ufunc, dtypes,
                 &(ufunc_impl->innerloop), &(ufunc_impl->innerloopdata),
                 &(ufunc_impl->needs_api)) < 0) {
             goto fail;
         }
-
-        /* Default is not to have one (we do not currently) */
-        ufunc_impl->adapt_dtype_func = NULL;
-        ufunc_impl->adapt_dtype_pyfunc = NULL;
     }
 
     /* Add caching logic here! :) */
