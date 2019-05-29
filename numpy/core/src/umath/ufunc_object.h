@@ -37,6 +37,16 @@ struct _tagPyUFuncImplObject;
 typedef int (PyUfuncAdaptFlexibleDTypes) (
         struct _tagPyUFuncImplObject *ufunc_impl, PyArray_Descr **dtypes);
 
+typedef int (PyUfuncImplSetupFunc) (
+        // TODO: Should get a whole lot more stuff (probably just about everything)
+        //       Possibly, it would be one function even handling everything.
+        struct _tagPyUFuncImplObject *ufunc_impl, PyUFuncObject *ufunc,
+        void **data, PyObject *extobj, int errormask);
+
+typedef int (PyUfuncImplTeardownFunc) (
+        struct _tagPyUFuncImplObject *ufunc_impl, PyUFuncObject *ufunc,
+        void **data, PyObject *extobj, int errormask);
+
 typedef struct _tagPyUFuncImplObject {
         PyObject_HEAD
         /*
@@ -82,6 +92,8 @@ typedef struct _tagPyUFuncImplObject {
         PyUfuncAdaptFlexibleDTypes *adapt_dtype_func;
         PyObject *adapt_dtype_pyfunc;
 
+        PyUfuncImplSetupFunc *setup;
+        PyUfuncImplTeardownFunc *teardown;
 } PyUFuncImplObject;
 
 #endif

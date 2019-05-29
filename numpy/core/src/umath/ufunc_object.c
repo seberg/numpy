@@ -516,6 +516,35 @@ _apply_array_wrap(
 }
 
 
+static int
+ufuncimpl_setup_clear_fp(
+        PyUFuncImplObject *ufunc_impl, PyUFuncObject * ufunc,
+        void **data, PyObject *extobj, int errormask) {
+    npy_clear_floatstatus_barrier((char*)&ufunc_impl);
+    return 0;
+}
+
+
+static int
+ufuncimpl_teardown_check_floatstatus(
+        PyUFuncImplObject *ufunc_impl, PyUFuncObject * ufunc,
+        void **data, PyObject *extobj, int errormask) {
+    return _check_ufunc_fperr(errormask, extobj, ufunc->name);
+}
+
+
+static int
+ufuncimpl_teardown_check_pyexc_floatstatus(
+        PyUFuncImplObject *ufunc_impl, PyUFuncObject * ufunc,
+        void **data, PyObject *extobj, int errormask) {
+    if (PyErr_Occurred() ||
+            (_check_ufunc_fperr(errormask, extobj, ufunc->name) < 0)) {
+        return -1;
+    }
+    return 0;
+}
+
+
 /*UFUNC_API
  *
  * On return, if errobj is populated with a non-NULL value, the caller
@@ -1608,8 +1637,10 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
                     npy_intp buffersize,
                     PyObject **arr_prep,
                     ufunc_full_args full_args,
-                    npy_uint32 *op_flags)
+                    npy_uint32 *op_flags,
+                    PyObject *extobj, int errormask)
 {
+    int error_occured = 0;
     npy_intp nin = ufunc->nin, nout = ufunc->nout;
     PyUFuncGenericFunction innerloop = ufunc_impl->innerloop;
     void *innerloopdata = ufunc_impl->innerloopdata;
@@ -1618,6 +1649,13 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
     /* If the loop wants the arrays, provide them. */
     if (_does_loop_use_arrays(innerloopdata)) {
         innerloopdata = (void*)op;
+    }
+
+    if (ufunc_impl->setup != NULL) {
+        if (ufunc_impl->setup(ufunc_impl, ufunc, innerloopdata,
+                              extobj, errormask) < 0) {
+            goto fail;
+        }
     }
 
     /* First check for the trivial cases that don't need an iterator */
@@ -1636,19 +1674,19 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
                                             NPY_ARRAY_F_CONTIGUOUS : 0,
                              NULL);
                 if (op[1] == NULL) {
-                    return -1;
+                    goto fail;
                 }
 
                 /* Call the __prepare_array__ if necessary */
                 if (prepare_ufunc_output(ufunc, &op[1],
                                     arr_prep[0], full_args, 0) < 0) {
-                    return -1;
+                    goto fail;
                 }
 
                 NPY_UF_DBG_PRINT("trivial 1 input with allocated output\n");
                 trivial_two_operand_loop(op, innerloop, innerloopdata);
 
-                return 0;
+                goto teardown;
             }
             else if (op[1] != NULL &&
                         PyArray_NDIM(op[1]) >= PyArray_NDIM(op[0]) &&
@@ -1659,13 +1697,13 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
                 /* Call the __prepare_array__ if necessary */
                 if (prepare_ufunc_output(ufunc, &op[1],
                                     arr_prep[0], full_args, 0) < 0) {
-                    return -1;
+                    goto fail;
                 }
 
                 NPY_UF_DBG_PRINT("trivial 1 input\n");
                 trivial_two_operand_loop(op, innerloop, innerloopdata);
 
-                return 0;
+                goto teardown;
             }
         }
         else if (nin == 2 && nout == 1) {
@@ -1695,19 +1733,19 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
                                                 NPY_ARRAY_F_CONTIGUOUS : 0,
                                  NULL);
                 if (op[2] == NULL) {
-                    return -1;
+                    goto fail;
                 }
 
                 /* Call the __prepare_array__ if necessary */
                 if (prepare_ufunc_output(ufunc, &op[2],
                                     arr_prep[0], full_args, 0) < 0) {
-                    return -1;
+                    goto fail;
                 }
 
                 NPY_UF_DBG_PRINT("trivial 2 input with allocated output\n");
                 trivial_three_operand_loop(op, innerloop, innerloopdata);
 
-                return 0;
+                goto teardown;
             }
             else if (op[2] != NULL &&
                     PyArray_NDIM(op[2]) >= PyArray_NDIM(op[0]) &&
@@ -1720,13 +1758,13 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
                 /* Call the __prepare_array__ if necessary */
                 if (prepare_ufunc_output(ufunc, &op[2],
                                     arr_prep[0], full_args, 0) < 0) {
-                    return -1;
+                    goto fail;
                 }
 
                 NPY_UF_DBG_PRINT("trivial 2 input\n");
                 trivial_three_operand_loop(op, innerloop, innerloopdata);
 
-                return 0;
+                goto teardown;
             }
         }
     }
@@ -1740,10 +1778,31 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
     if (iterator_loop(ufunc, ufunc_impl, op, dtypes, order,
                     buffersize, arr_prep, full_args,
                     innerloop, innerloopdata, op_flags) < 0) {
-        return -1;
+        goto fail;
+    }
+    goto teardown;
+
+fail:
+    error_occured = -1;
+
+    PyObject *type, *value, *traceback;
+    PyErr_Fetch(&type, &value, &traceback);
+
+teardown:
+
+    if (ufunc_impl->teardown != NULL) {
+        int ret = ufunc_impl->teardown(ufunc_impl, ufunc, innerloopdata,
+                                       extobj, errormask);
+        if (ret < 0 && error_occured == 0) {
+            /* This is the correct error. */
+            return -1;
+        }
+    }
+    if (error_occured < 0) {
+        PyErr_Restore(type, value, traceback);
     }
 
-    return 0;
+    return error_occured;
 }
 
 /*
@@ -3267,6 +3326,23 @@ ufunc_resolve_ufunc_impl(
                 &(ufunc_impl->needs_api)) < 0) {
             goto fail;
         }
+
+        /* TODO: What the hell to do about errors during casting? */
+        if (ufunc_impl->needs_api) {
+            /* Python errors could occur, check everything */
+            ufunc_impl->setup = ufuncimpl_setup_clear_fp;
+            ufunc_impl->teardown = ufuncimpl_teardown_check_pyexc_floatstatus;
+        }
+        else if (1) {
+            /* Python errors could occur, check everything */
+            ufunc_impl->setup = ufuncimpl_setup_clear_fp;
+            ufunc_impl->teardown = ufuncimpl_teardown_check_floatstatus;
+        }
+        else {
+            /* Never happens for now :). */
+            ufunc_impl->setup = NULL;
+            ufunc_impl->teardown = NULL;
+        }
     }
 
     /* Add caching logic here! :) */
@@ -3538,6 +3614,16 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
         retval = execute_fancy_ufunc_loop(ufunc, wheremask,
                             op, dtypes, order,
                             buffersize, arr_prep, full_args, op_flags);
+        if (retval < 0) {
+            goto fail;
+        }
+
+        /* Check whether any errors occurred during the loop */
+        if (PyErr_Occurred() ||
+            _check_ufunc_fperr(errormask, extobj, ufunc_name) < 0) {
+            retval = -1;
+            goto fail;
+        }
     }
     else {
         NPY_UF_DBG_PRINT("Executing legacy inner loop\n");
@@ -3553,22 +3639,13 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
             goto fail;
         }
 
-        /* check_for_trivial_loop on half-floats can overflow */
-        npy_clear_floatstatus_barrier((char*)&ufunc);
-
         retval = execute_legacy_ufunc_loop(ufunc, ufunc_impl, trivial_loop_ok,
                             op, dtypes, order,
-                            buffersize, arr_prep, full_args, op_flags);
-    }
-    if (retval < 0) {
-        goto fail;
-    }
-
-    /* Check whether any errors occurred during the loop */
-    if (PyErr_Occurred() ||
-        _check_ufunc_fperr(errormask, extobj, ufunc_name) < 0) {
-        retval = -1;
-        goto fail;
+                            buffersize, arr_prep, full_args, op_flags,
+                            extobj, errormask);
+        if (retval < 0) {
+            goto fail;
+        }
     }
 
 
@@ -6702,6 +6779,9 @@ ufuncimpl_copy(PyUFuncImplObject *ufunc_impl) {
     /* Default is not to have one (we do not currently) */
     new_ufunc_impl->adapt_dtype_func = ufunc_impl->adapt_dtype_func;
     new_ufunc_impl->adapt_dtype_pyfunc = ufunc_impl->adapt_dtype_pyfunc;
+
+    new_ufunc_impl->setup = ufunc_impl->setup;
+    new_ufunc_impl->teardown = ufunc_impl->teardown;
     Py_XINCREF(new_ufunc_impl->adapt_dtype_pyfunc);
 
     return new_ufunc_impl;
