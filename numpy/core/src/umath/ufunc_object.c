@@ -3174,6 +3174,7 @@ ufunc_resolve_ufunc_impl(
     // TODO: For testing, limit to same kind casting (which is the default)
     not_cacheable = not_cacheable || (casting != NPY_SAME_KIND_CASTING);
     not_cacheable = not_cacheable || get_legacy_impl;
+    not_cacheable = not_cacheable || !(type_tup == NULL || type_tup == Py_None);
 
     if (!not_cacheable) {
         /* Try to load from cache */
@@ -3333,15 +3334,34 @@ ufunc_resolve_ufunc_impl(
             ufunc_impl->setup = ufuncimpl_setup_clear_fp;
             ufunc_impl->teardown = ufuncimpl_teardown_check_pyexc_floatstatus;
         }
-        else if (1) {
-            /* Python errors could occur, check everything */
-            ufunc_impl->setup = ufuncimpl_setup_clear_fp;
-            ufunc_impl->teardown = ufuncimpl_teardown_check_floatstatus;
-        }
         else {
-            /* Never happens for now :). */
-            ufunc_impl->setup = NULL;
-            ufunc_impl->teardown = NULL;
+            // TODO: refactor into helper.
+            int float_err_possible = 0;
+            for (int i = 0; i < nop; i++) {
+                PyArray_Descr *dtype;
+                dtype = dtypes[i];
+                if (!((dtype->kind == 'i') || (dtype->kind == 'b'))) {
+                    float_err_possible = 1;
+                    break;
+                }
+                if (op[i] == NULL) {
+                    continue;
+                }
+                dtype = PyArray_DESCR(op[i]);
+                if (!((dtype->kind == 'i') || (dtype->kind == 'b'))) {
+                    float_err_possible = 1;
+                    break;
+                }
+            }
+            if (float_err_possible) {
+                /* Python errors could occur, check everything */
+                ufunc_impl->setup = ufuncimpl_setup_clear_fp;
+                ufunc_impl->teardown = ufuncimpl_teardown_check_floatstatus;
+            }
+            else {
+                ufunc_impl->setup = NULL;
+                ufunc_impl->teardown = NULL;
+            }
         }
     }
 
