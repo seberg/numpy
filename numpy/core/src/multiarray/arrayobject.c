@@ -472,7 +472,8 @@ array_dealloc(PyArrayObject *self)
 {
     PyArrayObject_fields *fa = (PyArrayObject_fields *)self;
 
-    if (PyDataType_REFCHK(PyArray_DESCR(self))) {
+    if (PyDataType_REFCHK(PyArray_DESCR(self)) ||
+                PyArray_CHKFLAGS(self, NPY_ARRAY_OWNDATA)) {
         PyObject_GC_UnTrack(self);
     }
     /*
@@ -1794,17 +1795,22 @@ array_traverse(PyArrayObject *self, visitproc visit, void *arg)
 {
     PyArray_Descr *descr = PyArray_DESCR(self);
 
+    printf("traversing array\n");
+
     /*
      * make sure we don't traverse the array before it is fully initialized,
      * or if it doesn't have any objects
      */
-    if (!descr || !PyDataType_REFCHK(descr)) {
+    if (!descr) {
         return 0;
     }
+    Py_VISIT(((PyArrayObject_fields *)self)->base);
 
+    if (!PyDataType_REFCHK(descr)) {
+        return 0;
+    }
     if (!PyArray_CHKFLAGS(self, NPY_ARRAY_OWNDATA)) {
         /* if the array doesn't own its data, visiting fa->base is sufficient */
-        Py_VISIT(((PyArrayObject_fields *)self)->base);
         return 0;
     }
     /* NOTE: In the future, user dtypes could in principle be visited */
