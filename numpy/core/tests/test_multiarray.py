@@ -8457,9 +8457,9 @@ def test_getfield():
     pytest.raises(ValueError, a.getfield, 'uint64', 0)
 
 
-@skipif
-class TestGarbageCollection(TestCase):
-    @dec.slow
+@pytest.mark.skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
+class TestGarbageCollection:
+    @pytest.mark.slow
     def test_trashcan(self):
         # this code triggers a long chain of nested deallocations - a stack
         # overflow is prevented by invoking the "trashcan mechanism" in
