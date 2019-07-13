@@ -19,6 +19,7 @@
 #define NPY_BEGIN_THREADS_NDITER(iter)
 #endif
 
+
 /*
  * Recursively examines the object to determine an appropriate dtype
  * to use for converting to an ndarray.
@@ -128,6 +129,25 @@ check_and_adjust_index(npy_intp *index, npy_intp max_item, int axis,
     }
     return 0;
 }
+
+
+
+static NPY_INLINE int
+NPySequence_Check(PyObject *obj) {
+    static PyObject *mappingview = NULL;
+
+    if (mappingview == NULL) {
+        PyObject *mod = PyImport_ImportModule("collections.abc");
+
+        if (mod != NULL) {
+            mappingview = PyObject_GetAttrString(mod, "MappingView");
+            Py_DECREF(mod);
+        }
+    }
+    /* Cannot raise an error here, should be written differently :) */
+    return (PySequence_Check(obj) || PyObject_IsInstance(obj, mappingview));
+}
+
 
 /*
  * Returns -1 and sets an exception if *axis is an invalid axis for

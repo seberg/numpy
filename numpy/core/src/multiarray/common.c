@@ -76,6 +76,7 @@ _array_find_python_scalar_type(PyObject *op)
     return NULL;
 }
 
+
 /*
  * These constants are used to signal that the recursive dtype determination in
  * PyArray_DTypeFromObject encountered a string type, and that the recursive
@@ -429,7 +430,7 @@ PyArray_DTypeFromObjectHelper(PyObject *obj, int maxdims,
      * be treated as objects, and they expect numpy to treat it as an object if
      * __len__ is not defined.
      */
-    if (maxdims == 0 || !PySequence_Check(obj) || PySequence_Size(obj) < 0) {
+    if (maxdims == 0 || !NPySequence_Check(obj) || PySequence_Size(obj) < 0) {
         /* clear any PySequence_Size error which corrupts further calls */
         PyErr_Clear();
 
