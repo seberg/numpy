@@ -28,4 +28,44 @@ arraydescr_field_subset_view(PyArray_Descr *self, PyObject *ind);
 
 extern NPY_NO_EXPORT char *_datetime_strings[];
 
+/*
+ * Slots of DTypeMeta, Probably can use the same structure for AbstractDTypeMeta.
+ * This must remain be fully opaque!
+ */
+typedef struct {
+        PyObject_HEAD
+        /*
+         * the type object representing an
+         * instance of this type -- should not
+         * be two type_numbers with the same type
+         * object.
+         */
+        PyTypeObject *typeobj;
+        /* kind for this type */
+        char kind;
+        /* unique-character representing this type */
+        char type;
+        /*
+         * '>' (big), '<' (little), '|'
+         * (not-applicable), or '=' (native).
+         */
+        /* flags describing data type */
+        char flags;
+        npy_bool flexible;
+        npy_bool abstract;
+        /* number representing this type */
+        int type_num;
+        /* element size (itemsize) for this type, can be -1 if flexible. */
+        int elsize;  // TODO: Think about making it intp? How much API would actually be broken by this?
+        /* alignment needed for this type */
+        // int alignment;   Maybe add again?
+        /*
+         * Link to the original f, should be removed at some point probably.
+         * Maybe this could become a copy, just to know if something happened
+         * in the meantime.
+         */
+        PyArray_ArrFuncs *f;
+} PyArray_DTypeMeta;
+
+
 #endif
