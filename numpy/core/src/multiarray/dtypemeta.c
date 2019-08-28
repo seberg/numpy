@@ -93,21 +93,21 @@ dtypemeta_init(PyObject *type, PyObject *args, PyObject *kwds)
 //    Py_DECREF(args);
 //    return res;
 //}
-
-
-static int
-dtypemeta_traverse(PyTypeObject *type, visitproc visit, void *arg)
-{
-    printf("eehh wah! Traversing (doesn't happen, right?)!\n");
-    return 0;
-}
-
-static int
-dtypemeta_clear(PyTypeObject *type)
-{
-    printf("eehh wah! Clearing (doesn't happen, right?)!\n");
-    return 0;
-}
+//
+//
+//static int
+//dtypemeta_traverse(PyTypeObject *type, visitproc visit, void *arg)
+//{
+//    printf("eehh wah! Traversing (doesn't happen, right?)!\n");
+//    return 0;
+//}
+//
+//static int
+//dtypemeta_clear(PyTypeObject *type)
+//{
+//    printf("eehh wah! Clearing (doesn't happen, right?)!\n");
+//    return 0;
+//}
 
 
 /*
@@ -150,7 +150,11 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     dtype_class->type = dtype->type;
     dtype_class->flags = dtype->flags;
     dtype_class->elsize = dtype_class->elsize;
-    dtype_class->flexible = dtype->elsize == 0;  // Silly but true here...
+    if (PyTypeNum_ISDATETIME(dtype->type_num) ||
+                PyTypeNum_ISFLEXIBLE(dtype->type_num)) {
+        /* Datetimes are flexible in this sense due to the attached unit. */
+        dtype_class->flexible = 1;
+    }
     dtype_class->abstract = 0;
     dtype_class->type_num = dtype->type_num;
     dtype_class->f = NULL;  // dtype->f;
@@ -165,51 +169,16 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
 
 NPY_NO_EXPORT PyTypeObject PyArrayDTypeMeta_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "numpy.DTypeMeta",                          /* tp_name */
-    sizeof(PyArray_DTypeMeta),              /* tp_basicsize */
-    0,                                          /* tp_itemsize */
+    .tp_name = "numpy.DTypeMeta",
+    .tp_basicsize = sizeof(PyArray_DTypeMeta),
     /* methods */
-    (destructor)dtypemeta_dealloc,            /* tp_dealloc */
-    0,                                          /* tp_print */
-    0,                                          /* tp_getattr */
-    0,                                          /* tp_setattr */
-    (void *)0,                                  /* tp_reserved */
-    0,                  /* tp_repr */
-    0,                           /* tp_as_number */
-    0,                         /* tp_as_sequence */
-    0,                          /* tp_as_mapping */
-    0,                                          /* tp_hash */
-    0,                                          /* tp_call */
-    0,                   /* tp_str */
-    0,                    /* tp_getattro */
-    0,                    /* tp_setattro */
-    0,                                          /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT,               /* tp_flags */
-    "nonsense docs",                                          /* tp_doc */
-    dtypemeta_traverse,                                          /* tp_traverse */
-    dtypemeta_clear,                                          /* tp_clear */
-    0,        /* tp_richcompare */
-    0,                                          /* tp_weaklistoffset */
-    0,                                          /* tp_iter */
-    0,                                          /* tp_iternext */
-    0,                         /* tp_methods */
-    dtypemeta_members,                         /* tp_members */
-    0,                         /* tp_getset */
-    &PyType_Type,                                          /* tp_base */
-    0,                                          /* tp_dict */
-    0,                                          /* tp_descr_get */
-    0,                                          /* tp_descr_set */
-    0,                                          /* tp_dictoffset */
-    (initproc)dtypemeta_init,                            /* tp_init */
-    0,                                          /* tp_alloc */
-    dtypemeta_new,                             /* tp_new */
-    0,                                          /* tp_free */
-    0,                                          /* tp_is_gc */
-    0,                                          /* tp_bases */
-    0,                                          /* tp_mro */
-    0,                                          /* tp_cache */
-    0,                                          /* tp_subclasses */
-    0,                                          /* tp_weaklist */
-    0,                                          /* tp_del */
-    0,                                          /* tp_version_tag */
+    .tp_dealloc = (destructor)dtypemeta_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = "nonsense docs",
+    // .tp_traverse = dtypemeta_traverse,
+    // .tp_clear = dtypemeta_clear,
+    .tp_members = dtypemeta_members,
+    .tp_base = &PyType_Type,
+    .tp_init = (initproc)dtypemeta_init,
+    .tp_new = dtypemeta_new,
 };

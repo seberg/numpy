@@ -4,6 +4,13 @@
 NPY_NO_EXPORT int descr_dtypesubclass_init(PyArray_Descr *dtype);
 
 
+/*
+ * This struct must remain fully opaque to the user, direct access is
+ * solely allowed from within NumPy!
+ * (Others have to use a PyArrayDType_GetSlot(), which may return an error
+ * or a similar name).
+ * Not all slots will be exposed.
+ */
 typedef struct {
     /* PyObject handling: */
     void *getitem;
@@ -22,13 +29,15 @@ typedef struct {
  * This must remain be fully opaque!
  */
 typedef struct {
-        PyTypeObject super;
+        // NOTE: This is allocated as PyHeapTypeObject, but most dtypes do not
+        //       actually require that. Value based casting should though, and
+        //       downstream should have the ability. (I hope this does not get difficult :/)
+        PyHeapTypeObject super;
         // TODO: I want these slots to be just 2-3 pointers, i.e.
         // int abstract
-        // void *tp_descrslots  /* Private growable struct */
+        // dtypemeta_slots *dt_slots  /* Private growable struct */
         // This means that downstream can rely on the size of the supertype
-        // in an ABI compatible manner.
-        // The struct would be heap allocated.
+        // in an ABI compatible manner while we can extend our API freely.
         
         /*
          * the type object representing an
