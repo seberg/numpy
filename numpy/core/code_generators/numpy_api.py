@@ -74,6 +74,7 @@ multiarray_types_api = {
     'PyHalfArrType_Type':               (217,),
     'NpyIter_Type':                     (218,),
     # End 1.6 API
+    'PyArrayDTypeMeta_Type':            (304,),
 }
 
 #define NPY_NUMUSERTYPES (*(int *)PyArray_API[6])

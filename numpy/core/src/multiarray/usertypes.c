@@ -183,6 +183,9 @@ PyArray_RegisterDataType(PyArray_Descr *descr)
         return -1;
     }
     userdescrs[NPY_NUMUSERTYPES++] = descr;
+    
+    descr_dtypesubclass_init(descr);
+    
     return typenum;
 }
 

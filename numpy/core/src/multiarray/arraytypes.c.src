@@ -24,6 +24,7 @@
 #include "usertypes.h"
 #include "_datetime.h"
 #include "arrayobject.h"
+#include "descriptor.h"
 #include "alloc.h"
 #include "typeinfo.h"
 #ifdef NPY_HAVE_SSE2_INTRINSICS
@@ -4671,6 +4672,30 @@ set_typeinfo(PyObject *dict)
                 NPY_DATETIME_DEFAULTUNIT, 1);
     if (_builtin_descrs[NPY_DATETIME]->c_metadata == NULL) {
         return -1;
+    }
+
+    for (i = 0; i <= NPY_HALF; i++) {
+        /*
+         * This is somewhat strange probably: create DType classes and override
+         * the Type...
+         */
+        dtype = (PyArray_Descr *)_builtin_descrs[i];
+
+        ////////////////////////////////////////////////////////////////////
+        //PyType_Slot slots[] = {
+        //    {Py_tp_doc, "DType class for something"},
+        //    {Py_tp_base, &PyArrayDescr_Type},
+        //    //{Py_tp_dealloc, Py_TYPE(_builtin_descrs)->tp_dealloc},
+        //    {0, NULL},
+        //};
+        //PyType_Spec spec = {"numpy.SomeDType", sizeof(PyArray_Descr), 0,
+        //                    Py_TPFLAGS_DEFAULT, slots};
+        //PyTypeObject *dtype_classobj = (PyTypeObject *)PyType_FromSpec(&spec);
+        //Py_TYPE(dtype_classobj) = &PyArrayDTypeMeta_Type;
+        ////////////////////////////////////////////////////////////////////
+        // PyTypeObject *dtype_classobj = (PyTypeObject *)dtypeclass_rawnew("SomeDType");
+
+        descr_dtypesubclass_init(dtype);
     }
 
     for (i = 0; i < _MAX_LETTER; i++) {

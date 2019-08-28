@@ -4651,10 +4651,15 @@ PyMODINIT_FUNC init_multiarray_umath(void) {
         goto err;
     }
 
+    if (PyType_Ready(&PyArrayDTypeMeta_Type) < 0) {
+        goto err;
+    }
+
     PyArrayDescr_Type.tp_hash = PyArray_DescrHash;
     if (PyType_Ready(&PyArrayDescr_Type) < 0) {
         goto err;
     }
+
     if (PyType_Ready(&PyArrayFlags_Type) < 0) {
         goto err;
     }
