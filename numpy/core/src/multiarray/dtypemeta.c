@@ -180,7 +180,7 @@ legacy_default_descr(PyArray_DTypeMeta *cls) {
     // For current flexible types (strings and void, but also
     // datetime/timedelta this practically exists currently, but should
     // not exist.
-    return PyArray_DescrNewFromType(cls->type_num);
+    return PyArray_DescrFromType(cls->type_num);
 }
 
 
