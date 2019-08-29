@@ -4,6 +4,10 @@
 NPY_NO_EXPORT int descr_dtypesubclass_init(PyArray_Descr *dtype);
 
 
+struct _PyArray_DTypeMeta;
+
+typedef PyArray_Descr *(default_descr_func)(struct _PyArray_DTypeMeta *cls);
+
 /*
  * This struct must remain fully opaque to the user, direct access is
  * solely allowed from within NumPy!
@@ -20,7 +24,7 @@ typedef struct {
     void *can_cast_from_other;
     void *can_cast_to_other;
     void *common_dtype;
-    void *default_descr;
+    default_descr_func *default_descr;
 } dtypemeta_slots;
 
 
@@ -28,7 +32,7 @@ typedef struct {
  * Slots of DTypeMeta, Probably can use the same structure for AbstractDTypeMeta.
  * This must remain be fully opaque!
  */
-typedef struct {
+typedef struct _PyArray_DTypeMeta {
         // NOTE: This is allocated as PyHeapTypeObject, but most dtypes do not
         //       actually require that. Value based casting should though, and
         //       downstream should have the ability. (I hope this does not get difficult :/)
