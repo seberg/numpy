@@ -20,6 +20,9 @@
 #include "_datetime.h"
 #include "datetime_strings.h"
 
+#include "dtypemeta.h"
+#include "castingimpl.h"
+
 
 /*
  * Required length of string when converting from unsigned integer type.
@@ -671,12 +674,114 @@ can_cast_fields(PyObject *field1, PyObject *field2, NPY_CASTING casting)
     return 1;
 }
 
+
 /*NUMPY_API
  * Returns true if data of type 'from' may be cast to data of type
  * 'to' according to the rule 'casting'.
  */
 NPY_NO_EXPORT npy_bool
 PyArray_CanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
+                                                    NPY_CASTING casting)
+{
+    /*
+     * This is going to be a two step process here, where the
+     * first step should be its own function and is only based on the
+     * CastingImpl.
+     */
+    CastingImpl *casting_impl = NULL;
+
+    PyArray_Descr *in_descrs[2] = {from, to};
+    PyArray_Descr *out_descrs[2];
+
+    PyArray_DTypeMeta *from_dtype = (PyArray_DTypeMeta *)Py_TYPE(from);
+    PyArray_DTypeMeta *to_dtype = (PyArray_DTypeMeta *)Py_TYPE(to);
+
+    // TODO: Maybe remove fast paths, they are stupid?
+    if (from == to) {
+        return 1;
+    }
+    if (casting == NPY_NO_CASTING) {
+        /* In rare cases dtypes may actually be equal, support that. */
+        // TODO: This is correct, but EquivTypes needs to use the object
+        //       equality slots (or possibly fast equality slots).
+        // Note: This path should only be reached for the Integer dtype aliases
+        //       and allowing to do this type of thing may not need to be
+        //       exposed. (i.e. DTypeMeta can check that nobody messes with the
+        //       comparison/hash slots)
+        return PyArray_EquivTypes(from, to);
+    }
+    if (from_dtype == to_dtype) {
+        if (!(from_dtype->flexible)) {
+            return 1;
+        }
+        // TODO: This has to jump to use the within_dtype_casting_impl!
+        casting_impl = from_dtype->dt_slots->within_dtype_castingimpl;
+        if (casting_impl->adjust_descriptors(
+                casting_impl, in_descrs, out_descrs, casting) < 0) {
+            PyErr_Clear();
+            return 0;
+        }
+        Py_DECREF(out_descrs[0]);
+        Py_DECREF(out_descrs[1]);
+        return 1;
+    }
+
+    /* We give the to_dtype precedence: */
+    casting_impl = (CastingImpl *)to_dtype->dt_slots->can_cast_from_other(
+                to_dtype, from_dtype, casting);
+    if (casting_impl == NULL) {
+        /* This function hides unrelated errors unfortunately */
+        // TODO: Print unraisable non type errors.
+        PyErr_Clear();
+        return 0;
+    }
+    if ((PyObject *)casting_impl == Py_NotImplemented) {
+        /* Try other direction */
+        Py_DECREF(Py_NotImplemented);
+
+        casting_impl = (CastingImpl *)to_dtype->dt_slots->can_cast_to_other(
+                    from_dtype, to_dtype, casting);
+        if (casting_impl == NULL) {
+            /* This function hides unrelated errors unfortunately */
+            // TODO: Print unraisable non type errors.
+            PyErr_Clear();
+            return 0;
+        }
+        if ((PyObject *)casting_impl == Py_NotImplemented) {
+            Py_DECREF(Py_NotImplemented);
+            return 0;
+        }
+    }
+
+    // Note: The above fast path means that from != to here.
+    assert(casting_impl->adjust_descriptors != NULL);  // TODO: remove assert
+    int res = casting_impl->adjust_descriptors(
+                casting_impl, in_descrs, out_descrs, casting);
+    Py_DECREF(casting_impl);
+    if (res < 0) {
+        PyErr_Clear();
+        return 0;
+    }
+    /* This made the cast between the dtypes */
+    if (((in_descrs[0] != out_descrs[0]) && (from_dtype->flexible)) ||
+            ((in_descrs[1] != out_descrs[1]) && (to_dtype->flexible))) {
+        // TODO: This may be OK, but it is an open question:
+        //       should we assume that a mismatch can only be due to
+        //       representation issues, or do we need to check within
+        //       dtype casting safety here?
+        printf("May be returning can_cast=True when it should not!\n");
+    }
+    Py_DECREF(out_descrs[0]);
+    Py_DECREF(out_descrs[1]);
+    return 1;
+}
+
+/*
+ * Renamed legacy version of CanCastTypeto.
+ * All functionality here should eventually be replaced.
+ */
+NPY_NO_EXPORT npy_bool
+PyArray_LegacyCanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
                                                     NPY_CASTING casting)
 {
     /*

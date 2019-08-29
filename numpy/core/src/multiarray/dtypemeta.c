@@ -20,6 +20,8 @@
 #include "assert.h"
 
 #include "dtypemeta.h"
+#include "castingimpl.h"
+#include "convert_datatype.h"
 
 
 static PyMemberDef dtypemeta_members[] = {
@@ -110,6 +112,67 @@ dtypemeta_init(PyObject *type, PyObject *args, PyObject *kwds)
 //}
 
 
+static PyObject *
+legacy_can_cast(
+        PyArray_DTypeMeta *from_dtype,
+        PyArray_DTypeMeta *to_dtype,
+        NPY_CASTING casting)
+{
+    // TODO: Practically doesn't matter, but error checks missing.
+    PyArray_Descr *from_descr = PyArray_DescrNewFromType(from_dtype->type_num);
+    PyArray_Descr *to_descr = PyArray_DescrNewFromType(to_dtype->type_num);
+    if (!PyArray_LegacyCanCastTypeTo(from_descr, to_descr, casting)) {
+        // TODO: If either is not a legacy, will need to return NotImplemented
+        Py_DECREF(from_descr);
+        Py_DECREF(to_descr);
+        PyErr_SetString(PyExc_TypeError,
+            "cannot cast! -- from inside legacy (possibly should be NotImplemented)");
+        return NULL;
+    }
+    Py_DECREF(from_descr);
+    Py_DECREF(to_descr);
+    /* should not return a new one every time of course: */
+    return castingimpl_legacynew(from_dtype, to_dtype);
+}
+
+
+static PyObject *
+legacy_can_cast_to(
+        PyArray_DTypeMeta *from_dtype,
+        PyArray_DTypeMeta *to_dtype,
+        NPY_CASTING casting)
+{
+    if (from_dtype->type_num >= to_dtype->type_num) {
+        // Reject to make things a bit more interesting.
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    return legacy_can_cast(from_dtype, to_dtype, casting);
+}
+
+
+static PyObject *
+legacy_can_cast_from(
+        PyArray_DTypeMeta *to_dtype,
+        PyArray_DTypeMeta *from_dtype,
+        NPY_CASTING casting)
+{
+    if (to_dtype->type_num >= from_dtype->type_num) {
+        // Reject to make things a bit more interesting.
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    return legacy_can_cast(from_dtype, to_dtype, casting);
+}
+
+
+static PyArray_Descr *
+legacy_default_descr(PyArray_DTypeMeta *cls) {
+    // For current flexible types (strings and void, but also
+    // datetime/timedelta this practically exists currently, but should
+    // not exist.
+    return PyArray_DescrNewFromType(cls->type_num);
+}
+
+
 /*
  * This is brutal. Because it seems tricky to do otherwise, use
  * the static full Python API on malloc allocated objects, so that they
@@ -160,6 +223,19 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     dtype_class->f = NULL;  // dtype->f;
     // Just hold on to a reference to name:
     ((PyTypeObject *)dtype_class)->tp_name = dtype->typeobj->tp_name;
+
+    dtype_class->dt_slots = dt_slots;
+
+    dtype_class->dt_slots->default_descr = legacy_default_descr;
+    
+    dtype_class->dt_slots->within_dtype_castingimpl = (
+            (CastingImpl *)castingimpl_legacynew(dtype_class, dtype_class));
+    if (dtype_class->dt_slots->within_dtype_castingimpl == NULL) {
+        return -1;
+    }
+
+    dtype_class->dt_slots->can_cast_to_other = legacy_can_cast_to;
+    dtype_class->dt_slots->can_cast_from_other = legacy_can_cast_from;
 
     // This seems like it might make sense (but probably not here):
     Py_INCREF(dtype);

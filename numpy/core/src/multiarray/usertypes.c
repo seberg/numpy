@@ -37,6 +37,8 @@ maintainer email:  oliphant.travis@ieee.org
 #include "npy_pycompat.h"
 
 #include "usertypes.h"
+#include "dtypemeta.h"
+
 
 NPY_NO_EXPORT PyArray_Descr **userdescrs=NULL;
 

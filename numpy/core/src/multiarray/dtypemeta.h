@@ -4,9 +4,15 @@
 NPY_NO_EXPORT int descr_dtypesubclass_init(PyArray_Descr *dtype);
 
 
+struct _CastingImpl;
 struct _PyArray_DTypeMeta;
 
 typedef PyArray_Descr *(default_descr_func)(struct _PyArray_DTypeMeta *cls);
+
+typedef struct _CastingImpl *(can_cast_function)(
+            struct _PyArray_DTypeMeta *cls,
+            struct _PyArray_DTypeMeta *other,
+            NPY_CASTING casting);
 
 /*
  * This struct must remain fully opaque to the user, direct access is
@@ -21,10 +27,17 @@ typedef struct {
     void *setitem;
     void *discover_dtype_from_pytype;
     /* Casting: */
-    void *can_cast_from_other;
-    void *can_cast_to_other;
+    can_cast_function *can_cast_from_other;
+    can_cast_function *can_cast_to_other;
     void *common_dtype;
     default_descr_func *default_descr;
+    /* Slots for legacy wrapper */
+    //PyObject *legacy_castingimpls_from;
+    //PyObject *legacy_castingimpls_to;
+    //int *legacy_casting_from_info;
+    //int *legacy_casting_to_info;
+    /* Special slots */
+    struct _CastingImpl *within_dtype_castingimpl;
 } dtypemeta_slots;
 
 
