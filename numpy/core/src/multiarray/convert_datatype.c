@@ -457,6 +457,12 @@ PyArray_CanCastSafely(int fromtype, int totype)
 NPY_NO_EXPORT npy_bool
 PyArray_CanCastTo(PyArray_Descr *from, PyArray_Descr *to)
 {
+    return PyArray_CanCastTypeTo(from, to, NPY_SAFE_CASTING);
+}
+
+NPY_NO_EXPORT npy_bool
+PyArray_LegacyCanCastTo(PyArray_Descr *from, PyArray_Descr *to)
+{
     int from_type_num = from->type_num;
     int to_type_num = to->type_num;
     npy_bool ret;
@@ -675,6 +681,49 @@ can_cast_fields(PyObject *field1, PyObject *field2, NPY_CASTING casting)
 }
 
 
+/*
+ * Fetch the casting implementation based on the two DType classes.
+ * Supports the two classes to be identical.
+ */
+static CastingImpl *
+get_casting_impl(
+            PyArray_DTypeMeta *from_dtype,
+            PyArray_DTypeMeta *to_dtype,
+            NPY_CASTING casting) {
+    CastingImpl *casting_impl = NULL;
+
+    if (from_dtype == to_dtype) {
+        casting_impl = from_dtype->dt_slots->within_dtype_castingimpl;
+        Py_INCREF(casting_impl);
+        return casting_impl;
+    }
+
+    /* We give the to_dtype precedence: */
+    casting_impl = (CastingImpl *)to_dtype->dt_slots->can_cast_from_other(
+                to_dtype, from_dtype, casting);
+    if (casting_impl == NULL) {
+        return NULL;
+    }
+    if ((PyObject *)casting_impl == Py_NotImplemented) {
+        /* Try other direction */
+        Py_DECREF(Py_NotImplemented);
+
+        casting_impl = (CastingImpl *)to_dtype->dt_slots->can_cast_to_other(
+                    from_dtype, to_dtype, casting);
+        if (casting_impl == NULL) {
+            return NULL;
+        }
+        if ((PyObject *)casting_impl == Py_NotImplemented) {
+            Py_DECREF(Py_NotImplemented);
+            PyErr_SetString(PyExc_TypeError,
+                "could not cast ...");
+            return NULL;
+        }
+    }
+    return casting_impl;
+}
+
+
 /*NUMPY_API
  * Returns true if data of type 'from' may be cast to data of type
  * 'to' according to the rule 'casting'.
@@ -714,7 +763,7 @@ PyArray_CanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
         if (!(from_dtype->flexible)) {
             return 1;
         }
-        // TODO: This has to jump to use the within_dtype_casting_impl!
+        // TODO: This has to jump to use the within_dtype_castingimpl!
         casting_impl = from_dtype->dt_slots->within_dtype_castingimpl;
         if (casting_impl->adjust_descriptors(
                 casting_impl, in_descrs, out_descrs, casting) < 0) {
@@ -726,33 +775,11 @@ PyArray_CanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
         return 1;
     }
 
-    /* We give the to_dtype precedence: */
-    casting_impl = (CastingImpl *)to_dtype->dt_slots->can_cast_from_other(
-                to_dtype, from_dtype, casting);
+    casting_impl = get_casting_impl(from_dtype, to_dtype, casting);
     if (casting_impl == NULL) {
-        /* This function hides unrelated errors unfortunately */
-        // TODO: Print unraisable non type errors.
         PyErr_Clear();
         return 0;
     }
-    if ((PyObject *)casting_impl == Py_NotImplemented) {
-        /* Try other direction */
-        Py_DECREF(Py_NotImplemented);
-
-        casting_impl = (CastingImpl *)to_dtype->dt_slots->can_cast_to_other(
-                    from_dtype, to_dtype, casting);
-        if (casting_impl == NULL) {
-            /* This function hides unrelated errors unfortunately */
-            // TODO: Print unraisable non type errors.
-            PyErr_Clear();
-            return 0;
-        }
-        if ((PyObject *)casting_impl == Py_NotImplemented) {
-            Py_DECREF(Py_NotImplemented);
-            return 0;
-        }
-    }
-
     // Note: The above fast path means that from != to here.
     assert(casting_impl->adjust_descriptors != NULL);  // TODO: remove assert
     int res = casting_impl->adjust_descriptors(
@@ -967,7 +994,7 @@ PyArray_LegacyCanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
     }
     /* If safe or same-kind casts are allowed */
     else if (casting == NPY_SAFE_CASTING || casting == NPY_SAME_KIND_CASTING) {
-        if (PyArray_CanCastTo(from, to)) {
+        if (PyArray_LegacyCanCastTo(from, to)) {
             return 1;
         }
         else if(casting == NPY_SAME_KIND_CASTING) {
@@ -1166,12 +1193,140 @@ ensure_dtype_nbo(PyArray_Descr *type)
     }
 }
 
+
+/*
+ * Promote two DType classes to the common one.
+ */
+NPY_NO_EXPORT PyArray_DTypeMeta *
+PyArray_PromoteDTypes(PyArray_DTypeMeta* type1, PyArray_DTypeMeta *type2)
+{
+    PyArray_DTypeMeta *common;
+
+    if (type1 == type2) {
+        /*
+         * This should be very common, so add fast path, it also means that
+         * the common_dtype slot implementers do not need to worry about it.
+         */
+        Py_INCREF(type1);
+        return type1;
+    }
+
+    // TODO: this does no priority inversion, I do not think that is necessary
+    //       though.
+    common = type1->dt_slots->common_dtype(type1, type2);
+    if (common == NULL) {
+        return NULL;
+    }
+    if ((PyObject *)common == Py_NotImplemented) {
+        Py_DECREF(common);
+        common = type2->dt_slots->common_dtype(type2, type1);
+        if (common == NULL) {
+            return NULL;
+        }
+        if ((PyObject *)common == Py_NotImplemented) {
+            Py_DECREF(common);
+            PyErr_SetString(PyExc_TypeError,
+                    "Could not promote to common DType.");
+            return NULL;
+        }
+    }
+    return common;
+}
+
+static PyArray_Descr *
+discover_descriptor_with_correct_dtype(
+        PyArray_Descr *descr,
+        PyArray_DTypeMeta *dtype_meta,
+        PyArray_DTypeMeta *common)
+{
+    if ((PyArray_DTypeMeta *)Py_TYPE(descr) == common) {
+        Py_INCREF(descr);
+        return descr;
+    }
+    CastingImpl *casting_impl = get_casting_impl(
+                                    dtype_meta, common, NPY_UNSAFE_CASTING);
+    if (casting_impl == NULL) {
+        return NULL;
+    }
+    PyArray_Descr *in_descrs[2] = {descr, NULL};
+    PyArray_Descr *out_descrs[2];
+    if (casting_impl->adjust_descriptors(
+            casting_impl, in_descrs, out_descrs, NPY_UNSAFE_CASTING) < 0) {
+        Py_DECREF(casting_impl);
+        return NULL;
+    }
+    Py_DECREF(casting_impl);
+    Py_DECREF(out_descrs[0]);
+    assert((PyArray_DTypeMeta *)Py_TYPE(out_descrs[1]) == common);
+    return out_descrs[1];
+}
+
 /*NUMPY_API
  * Produces the smallest size and lowest kind type to which both
  * input types can be cast.
  */
 NPY_NO_EXPORT PyArray_Descr *
-PyArray_PromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
+PyArray_PromoteTypes(PyArray_Descr *descr1, PyArray_Descr *descr2)
+{
+    PyArray_DTypeMeta *type1_meta = (PyArray_DTypeMeta *)Py_TYPE(descr1);
+    PyArray_DTypeMeta *type2_meta = (PyArray_DTypeMeta *)Py_TYPE(descr2);
+
+    // TODO: Could add fast path for the common case where things are identical
+    // NOTE: Even in that case, old behaviour is to ensure output is native!
+
+    /* The first step is always to find the common dtype. */
+    PyArray_DTypeMeta *common = PyArray_PromoteDTypes(type1_meta, type2_meta);
+    /*
+     * NOTE: Once we have a common type, we will assume that things are OK?
+     */
+    if (common == NULL) {
+        return NULL;
+    }
+    if (!common->flexible) {
+        /* Most of the time we will be done here: */
+        Py_DECREF(common);
+        return common->dt_slots->default_descr(common);
+    }
+
+    /*
+     * If we reached here, we may have to discover the correct descriptors
+     * within for the new common DType class. For example the output might
+     * be a string (the input can be arbitrary) and we need to find the
+     * string length.
+     */
+    PyArray_Descr *cast_descr1, *cast_descr2;
+
+    cast_descr1 = discover_descriptor_with_correct_dtype(
+            descr1, type1_meta, common);
+    if (cast_descr1 == NULL) {
+        Py_DECREF(common);
+        return NULL;
+    }
+    cast_descr2 = discover_descriptor_with_correct_dtype(
+            descr2, type2_meta, common);
+    if (cast_descr2 == NULL) {
+        Py_DECREF(common);
+        Py_DECREF(cast_descr1);
+        return NULL;
+    }
+
+    /*
+     * We still need to find out the actual common dtype, since the two inputs
+     * appear to be different:
+     */
+    assert((PyArray_DTypeMeta *)Py_TYPE(cast_descr1) == common);
+    assert((PyArray_DTypeMeta *)Py_TYPE(cast_descr2) == common);
+    PyArray_Descr *result = (
+        common->dt_slots->common_instance(common, cast_descr1, cast_descr2));
+
+    Py_DECREF(common);
+    Py_DECREF(cast_descr1);
+    Py_DECREF(cast_descr2);
+    return result;
+}
+
+NPY_NO_EXPORT PyArray_Descr *
+PyArray_LegacyPromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
 {
     int type_num1, type_num2, ret_type_num;
 

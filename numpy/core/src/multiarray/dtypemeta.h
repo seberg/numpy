@@ -9,6 +9,14 @@ struct _PyArray_DTypeMeta;
 
 typedef PyArray_Descr *(default_descr_func)(struct _PyArray_DTypeMeta *cls);
 
+typedef struct _PyArray_DTypeMeta *(common_dtype_function)(
+            struct _PyArray_DTypeMeta *cls,
+            struct _PyArray_DTypeMeta *other);
+
+typedef PyArray_Descr *(common_instance_function)(
+            struct _PyArray_DTypeMeta *cls,
+            PyArray_Descr *descr1, PyArray_Descr *descr2);
+
 typedef struct _CastingImpl *(can_cast_function)(
             struct _PyArray_DTypeMeta *cls,
             struct _PyArray_DTypeMeta *other,
@@ -29,7 +37,8 @@ typedef struct {
     /* Casting: */
     can_cast_function *can_cast_from_other;
     can_cast_function *can_cast_to_other;
-    void *common_dtype;
+    common_dtype_function *common_dtype;
+    common_instance_function *common_instance;
     default_descr_func *default_descr;
     /* Slots for legacy wrapper */
     //PyObject *legacy_castingimpls_from;
@@ -84,6 +93,7 @@ typedef struct _PyArray_DTypeMeta {
          */
         PyArray_ArrFuncs *f;
         PyObject *name;
+        npy_bool is_legacy_wrapper;
         // Most things should go into this single pointer, so that things
         // are nice and clean and hidden away:
         dtypemeta_slots *dt_slots;

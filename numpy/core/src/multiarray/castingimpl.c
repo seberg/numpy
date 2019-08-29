@@ -96,13 +96,12 @@ static int adjust_two_descriptors_flexible(
          * We need to adapt the dtype, which means pomotion in old terms.
          */
         // This function wraps existing dtypes, user dtypes are never flexible
-        // so this must be string, bytes, datetime, or timedelta.
-        int from_type_num = in_descrs[0]->type_num;
-        int to_type_num = in_descrs[0]->type_num;
-        int valid;
+        // so this must be string, bytes, datetime, timedelta, or void.
+        int from_type_num = self->from_dtype->type_num;
+        int to_type_num = self->to_dtype->type_num;
 
-        /* The legacy datatype should be string or unicode. */
-        if (to_type_num == NPY_STRING || to_type_num == NPY_UNICODE) {
+        if (to_type_num == NPY_STRING || to_type_num == NPY_UNICODE ||
+                PyTypeNum_ISDATETIME(to_type_num)) {
             PyArray_Descr *tmp = PyArray_DescrNewFromType(to_type_num);
             if (tmp == NULL) {
                 PyErr_SetString(PyExc_TypeError,
@@ -110,8 +109,7 @@ static int adjust_two_descriptors_flexible(
                 return -1;
             }
             // TODO: For scalar objects we may have special logic here! ugg!
-            out_descrs[1] = PyArray_AdaptFlexibleDType(NULL, in_descrs[1], tmp);
-            Py_DECREF(tmp);
+            out_descrs[1] = PyArray_AdaptFlexibleDType(NULL, in_descrs[0], tmp);
             if (out_descrs[1] == NULL) {
                 PyErr_SetString(PyExc_TypeError,
                     "invalid cast...");
@@ -119,6 +117,7 @@ static int adjust_two_descriptors_flexible(
             }
             Py_INCREF(in_descrs[0]);
             out_descrs[0] = in_descrs[0];
+            return 0;
         }
         // TODO: for Datetimes without a unit there may be corner cases...
         PyErr_SetString(PyExc_TypeError,

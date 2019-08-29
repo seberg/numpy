@@ -112,7 +112,7 @@ dtypemeta_init(PyObject *type, PyObject *args, PyObject *kwds)
 //}
 
 
-static PyObject *
+static CastingImpl *
 legacy_can_cast(
         PyArray_DTypeMeta *from_dtype,
         PyArray_DTypeMeta *to_dtype,
@@ -125,40 +125,51 @@ legacy_can_cast(
         // TODO: If either is not a legacy, will need to return NotImplemented
         Py_DECREF(from_descr);
         Py_DECREF(to_descr);
-        PyErr_SetString(PyExc_TypeError,
-            "cannot cast! -- from inside legacy (possibly should be NotImplemented)");
+        PyErr_Format(PyExc_TypeError,
+            "cannot cast from %R to %R under the rule %i! -- from inside legacy",
+             from_dtype, to_dtype, casting);
         return NULL;
     }
     Py_DECREF(from_descr);
     Py_DECREF(to_descr);
     /* should not return a new one every time of course: */
-    return castingimpl_legacynew(from_dtype, to_dtype);
+    return (CastingImpl *)castingimpl_legacynew(from_dtype, to_dtype);
 }
 
 
-static PyObject *
+static CastingImpl *
 legacy_can_cast_to(
         PyArray_DTypeMeta *from_dtype,
         PyArray_DTypeMeta *to_dtype,
         NPY_CASTING casting)
 {
+    if (!to_dtype->is_legacy_wrapper) {
+        Py_INCREF(Py_NotImplemented);
+        return (CastingImpl *)Py_NotImplemented;
+    }
     if (from_dtype->type_num >= to_dtype->type_num) {
         // Reject to make things a bit more interesting.
-        Py_RETURN_NOTIMPLEMENTED;
+        Py_INCREF(Py_NotImplemented);
+        return (CastingImpl *)Py_NotImplemented;
     }
     return legacy_can_cast(from_dtype, to_dtype, casting);
 }
 
 
-static PyObject *
+static CastingImpl *
 legacy_can_cast_from(
         PyArray_DTypeMeta *to_dtype,
         PyArray_DTypeMeta *from_dtype,
         NPY_CASTING casting)
 {
+    if (!from_dtype->is_legacy_wrapper) {
+        Py_INCREF(Py_NotImplemented);
+        return (CastingImpl *)Py_NotImplemented;
+    }
     if (to_dtype->type_num >= from_dtype->type_num) {
         // Reject to make things a bit more interesting.
-        Py_RETURN_NOTIMPLEMENTED;
+        Py_INCREF(Py_NotImplemented);
+        return (CastingImpl *)Py_NotImplemented;
     }
     return legacy_can_cast(from_dtype, to_dtype, casting);
 }
@@ -172,6 +183,45 @@ legacy_default_descr(PyArray_DTypeMeta *cls) {
     return PyArray_DescrNewFromType(cls->type_num);
 }
 
+
+static PyArray_DTypeMeta*
+legacy_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
+{
+    assert(cls != other);
+    assert(cls->type_num != other->type_num);
+    if (!other->is_legacy_wrapper) {
+        Py_INCREF(Py_NotImplemented);
+        // TODO: Maybe should fix the function type instead?
+        return (PyArray_DTypeMeta*)Py_NotImplemented;
+    }
+
+    if (cls->type_num >= other->type_num) {
+        // Reject to make things a bit more interesting.
+        Py_INCREF(Py_NotImplemented);
+        return (PyArray_DTypeMeta*)Py_NotImplemented;
+    }
+
+    PyArray_Descr *descr1 = PyArray_DescrFromType(cls->type_num);
+    PyArray_Descr *descr2 = PyArray_DescrFromType(other->type_num);
+
+    PyArray_Descr *common_descr = PyArray_LegacyPromoteTypes(descr1, descr2);
+    Py_DECREF(descr1);
+    Py_DECREF(descr2);
+    if (common_descr == NULL) {
+        return NULL;
+    }
+    PyArray_DTypeMeta *common = (PyArray_DTypeMeta *)Py_TYPE(common_descr);
+    Py_INCREF(common);
+    Py_DECREF(common_descr);
+    return common;
+}
+
+static PyArray_Descr*
+legacy_common_instance(
+        PyArray_DTypeMeta *cls, PyArray_Descr *descr1, PyArray_Descr *descr2)
+{
+    return PyArray_LegacyPromoteTypes(descr1, descr2);
+}
 
 /*
  * This is brutal. Because it seems tricky to do otherwise, use
@@ -208,6 +258,8 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     //dtype->tp_dictoffset = offsetof(PyArray_Descr, ob_dict);
 
     PyArray_DTypeMeta *dtype_class = (PyArray_DTypeMeta *)dtype_classobj;
+    dtype_class->is_legacy_wrapper = NPY_TRUE;
+
     dtype_class->typeobj = dtype->typeobj;
     dtype_class->kind = dtype->kind;
     dtype_class->type = dtype->type;
@@ -236,6 +288,12 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
 
     dtype_class->dt_slots->can_cast_to_other = legacy_can_cast_to;
     dtype_class->dt_slots->can_cast_from_other = legacy_can_cast_from;
+
+    dtype_class->dt_slots->common_dtype = legacy_common_dtype;
+    if (dtype_class->flexible) {
+        /* Common instance is only necessary for flexible dtypes */
+        dtype_class->dt_slots->common_instance = legacy_common_instance;
+    }
 
     // This seems like it might make sense (but probably not here):
     Py_INCREF(dtype);

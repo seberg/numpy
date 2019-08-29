@@ -19,17 +19,19 @@ castingimpl_legacynew(
  * (the trivial implementation could be inlined/optimized as NULL)
  */
 typedef int (adjust_descriptors_func)(
-        struct _CastingImpl *self,
-        PyArray_Descr *in_descrs[2], PyArray_Descr *out_descrs[2],
-        NPY_CASTING casting);
+            struct _CastingImpl *self,
+            PyArray_Descr *in_descrs[2], PyArray_Descr *out_descrs[2],
+            NPY_CASTING casting);
 
-typedef int (get_transferfunction_func)(struct _CastingImpl *self,
-        int aligned, int unicode_swap,
-        npy_intp src_stride, npy_intp dst_stride,
-        npy_intp src_itemsize, npy_intp dst_itemsize,
-        PyArray_StridedUnaryOp **outstransfer,
-        NpyAuxData **outtransferdata,
-        int *out_needs_api);
+typedef int (get_transferfunction_func)(
+            struct _CastingImpl *self,
+            int aligned,
+            npy_intp src_stride, npy_intp dst_stride,
+            PyArray_Descr *src_dtype, PyArray_Descr *dst_dtype,
+            int move_references,
+            PyArray_StridedUnaryOp **out_stransfer,
+            NpyAuxData **out_transferdata,
+            int *out_needs_api);
 
 /*
  * This struct requires a rehaul, it must be compatible with the UFuncImpl

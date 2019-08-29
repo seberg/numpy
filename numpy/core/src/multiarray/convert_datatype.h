@@ -14,6 +14,12 @@ NPY_NO_EXPORT npy_bool
 PyArray_LegacyCanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
                                                     NPY_CASTING casting);
 
+NPY_NO_EXPORT npy_bool
+PyArray_LegacyCanCastTo(PyArray_Descr *from, PyArray_Descr *to);
+
+NPY_NO_EXPORT PyArray_Descr *
+PyArray_LegacyPromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2);
+
 NPY_NO_EXPORT int
 PyArray_ValidType(int type);
 
