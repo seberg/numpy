@@ -3589,7 +3589,7 @@ static PyMappingMethods descr_as_mapping = {
 
 
 NPY_NO_EXPORT PyTypeObject PyArrayDescr_Type = {
-    PyVarObject_HEAD_INIT(NULL, 0)
+    PyVarObject_HEAD_INIT(&PyArray_DTypeMeta, 0)
     "numpy.dtype",                              /* tp_name */
     sizeof(PyArray_Descr),                      /* tp_basicsize */
     0,                                          /* tp_itemsize */

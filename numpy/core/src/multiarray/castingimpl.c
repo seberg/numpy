@@ -101,7 +101,7 @@ static int adjust_two_descriptors_flexible(
         int to_type_num = self->to_dtype->type_num;
 
         if (to_type_num == NPY_STRING || to_type_num == NPY_UNICODE ||
-                PyTypeNum_ISDATETIME(to_type_num)) {
+                PyTypeNum_ISDATETIME(to_type_num) || to_type_num == NPY_VOID) {
             PyArray_Descr *tmp = PyArray_DescrNewFromType(to_type_num);
             if (tmp == NULL) {
                 PyErr_SetString(PyExc_TypeError,
