@@ -3588,8 +3588,12 @@ static PyMappingMethods descr_as_mapping = {
 /****************** End of Mapping Protocol ******************************/
 
 
-NPY_NO_EXPORT PyTypeObject PyArrayDescr_Type = {
-    PyVarObject_HEAD_INIT(&PyArray_DTypeMeta, 0)
+// TODO: Needs to be actually initialized correctly to define
+//       some of the slots (pretty much just returning NotImplemented or error)
+static dtypemeta_slots _dt_slots_nulled = {0};
+
+NPY_NO_EXPORT PyArray_DTypeMeta PyArrayDescr_TypeFull = {{{
+    PyVarObject_HEAD_INIT(&PyArrayDTypeMeta_Type, 0)
     "numpy.dtype",                              /* tp_name */
     sizeof(PyArray_Descr),                      /* tp_basicsize */
     0,                                          /* tp_itemsize */
@@ -3637,6 +3641,12 @@ NPY_NO_EXPORT PyTypeObject PyArrayDescr_Type = {
     0,                                          /* tp_weaklist */
     0,                                          /* tp_del */
     0,                                          /* tp_version_tag */
+    },},
+    .type_num = -1,
+    .kind = '\0',
+    .abstract = 1,
+    .flexible = 0,
+    .dt_slots = &_dt_slots_nulled,
 };
 
 // TODO: This should be included above, but maybe does not need to be?

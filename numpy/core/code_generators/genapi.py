@@ -319,6 +319,12 @@ class TypeApi(object):
         self.api_name = api_name
 
     def define_from_array_api_string(self):
+        if self.name == "PyArrayDescr_Type":
+            assert self.index == 3
+            return """\
+#undef PyArrayDescr_Type
+#define PyArrayDescr_Type (*(PyTypeObject *)PyArray_API[3])
+"""
         return "#define %s (*(%s *)%s[%d])" % (self.name,
                                                self.ptr_cast,
                                                self.api_name,
@@ -328,9 +334,15 @@ class TypeApi(object):
         return "        (void *) &%s" % self.name
 
     def internal_define(self):
-        astr = """\
+        if self.name == "PyArrayDescr_Type":
+            astr = """\
+/* extern NPY_NO_EXPORT PyTypeObject %(type)s; */
+"""
+        else:
+            astr = """\
 extern NPY_NO_EXPORT PyTypeObject %(type)s;
-""" % {'type': self.name}
+"""
+        astr = astr % {'type': self.name}
         return astr
 
 class GlobalVarApi(object):
