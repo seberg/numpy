@@ -37,9 +37,6 @@ static int adjust_two_descriptors_trivial(
         return -1;
     }
 
-    Py_INCREF(in_descrs[0]);
-    out_descrs[0] = in_descrs[0];
-
     return 0;
 }
 
@@ -150,7 +147,7 @@ get_transferfunction_legacy_fallback(
     assert((src_dtype == NULL) ||
            (Py_TYPE(dst_dtype) == (PyTypeObject *)self->to_dtype));
  
-    int res = PyArray_GetDTypeTransferFunction(aligned,
+    int res = PyArray_LegacyGetDTypeTransferFunction(aligned,
                             src_stride, dst_stride,
                             src_dtype, dst_dtype,
                             move_references,

@@ -21,7 +21,6 @@
 #include "datetime_strings.h"
 
 #include "dtypemeta.h"
-#include "castingimpl.h"
 
 
 /*
@@ -685,7 +684,7 @@ can_cast_fields(PyObject *field1, PyObject *field2, NPY_CASTING casting)
  * Fetch the casting implementation based on the two DType classes.
  * Supports the two classes to be identical.
  */
-static CastingImpl *
+NPY_NO_EXPORT CastingImpl *
 get_casting_impl(
             PyArray_DTypeMeta *from_dtype,
             PyArray_DTypeMeta *to_dtype,

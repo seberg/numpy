@@ -54,8 +54,10 @@ dtypemeta_dealloc(PyArray_DTypeMeta *self)
 static PyObject *
 dtypemeta_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    PyObject *self = (&PyType_Type)->tp_new(type, args, kwds);
-    printf("INSIDE NEW: created at %ld from type %ld and type is %ld \n", (size_t)self, (size_t)type, (size_t)&PyType_Type);
+    // PyObject *self = (&PyType_Type)->tp_new(type, args, kwds);
+
+    PyErr_SetString(PyExc_TypeError,
+        "Cannot subclass dtype (abstract dtypes will be subclassable)");
     return NULL;
 }
 
@@ -63,8 +65,12 @@ static int
 dtypemeta_init(PyObject *type, PyObject *args, PyObject *kwds)
 {
     int res = (&PyType_Type)->tp_init(type, args, kwds);
-    printf("INSIDE INIT\n");
-    return res;
+    if (res < 0) {
+        return res;
+    }
+    PyErr_SetString(PyExc_TypeError,
+        "init slot of dtypemeta should never be called!");
+    return -1;
 }
 
 

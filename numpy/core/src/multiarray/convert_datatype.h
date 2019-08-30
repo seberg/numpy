@@ -1,6 +1,8 @@
 #ifndef _NPY_ARRAY_CONVERT_DATATYPE_H_
 #define _NPY_ARRAY_CONVERT_DATATYPE_H_
 
+#include "castingimpl.h"
+
 NPY_NO_EXPORT PyArray_VectorUnaryFunc *
 PyArray_GetCastFunc(PyArray_Descr *descr, int type_num);
 
@@ -22,6 +24,11 @@ PyArray_LegacyPromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2);
 
 NPY_NO_EXPORT int
 PyArray_ValidType(int type);
+
+NPY_NO_EXPORT CastingImpl *get_casting_impl(
+            PyArray_DTypeMeta *from_dtype,
+            PyArray_DTypeMeta *to_dtype,
+            NPY_CASTING casting);
 
 /* Like PyArray_CanCastArrayTo */
 NPY_NO_EXPORT npy_bool

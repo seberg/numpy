@@ -218,6 +218,15 @@ PyArray_GetDTypeTransferFunction(int aligned,
                             NpyAuxData **out_transferdata,
                             int *out_needs_api);
 
+NPY_NO_EXPORT int
+PyArray_LegacyGetDTypeTransferFunction(int aligned,
+                            npy_intp src_stride, npy_intp dst_stride,
+                            PyArray_Descr *src_dtype, PyArray_Descr *dst_dtype,
+                            int move_references,
+                            PyArray_StridedUnaryOp **out_stransfer,
+                            NpyAuxData **out_transferdata,
+                            int *out_needs_api);
+
 /*
  * This is identical to PyArray_GetDTypeTransferFunction, but returns a
  * transfer function which also takes a mask as a parameter.  The mask is used

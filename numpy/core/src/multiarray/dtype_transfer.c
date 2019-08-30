@@ -3449,6 +3449,88 @@ PyArray_GetDTypeTransferFunction(int aligned,
                             NpyAuxData **out_transferdata,
                             int *out_needs_api)
 {
+    // TODO: This function needs to be provided, but should not be used
+    //       much, since in most cases we should already know the correct
+    //       dtype classes to use.
+
+    /*
+     * This is a fairly complex process, for now the actual API can be private
+     * by giving users only the possibility to create CastingImpls using
+     * strided data on the basic dtypes.
+     */
+    // TODO: Right now I did the same internally, but internally we should not
+    //       do that to avoid performance regressions when copying unaligned
+    //       data (or byteswapped, etc).
+    // TODO (continued): This means we need to be able to signal whether
+    //       the returned implementation can handle unaligned data, etc.
+    //       The API here also has only a single aligned flag, which confuses
+    //       me?
+    if ((src_dtype == NULL) || (dst_dtype == NULL)) {
+        goto fallback;
+    }
+
+    PyArray_DTypeMeta *src_dtypemeta = (PyArray_DTypeMeta *)Py_TYPE(src_dtype);
+    PyArray_DTypeMeta *dst_dtypemeta = (PyArray_DTypeMeta *)Py_TYPE(dst_dtype);
+    CastingImpl *casting_impl = get_casting_impl(
+            src_dtypemeta, dst_dtypemeta, NPY_UNSAFE_CASTING);
+    if (casting_impl == NULL) {
+        return NPY_FAIL;
+    }
+    PyArray_Descr *in_descrs[2] = {src_dtype, dst_dtype};
+    PyArray_Descr *out_descrs[2] = {NULL, NULL};
+    if (casting_impl->adjust_descriptors(
+                casting_impl, in_descrs, out_descrs, NPY_UNSAFE_CASTING) < 0) {
+        Py_DECREF(casting_impl);
+        return NPY_FAIL;
+    }
+
+    if ((out_descrs[0] != src_dtype) || (out_descrs[1] != dst_dtype)) {
+        Py_DECREF(casting_impl);
+        Py_DECREF(out_descrs[0]);
+        Py_DECREF(out_descrs[1]);
+        goto fallback;
+    }
+
+    // TODO, IMPORTANT: This assumes aligned = 0 is handled, this is not a good assumption!
+    PyArray_StridedUnaryOp *casting_stransfer;
+    NpyAuxData *casting_transferdata;
+    int casting_needs_api;
+    int res = casting_impl->get_transferfunction(casting_impl,
+            aligned, src_stride, dst_stride,
+            out_descrs[0], out_descrs[1], move_references,
+            &casting_stransfer, &casting_transferdata, &casting_needs_api);
+    Py_DECREF(casting_impl);
+    Py_DECREF(out_descrs[0]);
+    Py_DECREF(out_descrs[1]);
+    if (res < 0) {
+        return NPY_FAIL;
+    }
+    *out_stransfer = casting_stransfer;
+    *out_transferdata = casting_transferdata;
+    *out_needs_api = casting_needs_api;
+    return NPY_SUCCEED;
+
+fallback:
+    //printf("Falling back to legacy dtype transfer function finding!\n");
+    return PyArray_LegacyGetDTypeTransferFunction(aligned,
+                            src_stride, dst_stride,
+                            src_dtype, dst_dtype,
+                            move_references,
+                            out_stransfer,
+                            out_transferdata,
+                            out_needs_api);
+}
+
+
+NPY_NO_EXPORT int
+PyArray_LegacyGetDTypeTransferFunction(int aligned,
+                            npy_intp src_stride, npy_intp dst_stride,
+                            PyArray_Descr *src_dtype, PyArray_Descr *dst_dtype,
+                            int move_references,
+                            PyArray_StridedUnaryOp **out_stransfer,
+                            NpyAuxData **out_transferdata,
+                            int *out_needs_api)
+{
     npy_intp src_itemsize, dst_itemsize;
     int src_type_num, dst_type_num;
     int is_builtin;
