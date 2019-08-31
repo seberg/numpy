@@ -94,7 +94,6 @@ static int adjust_two_descriptors_flexible(
          */
         // This function wraps existing dtypes, user dtypes are never flexible
         // so this must be string, bytes, datetime, timedelta, or void.
-        int from_type_num = self->from_dtype->type_num;
         int to_type_num = self->to_dtype->type_num;
 
         if (to_type_num == NPY_STRING || to_type_num == NPY_UNICODE ||

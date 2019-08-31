@@ -302,6 +302,8 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     // This seems like it might make sense (but probably not here):
     Py_INCREF(dtype);
     //PyDict_SetItemString(dict, "sometype", dtype_classobj);
+
+    return 0;
 }
 
 
