@@ -3492,6 +3492,7 @@ PyArray_GetDTypeTransferFunction(int aligned,
     }
 
     // TODO, IMPORTANT: This assumes aligned = 0 is handled, this is not a good assumption!
+    // But: We could keep the assumption for now and cram the logic into CastingImpl.
     PyArray_StridedUnaryOp *casting_stransfer;
     NpyAuxData *casting_transferdata;
     int casting_needs_api;

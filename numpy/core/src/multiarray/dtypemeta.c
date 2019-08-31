@@ -37,8 +37,6 @@ static PyMemberDef dtypemeta_members[] = {
         T_INT, offsetof(PyArray_DTypeMeta, type_num), READONLY, NULL},
     {"itemsize",
         T_INT, offsetof(PyArray_DTypeMeta, elsize), READONLY, NULL},
-    {"flags",
-        T_BYTE, offsetof(PyArray_DTypeMeta, flags), READONLY, NULL},
     {"flexible",
         T_INT, offsetof(PyArray_DTypeMeta, flexible), READONLY, NULL},
     {NULL, 0, 0, 0, NULL},
