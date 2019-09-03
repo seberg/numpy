@@ -773,6 +773,7 @@ def configuration(parent_package='',top_path=None):
     multiarray_deps = [
             join('src', 'multiarray', 'arrayobject.h'),
             join('src', 'multiarray', 'arraytypes.h'),
+            join('src', 'multiarray', 'abstractdtype.h'),
             join('src', 'multiarray', 'arrayfunction_override.h'),
             join('src', 'multiarray', 'npy_buffer.h'),
             join('src', 'multiarray', 'calculation.h'),
@@ -824,6 +825,7 @@ def configuration(parent_package='',top_path=None):
 
     multiarray_src = [
             join('src', 'multiarray', 'alloc.c'),
+            join('src', 'multiarray', 'abstractdtype.c'),
             join('src', 'multiarray', 'arrayobject.c'),
             join('src', 'multiarray', 'arraytypes.c.src'),
             join('src', 'multiarray', 'array_assign_scalar.c'),
