@@ -67,7 +67,7 @@ dtypemeta_init(PyObject *type, PyObject *args, PyObject *kwds)
         return res;
     }
     PyErr_SetString(PyExc_TypeError,
-        "init slot of dtypemeta should never be called!");
+        "init slot of dtypemeta should currently never be called!");
     return -1;
 }
 

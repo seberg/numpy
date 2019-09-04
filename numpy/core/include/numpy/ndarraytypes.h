@@ -1880,18 +1880,26 @@ typedef struct {
     /* PyObject handling: */
     void *getitem;
     void *setitem;
+    int requires_pyobject_for_discovery;  /* 1 if discovery requires value */
     void *discover_dtype_from_pytype;
+
     /* Casting: */
     can_cast_function *can_cast_from_other;
     can_cast_function *can_cast_to_other;
     common_dtype_function *common_dtype;
     common_instance_function *common_instance;
     default_descr_func *default_descr;
-    /* Slots for legacy wrapper */
+
+    /* Slots only intersting for abstract dtypes */
+    void *default_dtype;
+    void *minimal_dtype;  /* can default to the default_dtype */
+
+    /* Slots for legacy wrapper (needed?) */
     //PyObject *legacy_castingimpls_from;
     //PyObject *legacy_castingimpls_to;
     //int *legacy_casting_from_info;
     //int *legacy_casting_to_info;
+
     /* Special slots */
     struct _CastingImpl *within_dtype_castingimpl;
 } dtypemeta_slots;
