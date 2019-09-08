@@ -45,7 +45,9 @@ static PyMemberDef dtypemeta_members[] = {
 static void
 dtypemeta_dealloc(PyArray_DTypeMeta *self)
 {
-    printf("INSIDE DEALLOC!!!!!!\n");
+    printf("inside DTypeMeta dealloc (should be pretty rare...)\n");
+    Py_DECREF(self->typeobj);
+    free(self->dt_slots);
     (&PyType_Type)->tp_dealloc((PyObject *)self);
 }
 
@@ -264,6 +266,7 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     PyArray_DTypeMeta *dtype_class = (PyArray_DTypeMeta *)dtype_classobj;
     dtype_class->is_legacy_wrapper = NPY_TRUE;
 
+    Py_INCREF(dtype->typeobj);
     dtype_class->typeobj = dtype->typeobj;
     dtype_class->kind = dtype->kind;
     dtype_class->type = dtype->type;
@@ -307,6 +310,221 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
 }
 
 
+// TODO: Should really turn this around...
+static CastingImpl *
+can_cast_return_notimplemented(
+            PyArray_DTypeMeta *NPY_UNUSED(cls),
+            PyArray_DTypeMeta *NPY_UNUSED(other),
+            NPY_CASTING NPY_UNUSED(casting)) {
+    Py_INCREF(Py_NotImplemented);
+    return (CastingImpl *)Py_NotImplemented;
+}
+
+static PyArray_DTypeMeta *
+default_dtype_raise_no_default(PyArray_DTypeMeta *cls)
+{
+    PyErr_Format(PyExc_TypeError,
+        "The abstract DType %s has no default concrete dtype.",
+        (PyObject *)cls);
+    return NULL;
+}
+
+
+/*NUMPYAPI
+ *
+ * Initialize a DType subclasses DTypeMeta. Should be called after
+ * PyType_Ready.
+ */
+int
+PyArray_InitDTypeMetaFromSpec(
+            PyArray_DTypeMeta *dtype_meta,
+            PyArrayDTypeMeta_Spec *spec)
+{
+    PyType_Slot *slot;
+    PyObject *associated_python_types = NULL;
+
+    npy_bool is_abstract = spec->abstract;
+    npy_bool is_flexible = spec->flexible;
+    npy_intp itemsize = spec->itemsize;
+
+    dtype_meta->typeobj = NULL;
+
+    if (itemsize > NPY_MAX_INT) {
+        PyErr_SetString(PyExc_RuntimeError, "itemsize must fit C-int.");
+        return -1;
+    }
+    if (itemsize < 0) {
+        assert(itemsize == -1);
+    }
+    if (is_abstract && itemsize != -1) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "itemsize invalid for abstract DType (must be -1).");
+        return -1;
+    }
+
+    if (Py_TYPE((PyObject *)dtype_meta) != &PyArrayDTypeMeta_Type) {
+        /*
+         * We can only check the first one, C Type definers have to allocate
+         * enough space for the superclass.
+         */
+        PyErr_SetString(PyExc_RuntimeError,
+            "A DType must be an instance of PyArrayDTypeMeta_Type and "
+            "contain/be based on the PyArray_DTypeMeta struct.");
+        return -1;
+    }
+
+    if (!is_abstract) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Currently only AbstractDTypes support!");
+        return -1;
+    }
+
+    dtypemeta_slots *dt_slots = calloc(1, sizeof(dtypemeta_slots));
+    dtype_meta->dt_slots = calloc(1, sizeof(dtypemeta_slots));
+    if (dtype_meta->dt_slots == NULL) {
+        return -1;
+    }
+
+    for (slot = spec->slots; slot->slot; slot++) {
+        if (slot->pfunc == NULL) {
+            PyErr_SetString(PyExc_RuntimeError,
+                "A given PyArray_InitDTypeMetaFromSpec slot must not be NULL.");
+            goto fail;
+        }
+        // TODO: An offset array may be easier/nicer (less code).
+        switch (slot->slot) {
+
+        case NPY_dt_can_cast_from_other:
+            dt_slots->can_cast_from_other = (can_cast_function *)slot->pfunc;
+            continue;
+        case NPY_dt_can_cast_to_other:
+            dt_slots->can_cast_to_other = (can_cast_function *)slot->pfunc;
+            continue;
+        case NPY_dt_common_dtype:
+            dt_slots->common_dtype = (common_dtype_function *)slot->pfunc;
+            continue;
+        case NPY_dt_common_instance:
+            dt_slots->common_instance = (common_instance_function *)slot->pfunc;
+            continue;
+        case NPY_dt_default_dtype:
+            dt_slots->default_dtype = (dtype_from_dtype_function *)slot->pfunc;
+            continue;
+        case NPY_dt_minimal_dtype:
+            dt_slots->minimal_dtype = (dtype_from_dtype_function *)slot->pfunc;
+            continue;
+        // case NPY_dt_within_dtype_castingimpl:
+        //     continue;
+        case NPY_dt_legacy_arrfuncs:
+            dtype_meta->f = slot->pfunc;
+            continue;
+        case NPY_dt_associated_python_types:
+            associated_python_types = (PyObject *)slot->pfunc;
+            Py_INCREF(associated_python_types);
+            assert(Py_TYPE(associated_python_types) == &PyTuple_Type);
+            continue;
+        case NPY_dt_discover_dtype_from_pytype:
+            dt_slots->discover_dtype_from_pytype =
+                    (dtype_from_discovery_function *)slot->pfunc;
+        }
+        PyErr_SetString(PyExc_RuntimeError, "invalid slot offset (or not yet implemented)");
+        goto fail;
+    }
+
+    if (dt_slots->can_cast_from_other == NULL) {
+        dt_slots->can_cast_from_other = &can_cast_return_notimplemented;
+    }
+
+    if (spec->typeobj) {
+        Py_INCREF(spec->typeobj);
+        dtype_meta->typeobj = spec->typeobj;
+    }
+    else{
+        Py_INCREF(Py_None);
+        // TODO: Probably better store NULL...
+        dtype_meta->typeobj = (PyTypeObject *)Py_None;
+    }
+
+    if ((associated_python_types == NULL) &&
+                ((PyObject *)dtype_meta->typeobj != Py_None)) {
+        associated_python_types = PyTuple_Pack(1, dtype_meta->typeobj);
+        if (associated_python_types == NULL) {
+            goto fail;
+        }
+    }
+
+    for (Py_ssize_t i = 0; i < PyTuple_Size(associated_python_types); i++) {
+        int success;
+        PyObject *typeobj = PyTuple_GetItem(associated_python_types, i);
+
+        success = PyDict_Contains(PyArrayDTypeMeta_associated_types, typeobj);
+        if (success < 0) {
+            goto fail;
+        }
+        if (success) {
+            // TODO: Fix handling here;
+            printf("WARNING: DType to python type association already exists, ignoring!\n");
+            continue;
+        }
+        success = PyDict_SetItem(
+            PyArrayDTypeMeta_associated_types, typeobj, (PyObject *)dtype_meta);
+        if (success < 0) {
+            // TODO: Need to clean up in this unlikley event.
+            goto fail;
+        }
+    }
+    Py_DECREF(associated_python_types);
+    associated_python_types = NULL;
+
+    if (is_abstract) {
+        /* Many slots must not be defined (or should never be used) */
+        // TODO: Should ensure here, that `__new__` must fail/not be overwritten
+        // TODO: Revise, add and probably make a macro...
+        if (dt_slots->can_cast_to_other != NULL) {
+            PyErr_SetString(PyExc_RuntimeError,
+                "AbstractDTypes can never be cast to another dtype.");
+                goto fail;
+        }
+        if (dt_slots->common_instance != NULL) {
+            PyErr_SetString(PyExc_RuntimeError,
+                "AbstractDTypes cannot define a common instance.");
+                goto fail;
+        }
+        if (dt_slots->within_dtype_castingimpl != NULL) {
+            PyErr_SetString(PyExc_RuntimeError,
+                "AbstractDTypes can never cast.");
+                goto fail;
+        }
+        if (dt_slots->can_cast_to_other != NULL) {
+            PyErr_SetString(PyExc_RuntimeError,
+                "AbstractDTypes can never be cast to another dtype.");
+                goto fail;
+        }
+
+        if (dt_slots->default_dtype == NULL) {
+            dt_slots->default_dtype = &default_dtype_raise_no_default;
+        }
+        if (dt_slots->minimal_dtype == NULL) {
+            dt_slots->minimal_dtype = dt_slots->default_dtype;
+        }
+
+        return 0;
+    }
+    else {
+        // Some things should not be implemented, such as default_dtype and
+        // minimal_dtype.
+    }
+    goto fail;
+
+fail:
+    Py_XDECREF(associated_python_types);
+
+    Py_XDECREF(dtype_meta->typeobj);
+    dtype_meta->typeobj = NULL;
+    free(dt_slots);
+    return -1;
+}
+
+
 NPY_NO_EXPORT PyTypeObject PyArrayDTypeMeta_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "numpy.DTypeMeta",
@@ -322,3 +540,5 @@ NPY_NO_EXPORT PyTypeObject PyArrayDTypeMeta_Type = {
     .tp_init = (initproc)dtypemeta_init,
     .tp_new = dtypemeta_new,
 };
+
+NPY_NO_EXPORT PyObject *PyArrayDTypeMeta_associated_types = NULL;

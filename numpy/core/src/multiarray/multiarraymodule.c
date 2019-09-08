@@ -4651,6 +4651,10 @@ PyMODINIT_FUNC init_multiarray_umath(void) {
         goto err;
     }
 
+    PyArrayDTypeMeta_associated_types = PyDict_New();
+    if (PyArrayDTypeMeta_associated_types == NULL) {
+        goto err;
+    }
     if (PyType_Ready(&PyArrayDTypeMeta_Type) < 0) {
         goto err;
     }

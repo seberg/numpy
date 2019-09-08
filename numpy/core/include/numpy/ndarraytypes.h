@@ -1869,6 +1869,12 @@ typedef struct _CastingImpl *(can_cast_function)(
             struct _PyArray_DTypeMeta *other,
             NPY_CASTING casting);
 
+typedef struct _PyArray_DTypeMeta *(dtype_from_dtype_function)(
+            struct _PyArray_DTypeMeta *cls);
+
+typedef struct _PyArray_DTypeMeta *(dtype_from_discovery_function)(
+            struct _PyArray_DTypeMeta *cls, PyObject *obj);
+
 /*
  * This struct must remain fully opaque to the user, direct access is
  * solely allowed from within NumPy!
@@ -1881,7 +1887,7 @@ typedef struct {
     void *getitem;
     void *setitem;
     int requires_pyobject_for_discovery;  /* 1 if discovery requires value */
-    void *discover_dtype_from_pytype;
+    dtype_from_discovery_function *discover_dtype_from_pytype;
 
     /* Casting: */
     can_cast_function *can_cast_from_other;
@@ -1891,8 +1897,8 @@ typedef struct {
     default_descr_func *default_descr;
 
     /* Slots only intersting for abstract dtypes */
-    void *default_dtype;
-    void *minimal_dtype;  /* can default to the default_dtype */
+    dtype_from_dtype_function *default_dtype;
+    dtype_from_dtype_function *minimal_dtype;  /* can default to the default_dtype */
 
     /* Slots for legacy wrapper (needed?) */
     //PyObject *legacy_castingimpls_from;
@@ -1903,6 +1909,30 @@ typedef struct {
     /* Special slots */
     struct _CastingImpl *within_dtype_castingimpl;
 } dtypemeta_slots;
+
+#define NPY_dt_getitem 1
+#define NPY_dt_setitem 2
+#define NPY_dt_can_cast_from_other 3
+#define NPY_dt_can_cast_to_other 4
+#define NPY_dt_common_dtype 5
+#define NPY_dt_common_instance 6
+#define NPY_dt_within_dtype_castingimpl 7
+#define NPY_dt_legacy_arrfuncs 8
+
+#define NPY_dt_default_dtype 9
+#define NPY_dt_minimal_dtype 10
+#define NPY_dt_discover_dtype_from_pytype 11
+
+#define NPY_dt_associated_python_types 12
+
+typedef struct{
+  int flexible;
+  int abstract;
+  npy_intp itemsize;
+  int flags;
+  PyTypeObject *typeobj;
+  PyType_Slot *slots; /* terminated by slot==0. */
+} PyArrayDTypeMeta_Spec;
 
 
 /*
@@ -1947,7 +1977,6 @@ typedef struct _PyArray_DTypeMeta {
          * in the meantime.
          */
         PyArray_ArrFuncs *f;
-        PyObject *name;
         npy_bool is_legacy_wrapper;
         // Most things should go into this single pointer, so that things
         // are nice and clean and hidden away:
