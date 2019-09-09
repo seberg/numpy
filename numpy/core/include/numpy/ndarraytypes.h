@@ -1886,7 +1886,7 @@ typedef struct {
     /* PyObject handling: */
     void *getitem;
     void *setitem;
-    int requires_pyobject_for_discovery;  /* 1 if discovery requires value */
+    int requires_pyobject_for_discovery;  /* truly private for now */
     dtype_from_discovery_function *discover_dtype_from_pytype;
 
     /* Casting: */

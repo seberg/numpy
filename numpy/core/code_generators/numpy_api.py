@@ -352,6 +352,7 @@ multiarray_funcs_api = {
     'PyArray_ResolveWritebackIfCopy':       (302,),
     'PyArray_SetWritebackIfCopyBase':       (303,),
     # End 1.14 API
+    'PyArray_InitDTypeMetaFromSpec':        (306,),
 }
 
 ufunc_types_api = {

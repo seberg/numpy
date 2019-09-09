@@ -13,5 +13,8 @@ typedef struct {
 
 NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyIntAbstractDType;
 NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyFloatAbstractDType;
+NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyComplexAbstractDType;
+
+NPY_NO_EXPORT int init_pyvalue_abstractdtypes();
 
 #endif  /* _NPY_ABSTRACTDTYPE_H_ */

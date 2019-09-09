@@ -330,7 +330,7 @@ default_dtype_raise_no_default(PyArray_DTypeMeta *cls)
 }
 
 
-/*NUMPYAPI
+/*NUMPY_API
  *
  * Initialize a DType subclasses DTypeMeta. Should be called after
  * PyType_Ready.
