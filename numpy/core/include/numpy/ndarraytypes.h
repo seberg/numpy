@@ -6,6 +6,7 @@
 #include "npy_cpu.h"
 #include "utils.h"
 
+
 #define NPY_NO_EXPORT NPY_VISIBILITY_HIDDEN
 
 /* Only use thread if configured in config and python supports it */
@@ -1939,7 +1940,7 @@ typedef struct{
  * Slots of DTypeMeta, Probably can use the same structure for AbstractDTypeMeta.
  * This must remain be fully opaque!
  */
-typedef struct _PyArray_DTypeMeta {
+NPY_NO_EXPORT typedef struct _PyArray_DTypeMeta {
         // NOTE: This is allocated as PyHeapTypeObject, but most dtypes do not
         //       actually require that. Value based casting should though, and
         //       downstream should have the ability. (I hope this does not get difficult :/)

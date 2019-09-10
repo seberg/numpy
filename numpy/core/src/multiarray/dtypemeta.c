@@ -238,6 +238,8 @@ legacy_common_instance(
  */
 NPY_NO_EXPORT int
 descr_dtypesubclass_init(PyArray_Descr *dtype) {
+    // TODO: These are not exactly heaptypes (yet?)...
+    //       would need PyObject_new otherwise?
     PyTypeObject *dtype_classobj = calloc(1, sizeof(PyArray_DTypeMeta));
     if (dtype_classobj == NULL) {
         PyErr_NoMemory();
@@ -250,6 +252,7 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
         return -1;
     }
 
+    // TODO: Does this break a few fields in principle?
     memcpy(dtype_classobj, &PyArrayDescr_Type, sizeof(PyArrayDescr_Type));
     Py_TYPE(dtype_classobj) = &PyArrayDTypeMeta_Type;
     dtype_classobj->tp_base = &PyArrayDescr_Type;
@@ -425,6 +428,7 @@ PyArray_InitDTypeMetaFromSpec(
         case NPY_dt_discover_dtype_from_pytype:
             dt_slots->discover_dtype_from_pytype =
                     (dtype_from_discovery_function *)slot->pfunc;
+            continue;
         }
         PyErr_SetString(PyExc_RuntimeError, "invalid slot offset (or not yet implemented)");
         goto fail;
@@ -444,9 +448,13 @@ PyArray_InitDTypeMetaFromSpec(
         dtype_meta->typeobj = (PyTypeObject *)Py_None;
     }
 
-    if ((associated_python_types == NULL) &&
-                ((PyObject *)dtype_meta->typeobj != Py_None)) {
-        associated_python_types = PyTuple_Pack(1, dtype_meta->typeobj);
+    if (associated_python_types == NULL) {
+        if ((PyObject *)dtype_meta->typeobj != Py_None) {
+            associated_python_types = PyTuple_Pack(1, dtype_meta->typeobj);
+        }
+        else {
+            associated_python_types = PyTuple_New(0);
+        }
         if (associated_python_types == NULL) {
             goto fail;
         }
