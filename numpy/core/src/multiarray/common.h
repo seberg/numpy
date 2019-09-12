@@ -51,6 +51,11 @@ _array_find_python_scalar_type(PyObject *op);
 NPY_NO_EXPORT PyArray_Descr *
 _array_typedescr_fromstr(char *str);
 
+
+NPY_NO_EXPORT PyObject *
+_array_from_array_like(PyObject *op, PyArray_Descr *requested_dtype,
+                       npy_bool writeable, PyObject *context);
+
 NPY_NO_EXPORT char *
 index2ptr(PyArrayObject *mp, npy_intp i);
 
