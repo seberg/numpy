@@ -39,6 +39,9 @@ NPY_NO_EXPORT int
 should_use_min_scalar(npy_intp narrs, PyArrayObject **arr,
                       npy_intp ndtypes, PyArray_Descr **dtypes);
 
+NPY_NO_EXPORT PyArray_DTypeMeta *
+PyArray_PromoteDTypes(PyArray_DTypeMeta *type1, PyArray_DTypeMeta *type2);
+
 /*
  * This function calls Py_DECREF on flex_dtype, and replaces it with
  * a new dtype that has been adapted based on the values in data_dtype

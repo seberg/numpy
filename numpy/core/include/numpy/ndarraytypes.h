@@ -1940,7 +1940,7 @@ typedef struct{
  * Slots of DTypeMeta, Probably can use the same structure for AbstractDTypeMeta.
  * This must remain be fully opaque!
  */
-NPY_NO_EXPORT typedef struct _PyArray_DTypeMeta {
+typedef struct _PyArray_DTypeMeta {
         // NOTE: This is allocated as PyHeapTypeObject, but most dtypes do not
         //       actually require that. Value based casting should though, and
         //       downstream should have the ability. (I hope this does not get difficult :/)
@@ -1984,6 +1984,7 @@ NPY_NO_EXPORT typedef struct _PyArray_DTypeMeta {
         dtypemeta_slots *dt_slots;
 } PyArray_DTypeMeta;
 
+NPY_NO_EXPORT PyTypeObject PyArrayAbstractObjDTypeMeta_Type;
 NPY_NO_EXPORT PyArray_DTypeMeta PyArrayDescr_TypeFull;
 
 #define PyArrayDescr_Type (*(PyTypeObject *)(&PyArrayDescr_TypeFull))

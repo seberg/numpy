@@ -2,6 +2,7 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <numpy/ndarraytypes.h>
 #include "structmember.h"
 
 
@@ -22,6 +23,7 @@
 #include "dtypemeta.h"
 #include "castingimpl.h"
 #include "convert_datatype.h"
+#include "abstractdtype.h"
 
 
 static PyMemberDef dtypemeta_members[] = {
@@ -43,12 +45,15 @@ static PyMemberDef dtypemeta_members[] = {
 };
 
 static void
-dtypemeta_dealloc(PyArray_DTypeMeta *self)
-{
-    printf("inside DTypeMeta dealloc (should be pretty rare...)\n");
+dtypemeta_dealloc(PyArray_DTypeMeta *self) {
     Py_DECREF(self->typeobj);
     free(self->dt_slots);
-    (&PyType_Type)->tp_dealloc((PyObject *)self);
+    if (self->super.ht_type.tp_flags & Py_TPFLAGS_HEAPTYPE) {
+        (&PyType_Type)->tp_dealloc((PyObject *) self);
+    }
+    else {
+        PyObject_Del(self);
+    }
 }
 
 static PyObject *
@@ -350,7 +355,9 @@ PyArray_InitDTypeMetaFromSpec(
     npy_bool is_flexible = spec->flexible;
     npy_intp itemsize = spec->itemsize;
 
-    dtype_meta->typeobj = NULL;
+    dtype_meta->typeobj = spec->typeobj;
+    dtype_meta->abstract = is_abstract;
+    dtype_meta->flexible = is_flexible;
 
     if (itemsize > NPY_MAX_INT) {
         PyErr_SetString(PyExc_RuntimeError, "itemsize must fit C-int.");
@@ -365,7 +372,9 @@ PyArray_InitDTypeMetaFromSpec(
         return -1;
     }
 
-    if (Py_TYPE((PyObject *)dtype_meta) != &PyArrayDTypeMeta_Type) {
+    if (Py_TYPE((PyObject *)dtype_meta) != &PyArrayDTypeMeta_Type &&
+                Py_TYPE((PyObject *)dtype_meta) !=
+                        &PyArrayAbstractObjDTypeMeta_Type) {
         /*
          * We can only check the first one, C Type definers have to allocate
          * enough space for the superclass.
@@ -378,12 +387,12 @@ PyArray_InitDTypeMetaFromSpec(
 
     if (!is_abstract) {
         PyErr_SetString(PyExc_RuntimeError,
-            "Currently only AbstractDTypes support!");
+                        "Currently only AbstractDTypes support!");
         return -1;
     }
 
     dtypemeta_slots *dt_slots = calloc(1, sizeof(dtypemeta_slots));
-    dtype_meta->dt_slots = calloc(1, sizeof(dtypemeta_slots));
+    dtype_meta->dt_slots = dt_slots;
     if (dtype_meta->dt_slots == NULL) {
         return -1;
     }
@@ -520,6 +529,12 @@ PyArray_InitDTypeMetaFromSpec(
     else {
         // Some things should not be implemented, such as default_dtype and
         // minimal_dtype.
+        if (dt_slots->requires_pyobject_for_discovery ||
+                    dt_slots->discover_dtype_from_pytype) {
+            PyErr_SetString(PyExc_RuntimeError,
+                    "Only AbstractDTypes may use dtype discovery functions.");
+            goto fail;
+        }
     }
     goto fail;
 
@@ -548,5 +563,23 @@ NPY_NO_EXPORT PyTypeObject PyArrayDTypeMeta_Type = {
     .tp_init = (initproc)dtypemeta_init,
     .tp_new = dtypemeta_new,
 };
+
+
+NPY_NO_EXPORT PyTypeObject PyArrayAbstractObjDTypeMeta_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "numpy._AbstractObjDTypeMeta",
+    .tp_basicsize = sizeof(PyArray_PyValueAbstractDType),
+    /* methods */
+    .tp_dealloc = (destructor)dtypemeta_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = "nonsense docs",
+    // .tp_traverse = dtypemeta_traverse,
+    // .tp_clear = dtypemeta_clear,
+    .tp_members = dtypemeta_members,
+    .tp_base = &PyArrayDTypeMeta_Type,
+    .tp_init = (initproc)dtypemeta_init,
+    .tp_new = dtypemeta_new,
+};
+
 
 NPY_NO_EXPORT PyObject *PyArrayDTypeMeta_associated_types = NULL;

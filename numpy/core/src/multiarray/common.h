@@ -339,4 +339,9 @@ NPY_NO_EXPORT PyArrayObject *
 new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
                   int nd, npy_intp dimensions[], int typenum, PyArrayObject **result);
 
+NPY_NO_EXPORT int
+PyArray_DiscoverDTypeFromObject(
+        PyObject *obj, int max_dims, int curr_dims,
+        PyArray_DTypeMeta **out_dtype);
+
 #endif

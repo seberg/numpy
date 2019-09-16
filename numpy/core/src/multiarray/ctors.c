@@ -11,7 +11,6 @@
 
 #include "npy_config.h"
 
-#include "npy_ctypes.h"
 #include "npy_pycompat.h"
 #include "multiarraymodule.h"
 
@@ -715,7 +714,7 @@ discover_itemsize(PyObject *s, int nd, int *itemsize, int string_type)
  * has, filling in the dimensions as we go.
  */
 static int
-discover_dimensions(PyObject *obj, int *maxndim, npy_intp *d, int check_it,
+discover_dimensions(PyObject *obj, int *maxndim, npy_intp *d,
                                     int stop_at_string, int stop_at_tuple,
                                     int *out_is_object)
 {
@@ -928,7 +927,7 @@ discover_dimensions(PyObject *obj, int *maxndim, npy_intp *d, int check_it,
         /* Get the dimensions of the first item as a baseline */
         PyObject *first = PySequence_Fast_GET_ITEM(seq, 0);
         if (discover_dimensions(
-                first, &all_elems_maxndim, all_elems_d, check_it,
+                first, &all_elems_maxndim, all_elems_d,
                 stop_at_string, stop_at_tuple, out_is_object) < 0) {
             Py_DECREF(seq);
             return -1;
@@ -942,7 +941,7 @@ discover_dimensions(PyObject *obj, int *maxndim, npy_intp *d, int check_it,
 
             PyObject *elem = PySequence_Fast_GET_ITEM(seq, i);
             if (discover_dimensions(
-                    elem, &elem_maxndim, elem_d, check_it,
+                    elem, &elem_maxndim, elem_d,
                     stop_at_string, stop_at_tuple, out_is_object) < 0) {
                 Py_DECREF(seq);
                 return -1;
@@ -1448,159 +1447,6 @@ PyArray_New(
 }
 
 
-NPY_NO_EXPORT PyArray_Descr *
-_dtype_from_buffer_3118(PyObject *memoryview)
-{
-    PyArray_Descr *descr;
-    Py_buffer *view = PyMemoryView_GET_BUFFER(memoryview);
-    if (view->format != NULL) {
-        descr = _descriptor_from_pep3118_format(view->format);
-        if (descr == NULL) {
-            return NULL;
-        }
-    }
-    else {
-        /* If no format is specified, just assume a byte array
-         * TODO: void would make more sense here, as it wouldn't null
-         *       terminate.
-         */
-        descr = PyArray_DescrNewFromType(NPY_STRING);
-        descr->elsize = view->itemsize;
-    }
-    return descr;
-}
-
-
-NPY_NO_EXPORT PyObject *
-_array_from_buffer_3118(PyObject *memoryview)
-{
-    /* PEP 3118 */
-    Py_buffer *view;
-    PyArray_Descr *descr = NULL;
-    PyObject *r = NULL;
-    int nd, flags;
-    Py_ssize_t d;
-    npy_intp shape[NPY_MAXDIMS], strides[NPY_MAXDIMS];
-
-    view = PyMemoryView_GET_BUFFER(memoryview);
-    nd = view->ndim;
-    descr = _dtype_from_buffer_3118(memoryview);
-
-    if (descr == NULL) {
-        return NULL;
-    }
-
-    /* Sanity check */
-    if (descr->elsize != view->itemsize) {
-        /* Ctypes has bugs in its PEP3118 implementation, which we need to
-         * work around.
-         *
-         * bpo-10746
-         * bpo-32780
-         * bpo-32782
-         *
-         * Note that even if the above are fixed in master, we have to drop the
-         * early patch versions of python to actually make use of the fixes.
-         */
-        if (!npy_ctypes_check(Py_TYPE(view->obj))) {
-            /* This object has no excuse for a broken PEP3118 buffer */
-            PyErr_Format(
-                    PyExc_RuntimeError,
-                   "Item size %zd for PEP 3118 buffer format "
-                    "string %s does not match the dtype %c item size %d.",
-                    view->itemsize, view->format, descr->type,
-                    descr->elsize);
-            Py_DECREF(descr);
-            return NULL;
-        }
-
-        if (PyErr_Warn(
-                    PyExc_RuntimeWarning,
-                    "A builtin ctypes object gave a PEP3118 format "
-                    "string that does not match its itemsize, so a "
-                    "best-guess will be made of the data type. "
-                    "Newer versions of python may behave correctly.") < 0) {
-            Py_DECREF(descr);
-            return NULL;
-        }
-
-        /* Thankfully, np.dtype(ctypes_type) works in most cases.
-         * For an array input, this produces a dtype containing all the
-         * dimensions, so the array is now 0d.
-         */
-        nd = 0;
-        Py_DECREF(descr);
-        descr = (PyArray_Descr *)PyObject_CallFunctionObjArgs(
-                (PyObject *)&PyArrayDescr_Type, Py_TYPE(view->obj), NULL);
-        if (descr == NULL) {
-            return NULL;
-        }
-        if (descr->elsize != view->len) {
-            PyErr_SetString(
-                    PyExc_RuntimeError,
-                    "For the given ctypes object, neither the item size "
-                    "computed from the PEP 3118 buffer format nor from "
-                    "converting the type to a np.dtype matched the actual "
-                    "size. This is a bug both in python and numpy");
-            Py_DECREF(descr);
-            return NULL;
-        }
-    }
-
-    if (view->shape != NULL) {
-        int k;
-        if (nd > NPY_MAXDIMS || nd < 0) {
-            PyErr_Format(PyExc_RuntimeError,
-                "PEP3118 dimensions do not satisfy 0 <= ndim <= NPY_MAXDIMS");
-            goto fail;
-        }
-        for (k = 0; k < nd; ++k) {
-            shape[k] = view->shape[k];
-        }
-        if (view->strides != NULL) {
-            for (k = 0; k < nd; ++k) {
-                strides[k] = view->strides[k];
-            }
-        }
-        else {
-            d = view->len;
-            for (k = 0; k < nd; ++k) {
-                if (view->shape[k] != 0) {
-                    d /= view->shape[k];
-                }
-                strides[k] = d;
-            }
-        }
-    }
-    else {
-        if (nd == 1) {
-            shape[0] = view->len / view->itemsize;
-            strides[0] = view->itemsize;
-        }
-        else if (nd > 1) {
-            PyErr_SetString(PyExc_RuntimeError,
-                           "ndim computed from the PEP 3118 buffer format "
-                           "is greater than 1, but shape is NULL.");
-            goto fail;
-        }
-    }
-
-    flags = NPY_ARRAY_BEHAVED & (view->readonly ? ~NPY_ARRAY_WRITEABLE : ~0);
-    r = PyArray_NewFromDescrAndBase(
-            &PyArray_Type, descr,
-            nd, shape, strides, view->buf,
-            flags, NULL, memoryview);
-    return r;
-
-
-fail:
-    Py_XDECREF(r);
-    Py_XDECREF(descr);
-    return NULL;
-
-}
-
-
 /*NUMPY_API
  * Retrieves the array parameters for viewing/converting an arbitrary
  * PyObject* to a NumPy array. This allows the "innate type and shape"
@@ -1723,7 +1569,7 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
 
     /* Try to treat op as a list of lists or array-like objects. */
     if (!writeable && PySequence_Check(op)) {
-        int check_it, stop_at_string, stop_at_tuple, is_object;
+        int stop_at_string, stop_at_tuple, is_object;
         int type_num, type;
 
         /*
@@ -1766,7 +1612,7 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
         type_num = (*out_dtype)->type_num;
         type = (*out_dtype)->type;
 
-        check_it = (type != NPY_CHARLTR);
+        /* False for np.dtype("c") to signal single characters */
         stop_at_string = (type_num != NPY_STRING) ||
                          (type == NPY_STRINGLTR);
         stop_at_tuple = (type_num == NPY_VOID &&
@@ -1775,7 +1621,7 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
         *out_ndim = NPY_MAXDIMS;
         is_object = 0;
         if (discover_dimensions(
-                op, out_ndim, out_dims, check_it,
+                op, out_ndim, out_dims,
                 stop_at_string, stop_at_tuple, &is_object) < 0) {
             Py_DECREF(*out_dtype);
             if (PyErr_Occurred()) {

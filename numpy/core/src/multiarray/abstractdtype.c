@@ -15,7 +15,7 @@ static PyArray_DTypeMeta *
 common_dtype_int(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
 {
     PyObject *maximum = ((PyArray_PyValueAbstractDType *)cls)->maximum;
-    PyObject *minimum = ((PyArray_PyValueAbstractDType *)cls)->maximum;
+    PyObject *minimum = ((PyArray_PyValueAbstractDType *)cls)->minimum;
 
     PyObject *max_other = NULL;
     PyObject *min_other = NULL;
@@ -26,8 +26,8 @@ common_dtype_int(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
     // TODO: The second cast should be unnecessary, since we need to expose it :(?
     if (((PyTypeObject *)other)->tp_base == (PyTypeObject *)&PyArray_PyIntAbstractDType) {
         /* Modify ourself in-place and return */
-        PyObject *max_other = ((PyArray_PyValueAbstractDType *)other)->maximum;
-        PyObject *min_other = ((PyArray_PyValueAbstractDType *)other)->maximum;
+        max_other = ((PyArray_PyValueAbstractDType *)other)->maximum;
+        min_other = ((PyArray_PyValueAbstractDType *)other)->minimum;
 
         Py_INCREF(max_other);
         Py_INCREF(min_other);
@@ -178,17 +178,19 @@ discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj)
 {
     // TODO: There probably needs to be some optimizations here...
     PyArray_DTypeMeta *dtype = PyObject_New(
-                        PyArray_DTypeMeta, &PyArrayDTypeMeta_Type);
+            PyArray_PyValueAbstractDType, &PyArrayAbstractObjDTypeMeta_Type);
     if (dtype == NULL) {
         return NULL;
     }
 
     // TODO: Does this break a few fields in principle?
     /* Copy most things from the base type, since it is the same */
-    memcpy(dtype + sizeof(PyObject),
-            (&PyArray_PyIntAbstractDType) + sizeof(PyObject),
-            sizeof(PyArray_DTypeMeta) -  sizeof(PyObject));
+    memcpy((char *)dtype + sizeof(PyObject),
+           (char *)(&PyArray_PyIntAbstractDType) + sizeof(PyObject),
+           sizeof(PyArray_PyValueAbstractDType) -  sizeof(PyObject));
     ((PyTypeObject*)dtype)->tp_base = (PyTypeObject *)&PyArray_PyIntAbstractDType;
+    ((PyTypeObject*)dtype)->tp_name = "numpy.PyIntAbstractDType";
+    Py_INCREF(&PyArrayAbstractObjDTypeMeta_Type);
 
     if (PyType_Ready((PyTypeObject*)dtype) < 0) {
         Py_DECREF(dtype);
@@ -235,6 +237,7 @@ init_pyvalue_abstractdtypes()
 
     /* Prepare the abstract dtype used for integer (value based) promotion */
     PyType_Ready((PyTypeObject *)&PyArray_PyIntAbstractDType);
+    Py_INCREF(&PyArray_PyIntAbstractDType);
     /* All the types associated with Integers, are python ints and our ints */
     pytypes_int = PyTuple_Pack(11,
         &PyLong_Type, &PyByteArrType_Type, &PyShortArrType_Type,
@@ -266,6 +269,7 @@ init_pyvalue_abstractdtypes()
 
     /* Prepare the abstract dtype used for float (value based) promotion */
     PyType_Ready((PyTypeObject *)&PyArray_PyFloatAbstractDType);
+    Py_INCREF(&PyArray_PyFloatAbstractDType);
     pytypes_float = PyTuple_Pack(5,
         &PyFloat_Type, &PyHalfArrType_Type, &PyFloatArrType_Type,
         &PyDoubleArrType_Type, &PyLongDoubleArrType_Type);
@@ -293,7 +297,8 @@ init_pyvalue_abstractdtypes()
     PyArray_PyFloatAbstractDType.super.dt_slots->requires_pyobject_for_discovery = 1;
 
     /* Prepare the abstract dtype used for float (value based) promotion */
-    PyType_Ready((PyTypeObject *)&PyArray_PyFloatAbstractDType);
+    PyType_Ready((PyTypeObject *)&PyArray_PyComplexAbstractDType);
+    Py_INCREF(&PyArray_PyComplexAbstractDType);
     pytypes_complex = PyTuple_Pack(4,
         &PyComplex_Type, &PyCFloatArrType_Type,
         &PyCDoubleArrType_Type, &PyCLongDoubleArrType_Type);
@@ -347,9 +352,9 @@ fail:
 //       (say an Int24 wants to promote correctly with it).
 
 NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyIntAbstractDType = {{{{
-    PyVarObject_HEAD_INIT(&PyArrayDTypeMeta_Type, 0)
+    PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
     .tp_basicsize = sizeof(PyArray_DTypeMeta),
-    .tp_name = "numpy.PyIntAbstractDType",
+    .tp_name = "numpy.PyIntBaseAbstractDType",
     .tp_base = &PyArrayDescr_Type,
     },},},
     .minimum = NULL,
@@ -357,9 +362,9 @@ NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyIntAbstractDType = {{{{
 };
 
 NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyFloatAbstractDType = {{{{
-    PyVarObject_HEAD_INIT(&PyArrayDTypeMeta_Type, 0)
+    PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
     .tp_basicsize = sizeof(PyArray_DTypeMeta),
-    .tp_name = "numpy.PyIntAbstractDType",
+    .tp_name = "numpy.PyFloatBaseAbstractDType",
     .tp_base = &PyArrayDescr_Type,
     },},},
     .minimum = NULL,
@@ -367,9 +372,9 @@ NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyFloatAbstractDType = {{{{
 };
 
 NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyComplexAbstractDType = {{{{
-    PyVarObject_HEAD_INIT(&PyArrayDTypeMeta_Type, 0)
+    PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
     .tp_basicsize = sizeof(PyArray_DTypeMeta),
-    .tp_name = "numpy.PyComplexAbstractDType",
+    .tp_name = "numpy.PyComplexBaseAbstractDType",
     .tp_base = &PyArrayDescr_Type,
     },},},
     .minimum = NULL,  /* Real or complex part minimum/maximum... */

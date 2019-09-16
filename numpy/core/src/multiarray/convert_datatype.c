@@ -1197,7 +1197,7 @@ ensure_dtype_nbo(PyArray_Descr *type)
  * Promote two DType classes to the common one.
  */
 NPY_NO_EXPORT PyArray_DTypeMeta *
-PyArray_PromoteDTypes(PyArray_DTypeMeta* type1, PyArray_DTypeMeta *type2)
+PyArray_PromoteDTypes(PyArray_DTypeMeta *type1, PyArray_DTypeMeta *type2)
 {
     PyArray_DTypeMeta *common;
 

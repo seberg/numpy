@@ -4091,6 +4091,20 @@ normalize_axis_index(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwds)
     return PyInt_FromLong(axis);
 }
 
+static PyObject *
+_discover_dtype(PyObject *NPY_UNUSED(self), PyObject *obj)
+{
+    PyArray_DTypeMeta *out_dtype = NULL;
+    int out_dims;
+    int max_dims = NPY_MAXDIMS;
+
+    out_dims = PyArray_DiscoverDTypeFromObject(obj, max_dims, 0, &out_dtype);
+    if (out_dims < 0) {
+        return NULL;
+    }
+    return Py_BuildValue("iN", out_dims, (PyObject *)out_dtype);
+}
+
 static struct PyMethodDef array_module_methods[] = {
     {"_get_implementing_args",
         (PyCFunction)array__get_implementing_args,
@@ -4290,6 +4304,8 @@ static struct PyMethodDef array_module_methods[] = {
         METH_VARARGS, NULL},
     {"_add_newdoc_ufunc", (PyCFunction)add_newdoc_ufunc,
         METH_VARARGS, NULL},
+    {"_discover_dtype", (PyCFunction)_discover_dtype,
+        METH_O, NULL},
     {NULL, NULL, 0, NULL}                /* sentinel */
 };
 
@@ -4658,7 +4674,9 @@ PyMODINIT_FUNC init_multiarray_umath(void) {
     if (PyType_Ready(&PyArrayDTypeMeta_Type) < 0) {
         goto err;
     }
-
+    if (PyType_Ready(&PyArrayAbstractObjDTypeMeta_Type) < 0) {
+        goto err;
+    }
     PyArrayDescr_Type.tp_hash = PyArray_DescrHash;
     if (PyType_Ready(&PyArrayDescr_Type) < 0) {
         goto err;
