@@ -48,6 +48,7 @@ static void
 dtypemeta_dealloc(PyArray_DTypeMeta *self) {
     Py_DECREF(self->typeobj);
     free(self->dt_slots);
+    // TODO: I guess types that can run into this should just be heaptypes...?
     if (self->super.ht_type.tp_flags & Py_TPFLAGS_HEAPTYPE) {
         (&PyType_Type)->tp_dealloc((PyObject *) self);
     }
@@ -560,23 +561,6 @@ NPY_NO_EXPORT PyTypeObject PyArrayDTypeMeta_Type = {
     // .tp_clear = dtypemeta_clear,
     .tp_members = dtypemeta_members,
     .tp_base = &PyType_Type,
-    .tp_init = (initproc)dtypemeta_init,
-    .tp_new = dtypemeta_new,
-};
-
-
-NPY_NO_EXPORT PyTypeObject PyArrayAbstractObjDTypeMeta_Type = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "numpy._AbstractObjDTypeMeta",
-    .tp_basicsize = sizeof(PyArray_PyValueAbstractDType),
-    /* methods */
-    .tp_dealloc = (destructor)dtypemeta_dealloc,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = "nonsense docs",
-    // .tp_traverse = dtypemeta_traverse,
-    // .tp_clear = dtypemeta_clear,
-    .tp_members = dtypemeta_members,
-    .tp_base = &PyArrayDTypeMeta_Type,
     .tp_init = (initproc)dtypemeta_init,
     .tp_new = dtypemeta_new,
 };

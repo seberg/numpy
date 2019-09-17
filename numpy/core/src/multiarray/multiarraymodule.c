@@ -4310,6 +4310,7 @@ static struct PyMethodDef array_module_methods[] = {
 };
 
 #include "__multiarray_api.c"
+#include "abstractdtype.h"
 
 /* Establish scalar-type hierarchy
  *

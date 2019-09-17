@@ -11,6 +11,16 @@
 #include "abstractdtype.h"
 
 
+/*
+ * A very short cache, normally we should only have two at once really,
+ * although e.g. for ufuncs more could be necessary.
+ */
+#define ABSTRACTDTYPE_CACHE_SIZE 4
+static PyObject *pyint_abstractdtype_cache[ABSTRACTDTYPE_CACHE_SIZE] = {NULL};
+//static PyObject *pyfloat_abstractdtype_cache[ABSTRACTDTYPE_CACHE_SIZE] = {NULL};
+//static PyObject *pycfloat_abstractdtype_cache[ABSTRACTDTYPE_CACHE_SIZE] = {NULL};
+
+
 static PyArray_DTypeMeta *
 common_dtype_int(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
 {
@@ -51,55 +61,55 @@ common_dtype_int(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
 
     /* Handle integers, a bit non-elegant, but user types are rejected above */
     if ((other->kind == 'i') || (other->kind == 'u')) {
-        npy_ulonglong maximum = 0;
-        npy_longlong minimum = 0;
+        npy_ulonglong maximum_val = 0;
+        npy_longlong minimum_val = 0;
         switch (other->type_num) {
 
         case NPY_BYTE:
-            maximum = NPY_MAX_BYTE;
-            minimum = NPY_MIN_BYTE;
+            maximum_val = NPY_MAX_BYTE;
+            minimum_val = NPY_MIN_BYTE;
             break;
         case NPY_SHORT:
-            maximum = NPY_MAX_SHORT;
-            minimum = NPY_MIN_SHORT;
+            maximum_val = NPY_MAX_SHORT;
+            minimum_val = NPY_MIN_SHORT;
             break;
         case NPY_INT:
-            maximum = NPY_MAX_INT;
-            minimum = NPY_MIN_INT;
+            maximum_val = NPY_MAX_INT;
+            minimum_val = NPY_MIN_INT;
             break;
         case NPY_LONG:
-            maximum = NPY_MAX_LONG;
-            minimum = NPY_MIN_LONG;
+            maximum_val = NPY_MAX_LONG;
+            minimum_val = NPY_MIN_LONG;
             break;
         case NPY_LONGLONG:
-            maximum = NPY_MAX_LONGLONG;
-            minimum = NPY_MIN_LONGLONG;
+            maximum_val = NPY_MAX_LONGLONG;
+            minimum_val = NPY_MIN_LONGLONG;
             break;
         /* Unsigned versions: */
         case NPY_UBYTE:
-            maximum = NPY_MAX_UBYTE;
+            maximum_val = NPY_MAX_UBYTE;
             break;
         case NPY_USHORT:
-            maximum = NPY_MAX_USHORT;
+            maximum_val = NPY_MAX_USHORT;
             break;
         case NPY_UINT:
-            maximum = NPY_MAX_UINT;
+            maximum_val = NPY_MAX_UINT;
             break;
         case NPY_ULONG:
-            maximum = NPY_MAX_ULONG;
+            maximum_val = NPY_MAX_ULONG;
             break;
         case NPY_ULONGLONG:
-            maximum = NPY_MAX_ULONGLONG;
+            maximum_val = NPY_MAX_ULONGLONG;
             break;
         default:
             assert(0);  /* Cannot happen */
         }
 
-        max_other = PyLong_FromUnsignedLongLong(maximum);
+        max_other = PyLong_FromUnsignedLongLong(maximum_val);
         if (max_other == NULL) {
             return NULL;
         }
-        min_other = PyLong_FromLongLong(minimum);
+        min_other = PyLong_FromLongLong(minimum_val);
         if (min_other == NULL) {
             Py_DECREF(max_other);
             return NULL;
@@ -172,12 +182,22 @@ minimal_dtype_int(PyArray_DTypeMeta *cls) {
 }
 
 
-
 static PyArray_DTypeMeta*
 discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj)
 {
-    // TODO: There probably needs to be some optimizations here...
-    PyArray_DTypeMeta *dtype = PyObject_New(
+    PyArray_DTypeMeta *dtype;
+    /* Used a cached instance if possible: */
+    for (int i = 0; i < ABSTRACTDTYPE_CACHE_SIZE; i++) {
+        if (pyint_abstractdtype_cache[i] != NULL) {
+            dtype = (PyArray_DTypeMeta *)PyObject_Init(
+                    pyint_abstractdtype_cache[i],
+                    &PyArrayAbstractObjDTypeMeta_Type);
+            pyint_abstractdtype_cache[i] = NULL;
+            goto finish;
+        }
+    }
+
+    dtype = (PyArray_DTypeMeta *)PyObject_New(
             PyArray_PyValueAbstractDType, &PyArrayAbstractObjDTypeMeta_Type);
     if (dtype == NULL) {
         return NULL;
@@ -218,12 +238,30 @@ discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj)
         return NULL;
     }
 
+finish:
     Py_INCREF(obj);
     ((PyArray_PyValueAbstractDType *)dtype)->minimum = obj;
     Py_INCREF(obj);
     ((PyArray_PyValueAbstractDType *)dtype)->maximum = obj;
 
     return dtype;
+}
+
+static void
+abstractobjdtypemeta_dealloc(PyArray_PyValueAbstractDType *self) {
+    Py_XDECREF(self->minimum);
+    Py_XDECREF(self->maximum);
+    self->minimum = NULL;
+    self->maximum = NULL;
+    if (((PyTypeObject *)self)->tp_base == (PyTypeObject *)&PyArray_PyFloatAbstractDType) {
+        for (int i = 0; i < ABSTRACTDTYPE_CACHE_SIZE; i++) {
+            if (pyint_abstractdtype_cache[i] == NULL) {
+                pyint_abstractdtype_cache[i] = (PyObject *)self;
+                return;
+            }
+        }
+    }
+    (&PyArrayDTypeMeta_Type)->tp_dealloc((PyObject *) self);
 }
 
 
@@ -351,33 +389,54 @@ fail:
 //       we may provide functions to deal with these.
 //       (say an Int24 wants to promote correctly with it).
 
-NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyIntAbstractDType = {{{{
-    PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
-    .tp_basicsize = sizeof(PyArray_DTypeMeta),
-    .tp_name = "numpy.PyIntBaseAbstractDType",
-    .tp_base = &PyArrayDescr_Type,
+
+NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyIntAbstractDType = {
+    {{{
+        PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
+        .tp_basicsize = sizeof(PyArray_DTypeMeta),
+        .tp_name = "numpy.PyIntBaseAbstractDType",
+        .tp_base = &PyArrayDescr_Type,
     },},},
     .minimum = NULL,
     .maximum = NULL,
 };
 
-NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyFloatAbstractDType = {{{{
-    PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
-    .tp_basicsize = sizeof(PyArray_DTypeMeta),
-    .tp_name = "numpy.PyFloatBaseAbstractDType",
-    .tp_base = &PyArrayDescr_Type,
+
+NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyFloatAbstractDType = {
+    {{{
+        PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
+        .tp_basicsize = sizeof(PyArray_DTypeMeta),
+        .tp_name = "numpy.PyFloatBaseAbstractDType",
+        .tp_base = &PyArrayDescr_Type,
     },},},
     .minimum = NULL,
     .maximum = NULL,
 };
 
-NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyComplexAbstractDType = {{{{
-    PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
-    .tp_basicsize = sizeof(PyArray_DTypeMeta),
-    .tp_name = "numpy.PyComplexBaseAbstractDType",
-    .tp_base = &PyArrayDescr_Type,
+
+NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyComplexAbstractDType = {
+    {{{
+        PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
+        .tp_basicsize = sizeof(PyArray_DTypeMeta),
+        .tp_name = "numpy.PyComplexBaseAbstractDType",
+        .tp_base = &PyArrayDescr_Type,
     },},},
     .minimum = NULL,  /* Real or complex part minimum/maximum... */
     .maximum = NULL,
 };
 
+
+NPY_NO_EXPORT PyTypeObject PyArrayAbstractObjDTypeMeta_Type = {
+        PyVarObject_HEAD_INIT(NULL, 0)
+        .tp_name = "numpy._AbstractObjDTypeMeta",
+        .tp_basicsize = sizeof(PyArray_PyValueAbstractDType),
+        /* methods */
+        .tp_dealloc = (destructor)abstractobjdtypemeta_dealloc,
+        .tp_flags = Py_TPFLAGS_DEFAULT,
+        .tp_doc = "Helper MetaClass for value based casting AbstractDTypes.",
+        .tp_base = &PyArrayDTypeMeta_Type,
+        //.tp_init = (initproc)dtypemeta_init,
+        //.tp_new = dtypemeta_new,
+};
+
+#undef ABSTRACTDTYPE_CACHE_SIZE
