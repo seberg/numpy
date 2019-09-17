@@ -186,7 +186,7 @@ static PyArray_DTypeMeta*
 discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj)
 {
     PyArray_DTypeMeta *dtype;
-    /* Used a cached instance if possible: */
+    /* Used a cached instance if possible (should be hit practically always) */
     for (int i = 0; i < ABSTRACTDTYPE_CACHE_SIZE; i++) {
         if (pyint_abstractdtype_cache[i] != NULL) {
             dtype = (PyArray_DTypeMeta *)PyObject_Init(
@@ -253,7 +253,7 @@ abstractobjdtypemeta_dealloc(PyArray_PyValueAbstractDType *self) {
     Py_XDECREF(self->maximum);
     self->minimum = NULL;
     self->maximum = NULL;
-    if (((PyTypeObject *)self)->tp_base == (PyTypeObject *)&PyArray_PyFloatAbstractDType) {
+    if (((PyTypeObject *)self)->tp_base == (PyTypeObject *)&PyArray_PyIntAbstractDType) {
         for (int i = 0; i < ABSTRACTDTYPE_CACHE_SIZE; i++) {
             if (pyint_abstractdtype_cache[i] == NULL) {
                 pyint_abstractdtype_cache[i] = (PyObject *)self;

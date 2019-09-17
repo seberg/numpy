@@ -228,6 +228,14 @@ legacy_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
     return common;
 }
 
+static PyArray_DTypeMeta*
+object_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
+{
+    /* Object dtype always wins boojah! */
+    Py_INCREF(cls);
+    return cls;
+}
+
 static PyArray_Descr*
 legacy_common_instance(
         PyArray_DTypeMeta *cls, PyArray_Descr *descr1, PyArray_Descr *descr2)
@@ -305,7 +313,12 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     dtype_class->dt_slots->can_cast_to_other = legacy_can_cast_to;
     dtype_class->dt_slots->can_cast_from_other = legacy_can_cast_from;
 
-    dtype_class->dt_slots->common_dtype = legacy_common_dtype;
+    if (dtype_class->type_num == NPY_OBJECT) {
+        dtype_class->dt_slots->common_dtype = object_common_dtype;
+    }
+    else {
+        dtype_class->dt_slots->common_dtype = legacy_common_dtype;
+    }
     if (dtype_class->flexible) {
         /* Common instance is only necessary for flexible dtypes */
         dtype_class->dt_slots->common_instance = legacy_common_instance;

@@ -4097,12 +4097,27 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *obj)
     PyArray_DTypeMeta *out_dtype = NULL;
     int out_dims;
     int max_dims = NPY_MAXDIMS;
+    npy_intp shape[NPY_MAXDIMS];
 
-    out_dims = PyArray_DiscoverDTypeFromObject(obj, max_dims, 0, &out_dtype);
+    out_dims = PyArray_DiscoverDTypeFromObject(
+            obj, max_dims, 0, &out_dtype, shape);
     if (out_dims < 0) {
         return NULL;
     }
-    return Py_BuildValue("iN", out_dims, (PyObject *)out_dtype);
+    PyObject *shape_tup = PyTuple_New(out_dims);
+    if (shape_tup == NULL) {
+        Py_DECREF(out_dtype);
+        return NULL;
+    }
+    for (int i = 0; i < out_dims; i++) {
+        PyTuple_SET_ITEM(shape_tup, i, PyLong_FromLongLong(shape[i]));
+        if (PyTuple_GET_ITEM(shape_tup, i) == NULL) {
+            Py_DECREF(shape_tup);  // TODO: Is this OK to not clean more?
+            Py_DECREF(out_dtype);
+            return NULL;
+        }
+    }
+    return Py_BuildValue("NN", shape_tup, (PyObject *)out_dtype);
 }
 
 static struct PyMethodDef array_module_methods[] = {

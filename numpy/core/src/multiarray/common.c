@@ -1188,6 +1188,36 @@ new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
 }
 
 
+static int
+update_shape(int curr_dims, int *max_dims,
+             npy_intp out_shape[NPY_MAXDIMS], int new_dims,
+             npy_intp new_shape[NPY_MAXDIMS])
+{
+    int success = 0;  /* unsuccessful if array is ragged */
+    if (curr_dims + new_dims > *max_dims) {
+        success = -1;
+        /* Only update check as many dims as possible */
+        new_dims = *max_dims - curr_dims;
+    }
+    else {
+        *max_dims = curr_dims + new_dims;
+    }
+    for (int i = 0; i < new_dims; i++) {
+        npy_intp curr_dim = out_shape[i + curr_dims];
+        npy_intp new_dim = new_shape[i];
+        if (curr_dim == -1) {
+            out_shape[i + curr_dims] = new_dim;
+        }
+        else if (new_dim != curr_dim) {
+            /* The array is ragged, and this dimension is unusable already */
+            success = -1;
+            *max_dims -= i + 1;
+            break;
+        }
+    }
+    return success;
+}
+
 // TODO: We want two different modes here to catch the special cases where
 //       used to use make use of value based casting (i.e. 0D arrays), and
 //       the other one for array coercion, where we do not do this normally.
@@ -1204,17 +1234,24 @@ new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
 NPY_NO_EXPORT int
 PyArray_DiscoverDTypeFromObject(
         PyObject *obj, int max_dims, int curr_dims,
-        PyArray_DTypeMeta **out_dtype)
+        PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS])
 {
     PyArray_DTypeMeta *dtype = NULL;
     PyArray_Descr *descriptor = NULL;
 
     static PyTypeObject *prev_type;
     static PyArray_DTypeMeta *prev_dtype;
+
+    /* Do housekeeping for the initial call in the recursion: */
     if (curr_dims == 0) {
         /* Clear the static cache of which types we have already seen */
         prev_type = NULL;
         prev_dtype = NULL;
+
+        /* initialize shape for shape discovery */
+        for (int i = 0; i < max_dims; i++) {
+            out_shape[i] = -1;
+        }
     }
 
     if (prev_type == Py_TYPE(obj)) {
@@ -1229,6 +1266,11 @@ PyArray_DiscoverDTypeFromObject(
         /* Cache that we have discovered the dtype class: */
         prev_type = Py_TYPE(obj);
         prev_dtype = dtype;
+
+        if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL) < 0) {
+            goto ragged_array;
+        }
+
         // TODO: At least if the below does not return an abstract dtype
         //       we could cache that directly. Otherwise, it is possible,
         //       but requires that the returned dtype implements discovery.
@@ -1246,6 +1288,11 @@ PyArray_DiscoverDTypeFromObject(
 
     /* Check if it's an ndarray */
     if (PyArray_Check(obj)) {
+        if (update_shape(curr_dims, &max_dims, out_shape,
+                         PyArray_NDIM(obj),
+                         PyArray_SHAPE((PyArrayObject *)obj)) < 0) {
+            goto ragged_array;
+        }
         descriptor = PyArray_DESCR((PyArrayObject *)obj);
         dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
         Py_INCREF(dtype);
@@ -1256,6 +1303,9 @@ PyArray_DiscoverDTypeFromObject(
     /* Check if it's a NumPy scalar */
     // TODO: Should be found before, unless a subclass, wihich is no good?
     if (PyArray_IsScalar(obj, Generic)) {
+        if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL) < 0) {
+            goto ragged_array;
+        }
         descriptor = PyArray_DescrFromScalar(obj);
         if (descriptor == NULL) {
             goto fail;
@@ -1274,6 +1324,9 @@ PyArray_DiscoverDTypeFromObject(
     /* Check if it's a Python scalar */
     descriptor = _array_find_python_scalar_type(obj);
     if (descriptor != NULL) {
+        if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL) < 0) {
+            goto ragged_array;
+        }
         dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
         Py_INCREF(dtype);
         Py_DECREF(descriptor);
@@ -1281,27 +1334,34 @@ PyArray_DiscoverDTypeFromObject(
         prev_dtype = dtype;
         goto promote_types;
     }
-
     /* Check if it's an ASCII string */
-    if (PyBytes_Check(obj)) {
-        PyErr_SetString(PyExc_NotImplementedError,
-                "this is not yet implemented, and should not really happen much.");
-        goto fail;
-    }
+    {
+        // TODO: These must remain as fallbacks for subclasses (Deprecate)
+        if (PyBytes_Check(obj)) {
+            PyErr_SetString(PyExc_NotImplementedError,
+                            "this is not yet implemented, and should not really happen much.");
+            goto fail;
+        }
 
-    /* Check if it's a Unicode string */
-    if (PyUnicode_Check(obj)) {
-        PyErr_SetString(PyExc_NotImplementedError,
-                "this is not yet implemented, and should not really happen much.");
-        goto fail;
+        /* Check if it's a Unicode string */
+        if (PyUnicode_Check(obj)) {
+            PyErr_SetString(PyExc_NotImplementedError,
+                            "this is not yet implemented, and should not really happen much.");
+            goto fail;
+        }
     }
 
     {
         PyObject *tmp = _array_from_array_like(obj,  /* requested_dtype */ NULL,
                                                NPY_FALSE, /* context */ NULL);
         if (tmp != Py_NotImplemented) {
+            if (update_shape(curr_dims, &max_dims, out_shape,
+                             PyArray_NDIM(tmp),
+                             PyArray_SHAPE((PyArrayObject *)tmp)) < 0) {
+                Py_DECREF(tmp);
+                goto ragged_array;
+            }
             descriptor = PyArray_DESCR(tmp);
-            curr_dims += PyArray_NDIM(tmp);
             Py_DECREF(tmp);
             dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
             Py_INCREF(dtype);
@@ -1323,20 +1383,9 @@ PyArray_DiscoverDTypeFromObject(
         /* clear any PySequence_Size error which corrupts further calls */
         PyErr_Clear();
 
-        if (*out_dtype == NULL || (*out_dtype)->type_num != NPY_OBJECT) {
-            // TODO: We may want to add a deprecation warning in this path,
-            //       in generally, object should probably never happen without
-            //       the user asking for it specifically.
-            Py_XDECREF(*out_dtype);
-            descriptor = PyArray_DescrFromType(NPY_OBJECT);
-            dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
-            Py_INCREF(dtype);
-            Py_DECREF(descriptor);
-            if (*out_dtype == NULL) {
-                return -1;
-            }
-        }
-        return curr_dims;
+        /* This branch always leads to a ragged array */
+        update_shape(curr_dims, &max_dims, out_shape, 0, NULL);
+        goto ragged_array;
     }
 
     /*
@@ -1350,15 +1399,18 @@ PyArray_DiscoverDTypeFromObject(
 
     // TODO: Old case checked if there was only a single type present
     //       to optimize (super fast path for floats, bools, and complex)
-    Py_ssize_t  size = PySequence_Fast_GET_SIZE(seq);
+    npy_intp size = PySequence_Fast_GET_SIZE(seq);
     PyObject **objects = PySequence_Fast_ITEMS(seq);
-    /* Recursive call for each sequence item */
-    if (size == 0) {
-        // TODO,XXX: This blocks `np.array([np.empty((0,3)), []])`, but that
-        //           is legacy behaviour and probably OK...
-        max_dims = curr_dims + 1;
+
+    int max_dims_copy = max_dims;  /* Do not update max_dims here. */
+    if (update_shape(curr_dims, &max_dims_copy,
+                     out_shape, 1, &size) < 0) {
+        /* But do update, if there this is a ragged case */
+        max_dims = max_dims_copy;
+        goto ragged_array;
     }
-    npy_bool max_dims_found = NPY_FALSE;
+
+    /* Recursive call for each sequence item */
     for (Py_ssize_t i = 0; i < size; ++i) {
         /*
          * Discover each item, which could also be a sequence, so we store
@@ -1366,22 +1418,11 @@ PyArray_DiscoverDTypeFromObject(
          * ragged arrays). Do this by adjust max_dims.
          * TODO: Check that this is really identical (enough)
          */
-        int new_dims = PyArray_DiscoverDTypeFromObject(
-                objects[i], max_dims, curr_dims + 1, out_dtype);
-        if (new_dims != max_dims) {
-            max_dims = new_dims < max_dims ? new_dims : max_dims;
-            if (max_dims_found) {
-                /* This is a ragged array */
-                // TODO: Set deprecation warning or maybe error message?!
-                Py_XDECREF(*out_dtype);
-                descriptor = PyArray_DescrFromType(NPY_OBJECT);
-                dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
-                Py_INCREF(dtype);
-                Py_DECREF(descriptor);
-            }
-            max_dims_found = NPY_TRUE;
-        }
-        if (new_dims < 0) {
+        max_dims = PyArray_DiscoverDTypeFromObject(
+                objects[i], max_dims, curr_dims + 1,
+                out_dtype, out_shape);
+        if (max_dims < 0) {
+            // TODO: if max_dims <= curr_dims + 1, we got ragged and cans top
             Py_DECREF(seq);
             goto fail;
         }
@@ -1389,10 +1430,25 @@ PyArray_DiscoverDTypeFromObject(
     Py_DECREF(seq);
     return max_dims;
 
+ragged_array:
+    // TODO: If out_dtype and max_dims was by user, this branch here may be
+    //       taken unnecessarily.
+    if (*out_dtype == NULL || (*out_dtype)->type_num != NPY_OBJECT) {
+        // TODO: We may want to add a deprecation warning in this path,
+        //       in generally, object should probably never happen without
+        //       the user asking for it specifically.
+        Py_XDECREF(*out_dtype);
+        descriptor = PyArray_DescrFromType(NPY_OBJECT);
+        *out_dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+        Py_INCREF(*out_dtype);
+        Py_DECREF(descriptor);
+    }
+    return max_dims;
+
 promote_types:
     if (*out_dtype == NULL) {
         *out_dtype = dtype;
-        return curr_dims;
+        return max_dims;
     }
     Py_SETREF(*out_dtype, PyArray_PromoteDTypes(*out_dtype, dtype));
     Py_DECREF(dtype);
@@ -1402,7 +1458,7 @@ promote_types:
     // TODO: Only the single object/0D case may use minimal dtype, so in
     //       principle here (and even above), we could convert abstract
     //       DTypes using their default (or even tell them to give the default).
-    return curr_dims;
+    return max_dims;
 
 fail:
     Py_XDECREF(*out_dtype);

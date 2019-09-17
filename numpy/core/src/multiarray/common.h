@@ -342,6 +342,6 @@ new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
 NPY_NO_EXPORT int
 PyArray_DiscoverDTypeFromObject(
         PyObject *obj, int max_dims, int curr_dims,
-        PyArray_DTypeMeta **out_dtype);
+        PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS]);
 
 #endif
