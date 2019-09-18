@@ -300,6 +300,25 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     // Just hold on to a reference to name:
     ((PyTypeObject *)dtype_class)->tp_name = dtype->typeobj->tp_name;
 
+    if (dtype_class->type_num == NPY_STRING) {
+        int success = PyDict_SetItem(
+                PyArrayDTypeMeta_associated_types,
+                (PyObject *)&PyString_Type, (PyObject *)dtype_class);
+        if (success < 0) {
+            // TODO: Need to clean up in this unlikely event.
+            return -1;
+        }
+    }
+    else if (dtype_class->type_num == NPY_UNICODE) {
+        int success = PyDict_SetItem(
+                PyArrayDTypeMeta_associated_types,
+                (PyObject *)&PyUnicode_Type, (PyObject *)dtype_class);
+        if (success < 0) {
+            // TODO: Need to clean up in this unlikely event.
+            return -1;
+        }
+    }
+
     dtype_class->dt_slots = dt_slots;
 
     dtype_class->dt_slots->default_descr = legacy_default_descr;
@@ -484,6 +503,7 @@ PyArray_InitDTypeMetaFromSpec(
     }
 
     for (Py_ssize_t i = 0; i < PyTuple_Size(associated_python_types); i++) {
+        // TODO: Not currently stored on the DType itself, maybe OK?
         int success;
         PyObject *typeobj = PyTuple_GetItem(associated_python_types, i);
 

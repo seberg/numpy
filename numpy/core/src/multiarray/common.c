@@ -1191,7 +1191,7 @@ new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
 static int
 update_shape(int curr_dims, int *max_dims,
              npy_intp out_shape[NPY_MAXDIMS], int new_dims,
-             npy_intp new_shape[NPY_MAXDIMS])
+             const npy_intp new_shape[NPY_MAXDIMS])
 {
     int success = 0;  /* unsuccessful if array is ragged */
     if (curr_dims + new_dims > *max_dims) {
@@ -1199,8 +1199,13 @@ update_shape(int curr_dims, int *max_dims,
         /* Only update check as many dims as possible */
         new_dims = *max_dims - curr_dims;
     }
-    else {
+    else if (*max_dims != curr_dims + new_dims) {
+        /* Shrink max dims */
         *max_dims = curr_dims + new_dims;
+        /* If a shape was already set, this is also ragged */
+        if (out_shape[*max_dims] >= 0) {
+            success = -1;
+        }
     }
     for (int i = 0; i < new_dims; i++) {
         npy_intp curr_dim = out_shape[i + curr_dims];
@@ -1224,10 +1229,10 @@ update_shape(int curr_dims, int *max_dims,
 //       (although possibly that part will naturally go somewhere else.)
 /*
  * Internal helper to find the correct DType (class). Must be called with
- * `curr_dim = 0`. Returns the maximum reached depth and negative number
+ * `curr_dim = 0`. Returns the maximum reached depth and a negative number
  * on failure. `out_dtype` is NULL on error, otherwise a reference to a DType
- * class. Note that the maximum reached depth is not changed if empty sequences
- * are found.
+ * class.
+ * The function fills in the resulting shape in `out_shape`.
  * The caller may get an abstract dtype returned, at which point it is may
  * be necessary to convert it.
  */
@@ -1296,7 +1301,6 @@ PyArray_DiscoverDTypeFromObject(
         descriptor = PyArray_DESCR((PyArrayObject *)obj);
         dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
         Py_INCREF(dtype);
-        curr_dims += PyArray_NDIM(obj);
         goto promote_types;
     }
 
@@ -1378,8 +1382,7 @@ PyArray_DiscoverDTypeFromObject(
      * be treated as objects, and they expect numpy to treat it as an object if
      * __len__ is not defined.
      */
-    if (max_dims - curr_dims == 0 ||
-                !PySequence_Check(obj) || PySequence_Size(obj) < 0) {
+    if (!PySequence_Check(obj) || PySequence_Size(obj) < 0) {
         /* clear any PySequence_Size error which corrupts further calls */
         PyErr_Clear();
 
@@ -1412,17 +1415,11 @@ PyArray_DiscoverDTypeFromObject(
 
     /* Recursive call for each sequence item */
     for (Py_ssize_t i = 0; i < size; ++i) {
-        /*
-         * Discover each item, which could also be a sequence, so we store
-         * the smallest dimension that was found (in principle allowing
-         * ragged arrays). Do this by adjust max_dims.
-         * TODO: Check that this is really identical (enough)
-         */
         max_dims = PyArray_DiscoverDTypeFromObject(
                 objects[i], max_dims, curr_dims + 1,
                 out_dtype, out_shape);
+        // NOTE: If there is a ragged array found (NPY_OBJECT) could break
         if (max_dims < 0) {
-            // TODO: if max_dims <= curr_dims + 1, we got ragged and cans top
             Py_DECREF(seq);
             goto fail;
         }
@@ -1431,12 +1428,11 @@ PyArray_DiscoverDTypeFromObject(
     return max_dims;
 
 ragged_array:
-    // TODO: If out_dtype and max_dims was by user, this branch here may be
-    //       taken unnecessarily.
+    // TODO: We may want to add a deprecation warning in this path,
+    //       in generally, object should probably never happen without
+    //       the user asking for it specifically.
+    // NOTE: Users can probably supply max_dims and out_dtype.
     if (*out_dtype == NULL || (*out_dtype)->type_num != NPY_OBJECT) {
-        // TODO: We may want to add a deprecation warning in this path,
-        //       in generally, object should probably never happen without
-        //       the user asking for it specifically.
         Py_XDECREF(*out_dtype);
         descriptor = PyArray_DescrFromType(NPY_OBJECT);
         *out_dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
