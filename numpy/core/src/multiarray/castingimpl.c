@@ -52,8 +52,8 @@ static int adjust_two_descriptors_within_dtype(
     }
     Py_INCREF(in_descrs[0]);
     out_descrs[0] = in_descrs[0];
-    Py_INCREF(in_descrs[1]);
-    out_descrs[1] = in_descrs[1];
+    Py_INCREF(in_descrs[0]);
+    out_descrs[1] = in_descrs[0];
     
     return 0;
 }

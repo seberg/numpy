@@ -205,6 +205,57 @@ legacy_common_instance(
     return PyArray_LegacyPromoteTypes(descr1, descr2);
 }
 
+static PyArray_Descr *
+string_discover_descr_from_pyobject(
+        PyArray_DTypeMeta *cls, PyObject *obj)
+{
+    /* We disallow sequences during settings, so do it here as well */
+    // TODO: If we have a ragged array, we could never go here, since strings
+    //       will not support this anyway. This way, such an array could
+    //       create a huge intermediate before actually erroring out, but OK.
+    Py_ssize_t length;
+    if (PyBytes_Check(obj)) {
+        length = PyString_GET_SIZE(obj);
+        if (cls->type_num == NPY_UNICODE) {
+            length *= 4;
+        }
+    }
+    else {
+        PyObject * str = PyObject_Str(obj);
+        if (str == NULL) {
+            // TODO: Probably might as well just raise the error here?
+            PyErr_Clear();
+            return cls->dt_slots->default_descr(cls);
+        }
+        if (cls->type_num == NPY_STRING) {
+            length = PyUnicode_GetLength(str);
+        } else {
+            assert(cls->type_num == NPY_UNICODE);
+            length = PyUnicode_GET_DATA_SIZE(str);
+#ifndef Py_UNICODE_WIDE
+            length <<= 1;
+#endif
+        }
+        Py_DECREF(str);
+        if (length > NPY_MAX_INT) {
+            PyErr_SetString(PyExc_TypeError,
+                            "string representation of object is too large to store "
+                            "as NumPy string fixed width string.");
+            return NULL;
+        }
+    }
+    if (length == 0) {
+        // TODO: Legacy behaviour of not allowing empty strings!
+        length = cls->type_num == NPY_UNICODE ? 4 : 1;
+    }
+    PyArray_Descr *descr = PyArray_DescrNewFromType(cls->type_num);
+    if (descr == NULL) {
+        return NULL;
+    }
+    descr->elsize = (int)length;
+    return descr;
+}
+
 /*
  * This is brutal. Because it seems tricky to do otherwise, use
  * the static full Python API on malloc allocated objects, so that they
@@ -270,8 +321,16 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
         // TODO: Need to clean up in this unlikely event.
         return -1;
     }
-
     // For now, also register string dtypes (datetimes/timedeleta may be one)
+    if (dtype_class->type_num == NPY_BOOL) {
+        success = PyDict_SetItem(
+                PyArrayDTypeMeta_associated_types,
+                (PyObject *)&PyBool_Type, (PyObject *)dtype_class);
+        if (success < 0) {
+            // TODO: Need to clean up in this unlikely event.
+            return -1;
+        }
+    }
     if (dtype_class->type_num == NPY_STRING) {
         success = PyDict_SetItem(
                 PyArrayDTypeMeta_associated_types,
@@ -296,6 +355,11 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     dtype_class->dt_slots->default_descr = legacy_default_descr;
     dtype_class->dt_slots->discover_descr_from_pyobject =
                 discover_descr_using_default;
+    if (dtype_class->type_num == NPY_STRING ||
+                    dtype_class->type_num == NPY_UNICODE) {
+        dtype_class->dt_slots->discover_descr_from_pyobject =
+                string_discover_descr_from_pyobject;
+    }
     
     dtype_class->dt_slots->within_dtype_castingimpl = (
             (CastingImpl *)castingimpl_legacynew(dtype_class, dtype_class));
@@ -445,7 +509,7 @@ PyArray_InitDTypeMetaFromSpec(
             dt_slots->discover_dtype_from_pytype =
                     (dtype_from_discovery_function *)slot->pfunc;
             continue;
-        case NPY_discover_descr_from_pyobject
+            case NPY_discover_descr_from_pyobject:
             dt_slots->discover_descr_from_pyobject =
                     (descr_from_discovery_function *)slot->pfunc;
             continue;

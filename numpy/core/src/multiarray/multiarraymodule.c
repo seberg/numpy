@@ -4116,22 +4116,59 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs)
             shape, use_minimal,
             &coercion_cache, &single_or_no_element, NULL, NULL);
     if (out_dims < 0) {
-        if (coercion_cache != NULL) {
-            npy_free_coercion_cache(coercion_cache);
-        }
+        npy_free_coercion_cache(coercion_cache);
         return NULL;
     }
+
+    PyObject *out_descriptor = NULL;
     if (out_dtype == NULL) {
         out_dtype = Py_None;
         Py_INCREF(out_dtype);
+        out_descriptor = Py_None;
+        Py_INCREF(out_descriptor);
     }
-    if (coercion_cache != NULL) {
-        npy_free_coercion_cache(coercion_cache);
+    else {
+        if (((PyArray_DTypeMeta *)out_dtype)->abstract) {
+            /*
+             * AbstractDTypes cannot work here for coercion, they must
+             * be resolved now. Casting is possible but we may need many casts
+             * here, so the situation is different. The AbstractDType already
+             * had a chance to look at things.
+             */
+            PyArray_DTypeMeta *abstract_dtype = ((PyArray_DTypeMeta *)out_dtype);
+            PyArray_DTypeMeta *concrete_dtype;
+            if (use_minimal) {
+                concrete_dtype = abstract_dtype->dt_slots->minimal_dtype(
+                        abstract_dtype);
+            }
+            else {
+                concrete_dtype = abstract_dtype->dt_slots->default_dtype(
+                        abstract_dtype);
+            }
+            Py_DECREF(abstract_dtype);
+            out_dtype = (PyObject *)concrete_dtype;
+            if (out_dtype == NULL) {
+                npy_free_coercion_cache(coercion_cache);
+                return NULL;
+            }
+            assert(!concrete_dtype->abstract);
+        }
+        int success = PyArray_DiscoverDescriptorFromObject(
+                obj, (PyArray_Descr **)&out_descriptor,
+                coercion_cache,
+                single_or_no_element, (PyArray_DTypeMeta *)out_dtype);
+        if (success < 0) {
+            npy_free_coercion_cache(coercion_cache);
+            Py_DECREF(out_dtype);
+            return NULL;
+        }
     }
+    npy_free_coercion_cache(coercion_cache);
     // TODO: May want to get rid of remaining AbstractDTypes (depending on use)
     //       specifically, if use_minimal is not True.
     PyObject *shape_tup = PyTuple_New(out_dims);
     if (shape_tup == NULL) {
+        Py_DECREF(out_descriptor);
         Py_DECREF(out_dtype);
         return NULL;
     }
@@ -4139,12 +4176,14 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs)
         PyTuple_SET_ITEM(shape_tup, i, PyLong_FromLongLong(shape[i]));
         if (PyTuple_GET_ITEM(shape_tup, i) == NULL) {
             Py_DECREF(shape_tup);  // TODO: Is this OK to not clean more?
+            Py_DECREF(out_descriptor);
             Py_DECREF(out_dtype);
             return NULL;
         }
     }
-    return Py_BuildValue("NNi", shape_tup, out_dtype,
-                         (int)single_or_no_element);
+
+    return Py_BuildValue("NNiN", shape_tup, out_dtype,
+                         (int)single_or_no_element, out_descriptor);
 }
 
 static struct PyMethodDef array_module_methods[] = {

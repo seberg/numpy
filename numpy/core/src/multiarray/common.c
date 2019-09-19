@@ -1391,8 +1391,6 @@ PyArray_DiscoverDTypeFromObject(
         dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
         Py_INCREF(dtype);
         Py_DECREF(descriptor);
-        prev_type = Py_TYPE(obj);
-        prev_dtype = dtype;
         goto promote_types;
     }
     /* Check if it's an ASCII string */
@@ -1529,7 +1527,15 @@ promote_types:
     Py_SETREF(*out_dtype, PyArray_PromoteDTypes(*out_dtype, dtype));
     Py_DECREF(dtype);
     if (*out_dtype == NULL) {
-        return -1;
+        PyErr_Clear();
+        /*
+         * Fallback to object, at this point this is OK, later on an error
+         * should likely be raised if the user did not provide a DType.
+         */
+        descriptor = PyArray_DescrFromType(NPY_OBJECT);
+        *out_dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+        Py_INCREF(*out_dtype);
+        Py_DECREF(descriptor);
     }
     return max_dims;
 
@@ -1540,29 +1546,77 @@ fail:
 }
 
 
-NPY_NO_EXPORT int
+static int
 PyArray_DiscoverDescriptorFromObjectRecursive(
-        PyObject *obj, int max_dims, npy_intp out_shape[NPY_MAXDIMS],
+        PyObject *obj,
         PyArray_Descr **out_descr, coercion_cache_obj **coercion_cache,
-        PyArray_DTypeMeta *dtype)
+        PyArray_DTypeMeta *dtype,
+        PyTypeObject **last_dtype, CastingImpl **last_castingimpl)
 {
-    PyArray_Descr *descr;
     coercion_cache_obj *cache = *coercion_cache;
-    if (obj == cache->converted_obj) {
+    PyArray_Descr *descr;
+
+    if (cache != NULL && obj == cache->converted_obj) {
+        /* Advance the coercion_cache linked list. This one is now used. */
+        *coercion_cache = cache->next;
+
         if (cache->sequence) {
             PyObject *seq = cache->arr_or_sequence;
             npy_intp size = PySequence_Fast_GET_SIZE(seq);
             PyObject **objects = PySequence_Fast_ITEMS(seq);
             for (npy_intp i = 0; i < size; i++) {
                 int res = PyArray_DiscoverDescriptorFromObjectRecursive(
-                        obj, max_dims, out_shape, out_descr, coercion_cache, dtype);
+                        objects[i], out_descr, coercion_cache,
+                        dtype, last_dtype, last_castingimpl);
                 if (res < 0) {
                     return -1;
                 }
             }
+            /* No need to find the common descriptor instance */
+            return 0;
         }
         else {
             descr = PyArray_DESCR(cache->arr_or_sequence);
+            Py_INCREF(descr);
+            if (Py_TYPE(descr) != (PyTypeObject *) dtype) {
+                /*
+                 * If this is not an instance of the correct dtype class,
+                 * need to use the CastingImpl to find the correct descriptor.
+                 */
+                CastingImpl *casting_impl;
+                if (Py_TYPE(descr) == *last_dtype) {
+                    casting_impl = *last_castingimpl;
+                    Py_INCREF(casting_impl);
+                } else {
+                    casting_impl = get_casting_impl(
+                            (PyArray_DTypeMeta *) Py_TYPE(descr), dtype,
+                            NPY_UNSAFE_CASTING);
+                    if (casting_impl == NULL) {
+                        // TODO: Should use a goto fail probably.
+                        Py_DECREF(descr);
+                        Py_XDECREF(*out_descr);
+                        *out_descr = NULL;
+                        return -1;
+                    }
+                    /* replace the cached casting impl */
+                    Py_XSETREF(*last_dtype, Py_TYPE(descr));
+                    Py_XSETREF(*last_castingimpl, casting_impl);
+                }
+
+                PyArray_Descr * in_descrs[2] = {descr, NULL};
+                PyArray_Descr * out_descrs[2];
+                int success = casting_impl->adjust_descriptors(
+                        casting_impl, in_descrs, out_descrs, NPY_UNSAFE_CASTING);
+                if (success < 0) {
+                    Py_DECREF(descr);
+                    Py_XDECREF(*out_descr);
+                    *out_descr = NULL;
+                    return -1;
+                }
+                Py_DECREF(descr);
+                descr = out_descrs[1];
+                Py_DECREF(out_descrs[0]);
+            }
         }
     }
     else {
@@ -1570,14 +1624,30 @@ PyArray_DiscoverDescriptorFromObjectRecursive(
         if (descr == NULL) {
             Py_XDECREF(*out_descr);
             *out_descr = NULL;
+            return -1;
         }
     }
+    if (*out_descr == NULL) {
+        *out_descr = descr;
+        return 0;
+    }
+    /* We still need to find the common dtype/descriptor instance */
+    PyArray_Descr *common_descr = dtype->dt_slots->common_instance(dtype,
+            *out_descr, descr);
+    Py_DECREF(descr);
+    Py_DECREF(*out_descr);
+    if (common_descr == NULL) {
+        *out_descr = NULL;
+        return -1;
+    }
+    *out_descr = common_descr;
+    return 0;
 }
 
 NPY_NO_EXPORT int
 PyArray_DiscoverDescriptorFromObject(
-        PyObject *obj, int max_dims, npy_intp out_shape[NPY_MAXDIMS],
-        PyArray_Descr **out_descr, coercion_cache_obj **coercion_cache,
+        PyObject *obj,
+        PyArray_Descr **out_descr, coercion_cache_obj *coercion_cache,
         npy_bool single_or_no_element, PyArray_DTypeMeta *dtype)
 {
     *out_descr = NULL;
@@ -1597,6 +1667,12 @@ PyArray_DiscoverDescriptorFromObject(
         }
         /* There is a single element somewhere, it may have a descr. */
     }
-    return PyArray_DiscoverDescriptorFromObjectRecursive(
-            obj, max_dims, out_shape, out_descr, coercion_cache, dtype);
+    PyTypeObject *last_dtype = NULL;
+    CastingImpl *last_castingimpl = NULL;
+    int res = PyArray_DiscoverDescriptorFromObjectRecursive(
+            obj, out_descr, &coercion_cache, dtype,
+            &last_dtype, &last_castingimpl);
+    Py_XDECREF(last_dtype);
+    Py_XDECREF(last_castingimpl);
+    return res;
 }

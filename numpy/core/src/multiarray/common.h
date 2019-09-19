@@ -369,4 +369,11 @@ PyArray_DiscoverDTypeFromObject(
         /* These two are solely for the __array__ attribute */
         PyArray_Descr *requested_dtype, PyObject *context);
 
+NPY_NO_EXPORT int
+PyArray_DiscoverDescriptorFromObject(
+        PyObject *obj,
+        PyArray_Descr **out_descr, coercion_cache_obj *coercion_cache,
+        npy_bool single_or_no_element, PyArray_DTypeMeta *dtype);
+
+
 #endif
