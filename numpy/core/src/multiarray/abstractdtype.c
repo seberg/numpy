@@ -11,6 +11,8 @@
 #include "abstractdtype.h"
 #include "common.h"
 
+#include <numpy/npy_3kcompat.h>
+
 
 /*
  * A very short cache, normally we should only have two at once really,
@@ -168,20 +170,38 @@ fail:
     return NULL;
 }
 
-static PyArray_DTypeMeta *
-default_dtype_int(PyArray_DTypeMeta *cls) {
-    /*
-     * Use the same code as in the default version directly, checking the
-     * size...
-     */
-    PyArray_DTypeMeta *dtype;
-    PyObject *maximum = ((PyArray_PyValueAbstractDType *)cls)->maximum;
-    PyObject *minimum = ((PyArray_PyValueAbstractDType *)cls)->minimum;
-
-    int overflow;
+static int test_long(PyObject *obj)
+{
     long res;
-    res = PyLong_AsLongAndOverflow(minimum, &overflow);
+    int overflow;
+    res = PyLong_AsLongAndOverflow(obj, &overflow);
     if (error_converting(res)) {
+        /* Should be impossible, so fall through and trust it happens again. */
+        PyErr_Clear();
+        return -1;
+    }
+    return overflow;
+}
+
+static PyArray_DTypeMeta *
+get_default_int_dtype(PyObject *minimum, PyObject *maximum)
+{
+    PyArray_DTypeMeta *dtype;
+    PyArray_Descr *descriptor;
+
+    if ((test_long(maximum) == 0) &&
+            ((minimum == maximum) || (test_long(minimum) == 0))) {
+        /* A long is sufficient (if long is long long we do extra work below) */
+        descriptor = PyArray_DescrFromType(NPY_LONG);
+        goto finish;
+    }
+
+    // TODO: Quite frankly, this path is bad enough (although the intp
+    //       path should likely be the only one, meaning whatever is int64.)
+    int overflow, unsigned_long = 0;
+    long long res;
+    res = PyLong_AsLongLongAndOverflow(maximum, &overflow);
+    if ((overflow == 0) && error_converting(res)) {
         return NULL;
     }
     if ((overflow == 0) && (minimum != maximum)) {
@@ -190,21 +210,50 @@ default_dtype_int(PyArray_DTypeMeta *cls) {
             return NULL;
         }
     }
+    if (overflow == 1) {
+        /* The result might still fit into an unsigned type */
+        // TODO: This is as horrible as the OBJECT fallback!
+        /* AsLongAndOverflow is not available, so... */
+        unsigned long long res_u = PyLong_AsUnsignedLongLong(maximum);
+        if ((res_u == (unsigned long long) - 1) && PyErr_Occurred()) {
+            /* Assume it is not a bad error, could check OverflowError... */
+            PyErr_Clear();
+            unsigned_long = 0;
+        }
+        else {
+            unsigned_long = 1;
+        }
+    }
 
-    PyArray_Descr *descriptor;
-    if (overflow == 0) {
+    if (unsigned_long) {
+        descriptor = PyArray_DescrFromType(NPY_ULONGLONG);
+    }
+    else if (overflow == 0) {
         /* No overflow occurred, we use the long type */
-        descriptor = PyArray_DescrFromType(NPY_LONG);
+        descriptor = PyArray_DescrFromType(NPY_LONGLONG);
     }
     else {
         /* Overflow occured, so we need to use Object */
         // TODO: This is a fallback that should be deprecated!
         descriptor = PyArray_DescrFromType(NPY_OBJECT);
     }
+
+finish:
     dtype = (PyArray_DTypeMeta *)Py_TYPE((PyObject *)descriptor);
     Py_INCREF(dtype);
     Py_DECREF(descriptor);
     return dtype;
+}
+
+static PyArray_DTypeMeta *
+default_dtype_int(PyArray_DTypeMeta *cls) {
+    /*
+     * Use the same code as in the default version directly, checking the
+     * size...
+     */
+    PyObject *maximum = ((PyArray_PyValueAbstractDType *)cls)->maximum;
+    PyObject *minimum = ((PyArray_PyValueAbstractDType *)cls)->minimum;
+    return get_default_int_dtype(minimum, maximum);
 }
 
 
@@ -229,25 +278,7 @@ discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj,
          * Use the same code as in the default version directly, checking the
          * size...
          */
-        int overflow;
-        long res = PyLong_AsLongAndOverflow(obj, &overflow);
-        if (error_converting(res)) {
-            return NULL;
-        }
-        PyArray_Descr *descriptor;
-        if (overflow == 0) {
-            /* No overflow occurred, we use the long type */
-            descriptor = PyArray_DescrFromType(NPY_LONG);
-        }
-        else {
-            /* Overflow occured, so we need to use Object */
-            // TODO: This is a fallback that should be deprecated!
-            descriptor = PyArray_DescrFromType(NPY_OBJECT);
-        }
-        dtype = (PyArray_DTypeMeta *)Py_TYPE((PyObject *)descriptor);
-        Py_INCREF(dtype);
-        Py_DECREF(descriptor);
-        return dtype;
+        return get_default_int_dtype(obj, obj);
     }
 
     /* Use a cached instance if possible (should be hit practically always) */

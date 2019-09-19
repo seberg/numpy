@@ -1223,10 +1223,6 @@ update_shape(int curr_dims, int *max_dims,
     return success;
 }
 
-// TODO: We want two different modes here to catch the special cases where
-//       used to use make use of value based casting (i.e. 0D arrays), and
-//       the other one for array coercion, where we do not do this normally.
-//       (although possibly that part will naturally go somewhere else.)
 /*
  * Internal helper to find the correct DType (class). Must be called with
  * `curr_dim = 0`. Returns the maximum reached depth and a negative number
@@ -1235,6 +1231,9 @@ update_shape(int curr_dims, int *max_dims,
  * The function fills in the resulting shape in `out_shape`.
  * The caller may get an abstract dtype returned, at which point it is may
  * be necessary to convert it.
+ * If `use_minimal` is set, certain abstract dtypes may return a different
+ * dtype. (e.g. a python int is always long, unsigned long or object and not
+ * and abstract dtype describing the minimal possible dtype to hold the data).
  */
 NPY_NO_EXPORT int
 PyArray_DiscoverDTypeFromObject(
