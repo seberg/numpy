@@ -1874,7 +1874,8 @@ typedef struct _PyArray_DTypeMeta *(dtype_from_dtype_function)(
             struct _PyArray_DTypeMeta *cls);
 
 typedef struct _PyArray_DTypeMeta *(dtype_from_discovery_function)(
-            struct _PyArray_DTypeMeta *cls, PyObject *obj);
+            struct _PyArray_DTypeMeta *cls, PyObject *obj,
+            npy_bool use_minimal);
 
 /*
  * This struct must remain fully opaque to the user, direct access is

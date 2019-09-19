@@ -9,6 +9,7 @@ typedef struct {
     PyArray_DTypeMeta super;
     PyObject *minimum;
     PyObject *maximum;
+    int promoted;
 } PyArray_PyValueAbstractDType;
 
 NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyIntAbstractDType;

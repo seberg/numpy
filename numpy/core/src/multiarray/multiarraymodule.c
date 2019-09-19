@@ -4092,18 +4092,30 @@ normalize_axis_index(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwds)
 }
 
 static PyObject *
-_discover_dtype(PyObject *NPY_UNUSED(self), PyObject *obj)
+_discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs)
 {
+    PyObject *obj;
     PyArray_DTypeMeta *out_dtype = NULL;
     int out_dims;
     int max_dims = NPY_MAXDIMS;
+    npy_bool use_minimal;
     npy_intp shape[NPY_MAXDIMS];
 
+    static char *kwlist[] = {"obj", "minimal", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(
+                args, kwargs, "O|O&:_discover_dtype", kwlist,
+                &obj, PyArray_BoolConverter, &use_minimal)) {
+        return NULL;
+    }
+
     out_dims = PyArray_DiscoverDTypeFromObject(
-            obj, max_dims, 0, &out_dtype, shape);
+            obj, max_dims, 0, &out_dtype, shape, use_minimal);
     if (out_dims < 0) {
         return NULL;
     }
+    // TODO: May want to get rid of remaining AbstractDTypes (depending on use)
+    //       specifically, if use_minimal is not True.
     PyObject *shape_tup = PyTuple_New(out_dims);
     if (shape_tup == NULL) {
         Py_DECREF(out_dtype);
@@ -4320,7 +4332,7 @@ static struct PyMethodDef array_module_methods[] = {
     {"_add_newdoc_ufunc", (PyCFunction)add_newdoc_ufunc,
         METH_VARARGS, NULL},
     {"_discover_dtype", (PyCFunction)_discover_dtype,
-        METH_O, NULL},
+        METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL, NULL, 0, NULL}                /* sentinel */
 };
 

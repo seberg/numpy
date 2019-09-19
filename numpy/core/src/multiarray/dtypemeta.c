@@ -275,7 +275,7 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     Py_INCREF(dtype_classobj);  // manually allocated, shouldn't matter?
     Py_TYPE(dtype) = dtype_classobj;
     // printf("Attached class to %ld\n", dtype);
-    
+
     /* Shiboken2 does this, so assume it may be necessary???? */
     //dtype->tp_weaklistoffset = offsetof(PyArray_Descr, weakreflist);
     //dtype->tp_dictoffset = offsetof(PyArray_Descr, ob_dict);
@@ -300,8 +300,18 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     // Just hold on to a reference to name:
     ((PyTypeObject *)dtype_class)->tp_name = dtype->typeobj->tp_name;
 
+    // Register the typeobject for quicker discovery globally.
+    int success = PyDict_SetItem(
+            PyArrayDTypeMeta_associated_types,
+            (PyObject *)dtype_class->typeobj, (PyObject *)dtype_class);
+    if (success < 0) {
+        // TODO: Need to clean up in this unlikely event.
+        return -1;
+    }
+
+    // For now, also register string dtypes (datetimes/timedeleta may be one)
     if (dtype_class->type_num == NPY_STRING) {
-        int success = PyDict_SetItem(
+        success = PyDict_SetItem(
                 PyArrayDTypeMeta_associated_types,
                 (PyObject *)&PyString_Type, (PyObject *)dtype_class);
         if (success < 0) {
@@ -310,7 +320,7 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
         }
     }
     else if (dtype_class->type_num == NPY_UNICODE) {
-        int success = PyDict_SetItem(
+        success = PyDict_SetItem(
                 PyArrayDTypeMeta_associated_types,
                 (PyObject *)&PyUnicode_Type, (PyObject *)dtype_class);
         if (success < 0) {

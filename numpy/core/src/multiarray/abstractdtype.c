@@ -9,6 +9,7 @@
 #include "numpy/arrayscalars.h"
 
 #include "abstractdtype.h"
+#include "common.h"
 
 
 /*
@@ -32,10 +33,9 @@ common_dtype_int(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
 
     int res_max, res_min;
 
-    /* Lets just use direct slot lookup for now: */
-    // TODO: The second cast should be unnecessary, since we need to expose it :(?
+    /* Lets just use direct slot lookup for now on the base: */
     if (((PyTypeObject *)other)->tp_base == (PyTypeObject *)&PyArray_PyIntAbstractDType) {
-        /* Modify ourself in-place and return */
+        /* We need to find the combined minimum and maximum. */
         max_other = ((PyArray_PyValueAbstractDType *)other)->maximum;
         min_other = ((PyArray_PyValueAbstractDType *)other)->minimum;
 
@@ -61,6 +61,10 @@ common_dtype_int(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
 
     /* Handle integers, a bit non-elegant, but user types are rejected above */
     if ((other->kind == 'i') || (other->kind == 'u')) {
+        // TODO: We need to store the largest DType that
+        //       was already seen (that means also when combining two of
+        //       these). Because the largest non-abstract is the smallest
+        //       allowed non-abstract!
         npy_ulonglong maximum_val = 0;
         npy_longlong minimum_val = 0;
         switch (other->type_num) {
@@ -115,6 +119,9 @@ common_dtype_int(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
             return NULL;
         }
 
+        // TODO: This modifies cls/self, even if we return other, that should
+        //       be OK, but just to note.
+        ((PyArray_PyValueAbstractDType *)cls)->promoted = 1;
         goto return_other_or_updated_minmax;
     }
 
@@ -163,30 +170,87 @@ fail:
 
 static PyArray_DTypeMeta *
 default_dtype_int(PyArray_DTypeMeta *cls) {
-    // TODO: May need to return an Object here in some cases?
-    PyArray_DTypeMeta *dtype = (PyArray_DTypeMeta *)Py_TYPE(PyArray_DescrFromType(NPY_LONG));
+    /*
+     * Use the same code as in the default version directly, checking the
+     * size...
+     */
+    PyArray_DTypeMeta *dtype;
+    PyObject *maximum = ((PyArray_PyValueAbstractDType *)cls)->maximum;
+    PyObject *minimum = ((PyArray_PyValueAbstractDType *)cls)->minimum;
+
+    int overflow;
+    long res;
+    res = PyLong_AsLongAndOverflow(minimum, &overflow);
+    if (error_converting(res)) {
+        return NULL;
+    }
+    if ((overflow == 0) && (minimum != maximum)) {
+        res = PyLong_AsLongAndOverflow(minimum, &overflow);
+        if (error_converting(res)) {
+            return NULL;
+        }
+    }
+
+    PyArray_Descr *descriptor;
+    if (overflow == 0) {
+        /* No overflow occurred, we use the long type */
+        descriptor = PyArray_DescrFromType(NPY_LONG);
+    }
+    else {
+        /* Overflow occured, so we need to use Object */
+        // TODO: This is a fallback that should be deprecated!
+        descriptor = PyArray_DescrFromType(NPY_OBJECT);
+    }
+    dtype = (PyArray_DTypeMeta *)Py_TYPE((PyObject *)descriptor);
     Py_INCREF(dtype);
+    Py_DECREF(descriptor);
     return dtype;
 }
 
 
 static PyArray_DTypeMeta *
 minimal_dtype_int(PyArray_DTypeMeta *cls) {
-    // TODO: This is incorrect, I need to return the actual minimal type.
-    // TODO: May need to think about the need of this, it may need to be
-    //       more specific for integers, at which point
-    //       the whole slot may be useless...
-    PyArray_DTypeMeta *dtype = (PyArray_DTypeMeta *)Py_TYPE(PyArray_DescrFromType(NPY_LONG));
-    Py_INCREF(dtype);
-    return dtype;
+    if (((PyArray_PyValueAbstractDType *)cls)->promoted) {
+        // TODO: In this case I should return the actual minimal type!
+        //       and not fall through to the default dtype.
+    }
+    return default_dtype_int(cls);
 }
 
 
-static PyArray_DTypeMeta*
-discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj)
+static PyArray_DTypeMeta *
+discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj,
+                          npy_bool use_minimal)
 {
     PyArray_DTypeMeta *dtype;
-    /* Used a cached instance if possible (should be hit practically always) */
+
+    if (!use_minimal) {
+        /*
+         * Use the same code as in the default version directly, checking the
+         * size...
+         */
+        int overflow;
+        long res = PyLong_AsLongAndOverflow(obj, &overflow);
+        if (error_converting(res)) {
+            return NULL;
+        }
+        PyArray_Descr *descriptor;
+        if (overflow == 0) {
+            /* No overflow occurred, we use the long type */
+            descriptor = PyArray_DescrFromType(NPY_LONG);
+        }
+        else {
+            /* Overflow occured, so we need to use Object */
+            // TODO: This is a fallback that should be deprecated!
+            descriptor = PyArray_DescrFromType(NPY_OBJECT);
+        }
+        dtype = (PyArray_DTypeMeta *)Py_TYPE((PyObject *)descriptor);
+        Py_INCREF(dtype);
+        Py_DECREF(descriptor);
+        return dtype;
+    }
+
+    /* Use a cached instance if possible (should be hit practically always) */
     for (int i = 0; i < ABSTRACTDTYPE_CACHE_SIZE; i++) {
         if (pyint_abstractdtype_cache[i] != NULL) {
             dtype = (PyArray_DTypeMeta *)PyObject_Init(
@@ -239,7 +303,8 @@ discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj)
     }
 
 finish:
-    Py_INCREF(obj);
+    ((PyArray_PyValueAbstractDType *)dtype)->promoted = 0;
+            Py_INCREF(obj);
     ((PyArray_PyValueAbstractDType *)dtype)->minimum = obj;
     Py_INCREF(obj);
     ((PyArray_PyValueAbstractDType *)dtype)->maximum = obj;
@@ -277,11 +342,7 @@ init_pyvalue_abstractdtypes()
     PyType_Ready((PyTypeObject *)&PyArray_PyIntAbstractDType);
     Py_INCREF(&PyArray_PyIntAbstractDType);
     /* All the types associated with Integers, are python ints and our ints */
-    pytypes_int = PyTuple_Pack(11,
-        &PyLong_Type, &PyByteArrType_Type, &PyShortArrType_Type,
-        &PyIntArrType_Type, &PyLongArrType_Type, &PyLongLongArrType_Type,
-        &PyUByteArrType_Type, &PyUShortArrType_Type,
-        &PyUIntArrType_Type, &PyULongArrType_Type, &PyULongLongArrType_Type);
+    pytypes_int = PyTuple_Pack(1, &PyLong_Type);
     if (pytypes_int == NULL) {
         goto fail;
     }
@@ -399,6 +460,7 @@ NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyIntAbstractDType = {
     },},},
     .minimum = NULL,
     .maximum = NULL,
+    .promoted = 0,
 };
 
 
@@ -411,6 +473,7 @@ NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyFloatAbstractDType = {
     },},},
     .minimum = NULL,
     .maximum = NULL,
+    .promoted = 0,
 };
 
 
@@ -423,6 +486,7 @@ NPY_NO_EXPORT PyArray_PyValueAbstractDType PyArray_PyComplexAbstractDType = {
     },},},
     .minimum = NULL,  /* Real or complex part minimum/maximum... */
     .maximum = NULL,
+    .promoted = 0,
 };
 
 
