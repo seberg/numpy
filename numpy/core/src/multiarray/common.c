@@ -1223,6 +1223,40 @@ update_shape(int curr_dims, int *max_dims,
     return success;
 }
 
+
+NPY_NO_EXPORT coercion_cache_obj *npy_new_coercion_cache(
+        PyObject *converted_obj, PyObject *arr_or_sequence, npy_bool sequence,
+        coercion_cache_obj **prev)
+{
+    coercion_cache_obj *cache = PyArray_malloc(sizeof(coercion_cache_obj));
+    if (cache == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+    cache->converted_obj = converted_obj;
+    Py_INCREF(arr_or_sequence);
+    cache->arr_or_sequence = arr_or_sequence;
+    cache->sequence = sequence;
+    cache->next = NULL;
+    if (*prev != NULL) {
+        (*prev)->next = cache;
+    }
+    else {
+        *prev = cache;
+    }
+    return cache;
+}
+
+NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *next) {
+    while (next != NULL) {
+        coercion_cache_obj *current = next;
+        next = current->next;
+
+        Py_DECREF(current->arr_or_sequence);
+        PyArray_free(current);
+    }
+}
+
 /*
  * Internal helper to find the correct DType (class). Must be called with
  * `curr_dim = 0`. Returns the maximum reached depth and a negative number
@@ -1239,7 +1273,8 @@ NPY_NO_EXPORT int
 PyArray_DiscoverDTypeFromObject(
         PyObject *obj, int max_dims, int curr_dims,
         PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS],
-        npy_bool use_minimal)
+        npy_bool use_minimal, coercion_cache_obj **coercion_cache,
+        npy_bool *single_or_no_element)
 {
     PyArray_DTypeMeta *dtype = NULL;
     PyArray_Descr *descriptor = NULL;
@@ -1252,6 +1287,8 @@ PyArray_DiscoverDTypeFromObject(
         /* Clear the static cache of which types we have already seen */
         prev_type = NULL;
         prev_dtype = NULL;
+        *coercion_cache = NULL;
+        *single_or_no_element = 1;
 
         /* initialize shape for shape discovery */
         for (int i = 0; i < max_dims; i++) {
@@ -1312,6 +1349,10 @@ PyArray_DiscoverDTypeFromObject(
         descriptor = PyArray_DESCR((PyArrayObject *)obj);
         dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
         Py_INCREF(dtype);
+        /* We must cache it for dtype discovery currently (it hardly hurts) */
+        if (npy_new_coercion_cache(obj, obj, 0, coercion_cache) == NULL) {
+            goto fail;
+        }
         goto promote_types;
     }
 
@@ -1392,6 +1433,9 @@ PyArray_DiscoverDTypeFromObject(
                 goto ragged_array;
             }
             descriptor = PyArray_DESCR(tmp);
+            if (npy_new_coercion_cache(obj, tmp, 0, coercion_cache) == NULL) {
+                goto fail;
+            }
             Py_DECREF(tmp);
             dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
             Py_INCREF(dtype);
@@ -1425,6 +1469,9 @@ PyArray_DiscoverDTypeFromObject(
     if (seq == NULL) {
         goto fail;
     }
+    if (npy_new_coercion_cache(obj, seq, 1, coercion_cache) == NULL) {
+        goto fail;
+    }
 
     // TODO: Old case checked if there was only a single type present
     //       to optimize (super fast path for floats, bools, and complex)
@@ -1438,12 +1485,16 @@ PyArray_DiscoverDTypeFromObject(
         max_dims = max_dims_copy;
         goto ragged_array;
     }
-
+    if (size == 0) {
+        Py_DECREF(seq);
+        return curr_dims;
+    }
     /* Recursive call for each sequence item */
     for (Py_ssize_t i = 0; i < size; ++i) {
         max_dims = PyArray_DiscoverDTypeFromObject(
                 objects[i], max_dims, curr_dims + 1,
-                out_dtype, out_shape, use_minimal);
+                out_dtype, out_shape, use_minimal, coercion_cache,
+                single_or_no_element);
         // NOTE: If there is a ragged array found (NPY_OBJECT) could break
         if (max_dims < 0) {
             Py_DECREF(seq);
@@ -1472,14 +1523,12 @@ promote_types:
         *out_dtype = dtype;
         return max_dims;
     }
+    *single_or_no_element = 0;
     Py_SETREF(*out_dtype, PyArray_PromoteDTypes(*out_dtype, dtype));
     Py_DECREF(dtype);
     if (*out_dtype == NULL) {
         return -1;
     }
-    // TODO: Only the single object/0D case may use minimal dtype, so in
-    //       principle here (and even above), we could convert abstract
-    //       DTypes using their default (or even tell them to give the default).
     return max_dims;
 
 fail:

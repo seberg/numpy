@@ -80,50 +80,6 @@ dtypemeta_init(PyObject *type, PyObject *args, PyObject *kwds)
 }
 
 
-//static int
-//dtypemeta_repr(PyObject *type, PyObject *args, PyObject *kwds)
-//{
-//    printf("INSIDE REPR\n");
-//    return Py_BuildValue("s", "<this_is_a_funny_repr>");
-//}
-//
-//
-//static int
-//dtypemeta_str(PyObject *type, PyObject *args, PyObject *kwds)
-//{
-//    printf("INSIDE STR\n");
-//    return Py_BuildValue("s", "<this_is_a_funny_str>");
-//}
-//
-//PyObject *
-//dtypeclass_rawnew(char *name) {
-//    // TODOL Should be NN, but I am desperate to find the bug...
-//    PyObject *args = Py_BuildValue("(sOO)", name, PyTuple_Pack(1, &PyArrayDescr_Type), PyDict_New());
-//
-//    Py_INCREF(&PyArrayDTypeMeta_Type);
-//    PyObject *res = dtypemeta_new(&PyArrayDTypeMeta_Type, args, NULL);
-//    dtypemeta_init(res, args, NULL);
-//
-//    Py_DECREF(args);
-//    return res;
-//}
-//
-//
-//static int
-//dtypemeta_traverse(PyTypeObject *type, visitproc visit, void *arg)
-//{
-//    printf("eehh wah! Traversing (doesn't happen, right?)!\n");
-//    return 0;
-//}
-//
-//static int
-//dtypemeta_clear(PyTypeObject *type)
-//{
-//    printf("eehh wah! Clearing (doesn't happen, right?)!\n");
-//    return 0;
-//}
-
-
 static CastingImpl *
 legacy_can_cast(
         PyArray_DTypeMeta *from_dtype,

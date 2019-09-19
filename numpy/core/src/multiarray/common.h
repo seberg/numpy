@@ -339,10 +339,32 @@ NPY_NO_EXPORT PyArrayObject *
 new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
                   int nd, npy_intp dimensions[], int typenum, PyArrayObject **result);
 
+/*
+ * We do not want to coerce arrays many times unless absolutely necessary.
+ * The same goes for sequences, so everything we have seen, we will have
+ * to store somehow. This is a linked list of these objects.
+ */
+typedef struct coercion_cache_obj {
+    PyObject *converted_obj;
+    PyObject *arr_or_sequence;
+    struct coercion_cache_obj *next;
+    npy_bool sequence;
+} coercion_cache_obj;
+
+
+/* Create a new cache object */
+NPY_NO_EXPORT coercion_cache_obj *npy_new_coercion_cache(
+        PyObject *converted_obj, PyObject *arr_or_sequence, npy_bool sequence,
+        coercion_cache_obj **prev);
+/* Frees the coercion cache object. */
+NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *first);
+
+
 NPY_NO_EXPORT int
 PyArray_DiscoverDTypeFromObject(
         PyObject *obj, int max_dims, int curr_dims,
         PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS],
-        npy_bool use_minimal);
+        npy_bool use_minimal, coercion_cache_obj **cache,
+        npy_bool *single_or_no_element);
 
 #endif

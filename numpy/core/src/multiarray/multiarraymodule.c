@@ -4095,7 +4095,7 @@ static PyObject *
 _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs)
 {
     PyObject *obj;
-    PyArray_DTypeMeta *out_dtype = NULL;
+    PyObject *out_dtype = NULL;
     int out_dims;
     int max_dims = NPY_MAXDIMS;
     npy_bool use_minimal;
@@ -4109,10 +4109,21 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
+    coercion_cache_obj *coercion_cache = NULL;
+    npy_bool single_or_no_element;
     out_dims = PyArray_DiscoverDTypeFromObject(
-            obj, max_dims, 0, &out_dtype, shape, use_minimal);
+            obj, max_dims, 0, (PyArray_DTypeMeta **)&out_dtype,
+            shape, use_minimal,
+            &coercion_cache, &single_or_no_element);
     if (out_dims < 0) {
         return NULL;
+    }
+    if (out_dtype == NULL) {
+        out_dtype = Py_None;
+        Py_INCREF(out_dtype);
+    }
+    if (coercion_cache != NULL) {
+        npy_free_coercion_cache(coercion_cache);
     }
     // TODO: May want to get rid of remaining AbstractDTypes (depending on use)
     //       specifically, if use_minimal is not True.
@@ -4129,7 +4140,8 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs)
             return NULL;
         }
     }
-    return Py_BuildValue("NN", shape_tup, (PyObject *)out_dtype);
+    return Py_BuildValue("NNi", shape_tup, out_dtype,
+                         (int)single_or_no_element);
 }
 
 static struct PyMethodDef array_module_methods[] = {
