@@ -1274,7 +1274,9 @@ PyArray_DiscoverDTypeFromObject(
         PyObject *obj, int max_dims, int curr_dims,
         PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS],
         npy_bool use_minimal, coercion_cache_obj **coercion_cache,
-        npy_bool *single_or_no_element)
+        npy_bool *single_or_no_element,
+        /* These two are solely for the __array__ attribute */
+        PyArray_Descr *requested_dtype, PyObject *context)
 {
     PyArray_DTypeMeta *dtype = NULL;
     PyArray_Descr *descriptor = NULL;
@@ -1411,8 +1413,8 @@ PyArray_DiscoverDTypeFromObject(
     }
 
     {
-        PyObject *tmp = _array_from_array_like(obj,  /* requested_dtype */ NULL,
-                                               NPY_FALSE, /* context */ NULL);
+        PyObject *tmp = _array_from_array_like(obj,  requested_dtype,
+                                               NPY_FALSE, context);
         if (tmp == NULL) {
             PyErr_Clear();
             /* Clear the error and set to Object dtype (unless ragged) */
@@ -1434,6 +1436,7 @@ PyArray_DiscoverDTypeFromObject(
             }
             descriptor = PyArray_DESCR(tmp);
             if (npy_new_coercion_cache(obj, tmp, 0, coercion_cache) == NULL) {
+                Py_DECREF(tmp);
                 goto fail;
             }
             Py_DECREF(tmp);
@@ -1470,11 +1473,10 @@ PyArray_DiscoverDTypeFromObject(
         goto fail;
     }
     if (npy_new_coercion_cache(obj, seq, 1, coercion_cache) == NULL) {
+        Py_DECREF(seq);
         goto fail;
     }
 
-    // TODO: Old case checked if there was only a single type present
-    //       to optimize (super fast path for floats, bools, and complex)
     npy_intp size = PySequence_Fast_GET_SIZE(seq);
     PyObject **objects = PySequence_Fast_ITEMS(seq);
 
@@ -1494,7 +1496,7 @@ PyArray_DiscoverDTypeFromObject(
         max_dims = PyArray_DiscoverDTypeFromObject(
                 objects[i], max_dims, curr_dims + 1,
                 out_dtype, out_shape, use_minimal, coercion_cache,
-                single_or_no_element);
+                single_or_no_element, requested_dtype, context);
         // NOTE: If there is a ragged array found (NPY_OBJECT) could break
         if (max_dims < 0) {
             Py_DECREF(seq);
@@ -1538,3 +1540,63 @@ fail:
 }
 
 
+NPY_NO_EXPORT int
+PyArray_DiscoverDescriptorFromObjectRecursive(
+        PyObject *obj, int max_dims, npy_intp out_shape[NPY_MAXDIMS],
+        PyArray_Descr **out_descr, coercion_cache_obj **coercion_cache,
+        PyArray_DTypeMeta *dtype)
+{
+    PyArray_Descr *descr;
+    coercion_cache_obj *cache = *coercion_cache;
+    if (obj == cache->converted_obj) {
+        if (cache->sequence) {
+            PyObject *seq = cache->arr_or_sequence;
+            npy_intp size = PySequence_Fast_GET_SIZE(seq);
+            PyObject **objects = PySequence_Fast_ITEMS(seq);
+            for (npy_intp i = 0; i < size; i++) {
+                int res = PyArray_DiscoverDescriptorFromObjectRecursive(
+                        obj, max_dims, out_shape, out_descr, coercion_cache, dtype);
+                if (res < 0) {
+                    return -1;
+                }
+            }
+        }
+        else {
+            descr = PyArray_DESCR(cache->arr_or_sequence);
+        }
+    }
+    else {
+        descr = dtype->dt_slots->discover_descr_from_pyobject(dtype, obj);
+        if (descr == NULL) {
+            Py_XDECREF(*out_descr);
+            *out_descr = NULL;
+        }
+    }
+}
+
+NPY_NO_EXPORT int
+PyArray_DiscoverDescriptorFromObject(
+        PyObject *obj, int max_dims, npy_intp out_shape[NPY_MAXDIMS],
+        PyArray_Descr **out_descr, coercion_cache_obj **coercion_cache,
+        npy_bool single_or_no_element, PyArray_DTypeMeta *dtype)
+{
+    *out_descr = NULL;
+    if (dtype == NULL) {
+        /* An empty sequence, let the user deal with it. */
+        assert(single_or_no_element);
+        return 0;
+    }
+    if (!dtype->flexible) {
+        /* This is fairly boring (usually) */
+        if (!single_or_no_element) {
+            *out_descr = dtype->dt_slots->default_descr(dtype);
+            if (*out_descr == NULL) {
+                return -1;
+            }
+            return 0;
+        }
+        /* There is a single element somewhere, it may have a descr. */
+    }
+    return PyArray_DiscoverDescriptorFromObjectRecursive(
+            obj, max_dims, out_shape, out_descr, coercion_cache, dtype);
+}

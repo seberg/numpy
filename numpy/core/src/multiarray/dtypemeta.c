@@ -151,6 +151,12 @@ legacy_default_descr(PyArray_DTypeMeta *cls) {
     return PyArray_DescrFromType(cls->type_num);
 }
 
+static PyArray_Descr *
+discover_descr_using_default(PyArray_DTypeMeta *cls, PyObject *NPY_UNUSED(obj))
+{
+    return cls->dt_slots->default_descr(cls);
+}
+
 
 static PyArray_DTypeMeta*
 legacy_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
@@ -288,6 +294,8 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     dtype_class->dt_slots = dt_slots;
 
     dtype_class->dt_slots->default_descr = legacy_default_descr;
+    dtype_class->dt_slots->discover_descr_from_pyobject =
+                discover_descr_using_default;
     
     dtype_class->dt_slots->within_dtype_castingimpl = (
             (CastingImpl *)castingimpl_legacynew(dtype_class, dtype_class));
@@ -437,6 +445,10 @@ PyArray_InitDTypeMetaFromSpec(
             dt_slots->discover_dtype_from_pytype =
                     (dtype_from_discovery_function *)slot->pfunc;
             continue;
+        case NPY_discover_descr_from_pyobject
+            dt_slots->discover_descr_from_pyobject =
+                    (descr_from_discovery_function *)slot->pfunc;
+            continue;
         }
         PyErr_SetString(PyExc_RuntimeError, "invalid slot offset (or not yet implemented)");
         goto fail;
@@ -444,6 +456,15 @@ PyArray_InitDTypeMetaFromSpec(
 
     if (dt_slots->can_cast_from_other == NULL) {
         dt_slots->can_cast_from_other = &can_cast_return_notimplemented;
+    }
+
+    if (dt_slots->discover_descr_from_pyobject == NULL) {
+        if (is_flexible) {
+            PyErr_SetString(PyExc_RuntimeError,
+                    "a flexible dtype must implement instance from pytype discovery.");
+            goto fail;
+        }
+        dt_slots->discover_descr_from_pyobject = discover_descr_using_default;
     }
 
     if (spec->typeobj) {

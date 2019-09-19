@@ -364,7 +364,9 @@ NPY_NO_EXPORT int
 PyArray_DiscoverDTypeFromObject(
         PyObject *obj, int max_dims, int curr_dims,
         PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS],
-        npy_bool use_minimal, coercion_cache_obj **cache,
-        npy_bool *single_or_no_element);
+        npy_bool use_minimal, coercion_cache_obj **coercion_cache,
+        npy_bool *single_or_no_element,
+        /* These two are solely for the __array__ attribute */
+        PyArray_Descr *requested_dtype, PyObject *context);
 
 #endif

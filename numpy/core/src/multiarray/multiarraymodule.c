@@ -4114,8 +4114,11 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs)
     out_dims = PyArray_DiscoverDTypeFromObject(
             obj, max_dims, 0, (PyArray_DTypeMeta **)&out_dtype,
             shape, use_minimal,
-            &coercion_cache, &single_or_no_element);
+            &coercion_cache, &single_or_no_element, NULL, NULL);
     if (out_dims < 0) {
+        if (coercion_cache != NULL) {
+            npy_free_coercion_cache(coercion_cache);
+        }
         return NULL;
     }
     if (out_dtype == NULL) {
