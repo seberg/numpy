@@ -256,6 +256,24 @@ string_discover_descr_from_pyobject(
     return descr;
 }
 
+static PyArray_Descr *
+discover_datetime_and_timedelta_from_pyobject(
+        PyArray_DTypeMeta *cls, PyObject *obj) {
+    if (PyArray_IsScalar(obj, Datetime) ||
+                PyArray_IsScalar(obj, Timedelta)) {
+        PyArray_DatetimeMetaData *meta;
+        PyArray_Descr *descr = PyArray_DescrFromScalar(obj);
+        meta = get_datetime_metadata_from_dtype(descr);
+        if (meta == NULL) {
+            return NULL;
+        }
+        Py_DECREF(descr);
+        return create_datetime_dtype(cls->type_num, meta);
+    } else {
+        return find_object_datetime_type(obj, cls->type_num);
+    }
+}
+
 /*
  * This is brutal. Because it seems tricky to do otherwise, use
  * the static full Python API on malloc allocated objects, so that they
@@ -359,6 +377,11 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
                     dtype_class->type_num == NPY_UNICODE) {
         dtype_class->dt_slots->discover_descr_from_pyobject =
                 string_discover_descr_from_pyobject;
+    }
+    if (dtype_class->type_num == NPY_DATETIME ||
+                dtype_class->type_num == NPY_TIMEDELTA) {
+        dtype_class->dt_slots->discover_descr_from_pyobject =
+                discover_datetime_and_timedelta_from_pyobject;
     }
     
     dtype_class->dt_slots->within_dtype_castingimpl = (

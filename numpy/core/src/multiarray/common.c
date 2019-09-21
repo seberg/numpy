@@ -1276,7 +1276,8 @@ PyArray_DiscoverDTypeFromObject(
         npy_bool use_minimal, coercion_cache_obj **coercion_cache,
         npy_bool *single_or_no_element,
         /* These two are solely for the __array__ attribute */
-        PyArray_Descr *requested_dtype, PyObject *context)
+        PyArray_Descr *requested_dtype, PyObject *context,
+        npy_bool stop_at_tuple)
 {
     PyArray_DTypeMeta *dtype = NULL;
     PyArray_Descr *descriptor = NULL;
@@ -1339,6 +1340,11 @@ PyArray_DiscoverDTypeFromObject(
             Py_INCREF(dtype);
         }
         goto promote_types;
+    }
+
+    /* obj is a Tuple, but tuples aren't expanded */
+    if (stop_at_tuple && PyTuple_Check(obj)) {
+        return 0;
     }
 
     /* Check if it's an ndarray */

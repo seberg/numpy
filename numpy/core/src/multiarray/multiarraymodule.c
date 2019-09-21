@@ -4095,22 +4095,27 @@ static PyObject *
 _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs)
 {
     PyObject *obj;
-    PyObject *out_dtype = NULL;
+    PyArray_Descr *fixed_descriptor = NULL;
+    PyObject *out_dtype = NULL, *out_descriptor = NULL;
     int out_dims;
     int max_dims = NPY_MAXDIMS;
     npy_bool use_minimal;
     npy_intp shape[NPY_MAXDIMS];
 
-    static char *kwlist[] = {"obj", "minimal", NULL};
+    static char *kwlist[] = {"obj", "minimal", "dtype", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(
-                args, kwargs, "O|O&:_discover_dtype", kwlist,
-                &obj, PyArray_BoolConverter, &use_minimal)) {
+                args, kwargs, "O|O&O&:_discover_dtype", kwlist,
+                &obj, PyArray_BoolConverter, &use_minimal,
+                PyArray_DescrConverter, &fixed_descriptor)) {
         return NULL;
     }
 
     coercion_cache_obj *coercion_cache = NULL;
     npy_bool single_or_no_element;
+    /* Need to run this in any case to get dimensions */
+    // TODO: Should probably signal this, skip promotion or even give dtype
+    //       better hooks! (this means that dtype is already fixed)
     out_dims = PyArray_DiscoverDTypeFromObject(
             obj, max_dims, 0, (PyArray_DTypeMeta **)&out_dtype,
             shape, use_minimal,
@@ -4119,15 +4124,40 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs)
         npy_free_coercion_cache(coercion_cache);
         return NULL;
     }
+    if (fixed_descriptor != NULL) {
+        Py_XDECREF(out_dtype);
+        out_dtype = (PyObject *)Py_TYPE(fixed_descriptor);
+        Py_INCREF(out_dtype);
+    }
 
-    PyObject *out_descriptor = NULL;
     if (out_dtype == NULL) {
         out_dtype = Py_None;
         Py_INCREF(out_dtype);
         out_descriptor = Py_None;
         Py_INCREF(out_descriptor);
     }
-    else {
+    if (fixed_descriptor != NULL) {
+        /* No need to discover the output descriptor, unless it is "flexible" */
+        // TODO: Ask users to use the class instead and deprecate this!
+        if (PyDataType_ISFLEXIBLE(fixed_descriptor) &&
+                    !PyDataType_ISUNSIZED(fixed_descriptor)) {
+            out_descriptor = (PyObject *)fixed_descriptor;
+        }
+        else if (PyDataType_ISDATETIME(fixed_descriptor)) {
+            PyArray_DatetimeMetaData *meta;
+            meta = get_datetime_metadata_from_dtype(fixed_descriptor);
+            if (meta == NULL) {
+                Py_XDECREF(out_descriptor);
+                Py_XDECREF(out_dtype);
+                npy_free_coercion_cache(coercion_cache);
+                return NULL;
+            }
+            if (meta->base != NPY_FR_GENERIC) {
+                out_descriptor = (PyObject *)fixed_descriptor;
+            }
+        }
+    }
+    if (out_descriptor == NULL) {
         if (((PyArray_DTypeMeta *)out_dtype)->abstract) {
             /*
              * AbstractDTypes cannot work here for coercion, they must
