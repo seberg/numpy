@@ -1702,6 +1702,122 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
     return -1;
 }
 
+
+NPY_NO_EXPORT int
+PyArray_DiscoverDTypeAndShapeFromObject(
+        PyObject *obj,
+        npy_bool use_minimal,
+        // TODO: Add fixed DType (we do not currently support it)
+        PyArray_Descr *fixed_descriptor,
+        /* ouput arguments */
+        PyObject **out_dtype,
+        PyObject **out_descriptor,
+        // TODO: It seems Maxdims is actually not needed right now?
+        int *out_dims,
+        npy_intp shape[NPY_MAXDIMS],
+        /* Uninitialized Cache */
+        coercion_cache_obj *coercion_cache)
+{
+    npy_bool single_or_no_element;
+
+    *out_dtype = NULL;
+    *out_descriptor = NULL;
+
+    npy_bool stop_at_tuple = NPY_FALSE;
+    npy_bool string_is_sequence = NPY_FALSE;
+    if (fixed_descriptor != NULL) {
+        /* False for np.dtype("c") to signal single characters */
+        int type_num = fixed_descriptor->type_num;
+        char type = fixed_descriptor->type;
+        string_is_sequence = (type_num == NPY_STRING) && (type == NPY_CHARLTR);
+        stop_at_tuple = (type_num == NPY_VOID &&
+                         (fixed_descriptor->names || fixed_descriptor->subarray));
+    }
+
+    /* Need to run this in any case to get dimensions */
+    // TODO: Should probably signal this, skip promotion or even give dtype
+    //       better hooks! (this means that dtype is already fixed)
+    *out_dims = PyArray_DiscoverDTypeFromObject(
+            obj, NPY_MAXDIMS, 0, (PyArray_DTypeMeta **)out_dtype,
+            shape, use_minimal,
+            &coercion_cache, &single_or_no_element, NULL, NULL,
+            stop_at_tuple, string_is_sequence);
+    if (*out_dims < 0) {
+        npy_free_coercion_cache(coercion_cache);
+        return -1;
+    }
+    if (fixed_descriptor != NULL) {
+        Py_XDECREF(*out_dtype);
+        *out_dtype = (PyObject *)Py_TYPE(fixed_descriptor);
+        Py_INCREF(*out_dtype);
+    }
+
+    if (*out_dtype == NULL) {
+        *out_dtype = Py_None;
+        Py_INCREF(*out_dtype);
+        *out_descriptor = Py_None;
+        Py_INCREF(*out_descriptor);
+    }
+    if (fixed_descriptor != NULL) {
+        /* No need to discover the output descriptor, unless it is "flexible" */
+        // TODO: Ask users to use the class instead and deprecate this!
+        if (PyDataType_ISFLEXIBLE(fixed_descriptor) &&
+            !PyDataType_ISUNSIZED(fixed_descriptor)) {
+            *out_descriptor = (PyObject *)fixed_descriptor;
+        }
+        else if (PyDataType_ISDATETIME(fixed_descriptor)) {
+            PyArray_DatetimeMetaData *meta;
+            meta = get_datetime_metadata_from_dtype(fixed_descriptor);
+            if (meta == NULL) {
+                Py_XDECREF(*out_descriptor);
+                Py_XDECREF(*out_dtype);
+                npy_free_coercion_cache(coercion_cache);
+                return -1;
+            }
+            if (meta->base != NPY_FR_GENERIC) {
+                *out_descriptor = (PyObject *)fixed_descriptor;
+            }
+        }
+    }
+    if (*out_descriptor == NULL) {
+        if (((PyArray_DTypeMeta *)*out_dtype)->abstract) {
+            /*
+             * AbstractDTypes cannot work here for coercion, they must
+             * be resolved now. Casting is possible but we may need many casts
+             * here, so the situation is different. The AbstractDType already
+             * had a chance to look at things.
+             */
+            PyArray_DTypeMeta *abstract_dtype = ((PyArray_DTypeMeta *)*out_dtype);
+            PyArray_DTypeMeta *concrete_dtype;
+            if (use_minimal) {
+                concrete_dtype = abstract_dtype->dt_slots->minimal_dtype(
+                        abstract_dtype);
+            }
+            else {
+                concrete_dtype = abstract_dtype->dt_slots->default_dtype(
+                        abstract_dtype);
+            }
+            Py_DECREF(abstract_dtype);
+            *out_dtype = (PyObject *)concrete_dtype;
+            if (*out_dtype == NULL) {
+                npy_free_coercion_cache(coercion_cache);
+                return -1;
+            }
+            assert(!concrete_dtype->abstract);
+        }
+        int success = PyArray_DiscoverDescriptorFromObject(
+                obj, (PyArray_Descr **)out_descriptor,
+                coercion_cache,
+                single_or_no_element, (PyArray_DTypeMeta *)*out_dtype);
+        if (success < 0) {
+            npy_free_coercion_cache(coercion_cache);
+            Py_DECREF(*out_dtype);
+            return -1;
+        }
+    }
+}
+
+
 /*NUMPY_API
  * Does not check for NPY_ARRAY_ENSURECOPY and NPY_ARRAY_NOTSWAPPED in flags
  * Steals a reference to newtype --- which can be NULL

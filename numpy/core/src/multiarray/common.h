@@ -367,7 +367,10 @@ PyArray_DiscoverDTypeFromObject(
         npy_bool use_minimal, coercion_cache_obj **coercion_cache,
         npy_bool *single_or_no_element,
         /* These two are solely for the __array__ attribute */
-        PyArray_Descr *requested_dtype, PyObject *context);
+        PyArray_Descr *requested_dtype,
+        PyObject *context,
+        // TODO: Hacks to support legay behaviour (at least second one)
+        npy_bool stop_at_tuple, npy_bool string_is_sequence);
 
 NPY_NO_EXPORT int
 PyArray_DiscoverDescriptorFromObject(

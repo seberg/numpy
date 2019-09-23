@@ -1276,8 +1276,10 @@ PyArray_DiscoverDTypeFromObject(
         npy_bool use_minimal, coercion_cache_obj **coercion_cache,
         npy_bool *single_or_no_element,
         /* These two are solely for the __array__ attribute */
-        PyArray_Descr *requested_dtype, PyObject *context,
-        npy_bool stop_at_tuple)
+        PyArray_Descr *requested_dtype,
+        PyObject *context,
+        // TODO: Hacks to support legay behaviour (at least second one)
+        npy_bool stop_at_tuple, npy_bool string_is_sequence)
 {
     PyArray_DTypeMeta *dtype = NULL;
     PyArray_Descr *descriptor = NULL;
@@ -1296,6 +1298,16 @@ PyArray_DiscoverDTypeFromObject(
         /* initialize shape for shape discovery */
         for (int i = 0; i < max_dims; i++) {
             out_shape[i] = -1;
+        }
+    }
+
+
+    /* obj is a Tuple, but tuples aren't expanded */
+    // TODO: slow, but do this check first (it should never be used)
+    if (string_is_sequence) {
+        /* Do not bother to promote, it was already defined as a char. */
+        if (PyString_Check(obj) || PyUnicode_Check(obj)) {
+            goto force_sequence;
         }
     }
 
@@ -1344,7 +1356,13 @@ PyArray_DiscoverDTypeFromObject(
 
     /* obj is a Tuple, but tuples aren't expanded */
     if (stop_at_tuple && PyTuple_Check(obj)) {
-        return 0;
+        /* Do not bother to promote, dtype instance must have been passed in */
+        if (update_shape(
+                curr_dims, &max_dims, out_shape, 0, NULL) < 0) {
+            /* But do update, if there this is a ragged case */
+            goto ragged_array;
+        }
+        return max_dims;
     }
 
     /* Check if it's an ndarray */
@@ -1417,8 +1435,8 @@ PyArray_DiscoverDTypeFromObject(
     }
 
     {
-        PyObject *tmp = _array_from_array_like(obj,  requested_dtype,
-                                               NPY_FALSE, context);
+        PyObject *tmp = _array_from_array_like(
+                obj,  requested_dtype,0, context);
         if (tmp == NULL) {
             PyErr_Clear();
             /* Clear the error and set to Object dtype (unless ragged) */
@@ -1450,6 +1468,9 @@ PyArray_DiscoverDTypeFromObject(
         }
         Py_DECREF(tmp);
     }
+
+
+force_sequence:
     /*
      * If we reached the maximum recursion depth without hitting one
      * of the above cases, and obj isn't a sequence-like object, the output
@@ -1500,7 +1521,8 @@ PyArray_DiscoverDTypeFromObject(
         max_dims = PyArray_DiscoverDTypeFromObject(
                 objects[i], max_dims, curr_dims + 1,
                 out_dtype, out_shape, use_minimal, coercion_cache,
-                single_or_no_element, requested_dtype, context);
+                single_or_no_element, requested_dtype, context,
+                stop_at_tuple, string_is_sequence);
         // NOTE: If there is a ragged array found (NPY_OBJECT) could break
         if (max_dims < 0) {
             Py_DECREF(seq);

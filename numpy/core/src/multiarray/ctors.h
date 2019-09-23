@@ -1,6 +1,9 @@
 #ifndef _NPY_ARRAY_CTORS_H_
 #define _NPY_ARRAY_CTORS_H_
 
+// TODO: Cleanup include I guess..
+#include "common.h"
+
 NPY_NO_EXPORT PyObject *
 PyArray_NewFromDescr(
         PyTypeObject *subtype, PyArray_Descr *descr, int nd,
@@ -100,5 +103,20 @@ PyArray_AssignFromSequence(PyArrayObject *self, PyObject *v);
 NPY_NO_EXPORT PyArrayObject *
 PyArray_SubclassWrap(PyArrayObject *arr_of_subclass, PyArrayObject *towrap);
 
+
+NPY_NO_EXPORT int
+PyArray_DiscoverDTypeAndShapeFromObject(
+        PyObject *obj,
+        npy_bool use_minimal,
+        // TODO: Add fixed DType (we do not currently support it)
+        PyArray_Descr *fixed_descriptor,
+        /* ouput arguments */
+        PyObject **out_dtype,
+        PyObject **out_descriptor,
+        // TODO: It seems Maxdims is actually not needed right now?
+        int *out_dims,
+        npy_intp shape[NPY_MAXDIMS],
+        /* Uninitialized Cache */
+        coercion_cache_obj *coercion_cache);
 
 #endif
