@@ -117,6 +117,6 @@ PyArray_DiscoverDTypeAndShapeFromObject(
         int *out_dims,
         npy_intp shape[NPY_MAXDIMS],
         /* Uninitialized Cache */
-        coercion_cache_obj *coercion_cache);
+        coercion_cache_obj **coercion_cache);
 
 #endif

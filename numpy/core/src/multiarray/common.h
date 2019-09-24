@@ -372,10 +372,11 @@ PyArray_DiscoverDTypeFromObject(
         // TODO: Hacks to support legay behaviour (at least second one)
         npy_bool stop_at_tuple, npy_bool string_is_sequence);
 
+
 NPY_NO_EXPORT int
 PyArray_DiscoverDescriptorFromObject(
         PyObject *obj,
-        PyArray_Descr **out_descr, coercion_cache_obj *coercion_cache,
+        PyArray_Descr **out_descr, coercion_cache_obj **coercion_cache,
         npy_bool single_or_no_element, PyArray_DTypeMeta *dtype);
 
 

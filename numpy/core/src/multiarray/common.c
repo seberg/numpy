@@ -1216,7 +1216,7 @@ update_shape(int curr_dims, int *max_dims,
         else if (new_dim != curr_dim) {
             /* The array is ragged, and this dimension is unusable already */
             success = -1;
-            *max_dims -= i + 1;
+            *max_dims -= new_dims + i;
             break;
         }
     }
@@ -1301,7 +1301,6 @@ PyArray_DiscoverDTypeFromObject(
         }
     }
 
-
     /* obj is a Tuple, but tuples aren't expanded */
     // TODO: slow, but do this check first (it should never be used)
     if (string_is_sequence) {
@@ -1362,7 +1361,13 @@ PyArray_DiscoverDTypeFromObject(
             /* But do update, if there this is a ragged case */
             goto ragged_array;
         }
-        return max_dims;
+        // TODO: Should be able to just do nothing with dtype, but for now to
+        //       avoid bugs down here, set to OBJECT.
+        descriptor = PyArray_DescrFromType(NPY_OBJECT);
+        dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+        Py_INCREF(dtype);
+        Py_DECREF(descriptor);
+        goto promote_types;
     }
 
     /* Check if it's an ndarray */
@@ -1514,8 +1519,9 @@ force_sequence:
     }
     if (size == 0) {
         Py_DECREF(seq);
-        return curr_dims;
+        return max_dims_copy;
     }
+
     /* Recursive call for each sequence item */
     for (Py_ssize_t i = 0; i < size; ++i) {
         max_dims = PyArray_DiscoverDTypeFromObject(
@@ -1537,6 +1543,9 @@ ragged_array:
     //       in generally, object should probably never happen without
     //       the user asking for it specifically.
     // NOTE: Users can probably supply max_dims and out_dtype.
+    if (*out_dtype != NULL) {
+        *single_or_no_element = 0;
+    }
     if (*out_dtype == NULL || (*out_dtype)->type_num != NPY_OBJECT) {
         Py_XDECREF(*out_dtype);
         descriptor = PyArray_DescrFromType(NPY_OBJECT);
@@ -1577,16 +1586,15 @@ fail:
 static int
 PyArray_DiscoverDescriptorFromObjectRecursive(
         PyObject *obj,
-        PyArray_Descr **out_descr, coercion_cache_obj **coercion_cache,
+        PyArray_Descr **out_descr, coercion_cache_obj *coercion_cache,
         PyArray_DTypeMeta *dtype,
         PyTypeObject **last_dtype, CastingImpl **last_castingimpl)
 {
-    coercion_cache_obj *cache = *coercion_cache;
+    coercion_cache_obj *cache = coercion_cache;
     PyArray_Descr *descr;
-
     if (cache != NULL && obj == cache->converted_obj) {
         /* Advance the coercion_cache linked list. This one is now used. */
-        *coercion_cache = cache->next;
+        coercion_cache = cache->next;
 
         if (cache->sequence) {
             PyObject *seq = cache->arr_or_sequence;
@@ -1675,9 +1683,8 @@ PyArray_DiscoverDescriptorFromObjectRecursive(
 NPY_NO_EXPORT int
 PyArray_DiscoverDescriptorFromObject(
         PyObject *obj,
-        PyArray_Descr **out_descr, coercion_cache_obj *coercion_cache,
-        npy_bool single_or_no_element, PyArray_DTypeMeta *dtype)
-{
+        PyArray_Descr **out_descr, coercion_cache_obj **coercion_cache,
+        npy_bool single_or_no_element, PyArray_DTypeMeta *dtype) {
     *out_descr = NULL;
     if (dtype == NULL) {
         /* An empty sequence, let the user deal with it. */
@@ -1698,9 +1705,25 @@ PyArray_DiscoverDescriptorFromObject(
     PyTypeObject *last_dtype = NULL;
     CastingImpl *last_castingimpl = NULL;
     int res = PyArray_DiscoverDescriptorFromObjectRecursive(
-            obj, out_descr, &coercion_cache, dtype,
+            obj, out_descr, *coercion_cache, dtype,
             &last_dtype, &last_castingimpl);
+    /*
+     * It is possible that the above did not return a result
+     * (when it is empty), in that case, probably are seeing a string
+     * of length zero or so, but...
+     */
     Py_XDECREF(last_dtype);
     Py_XDECREF(last_castingimpl);
-    return res;
+    if (res < 0) {
+       return res;
+    }
+    if (*out_descr == NULL) {
+        assert(single_or_no_element);
+        /* Try to get the default one... */
+        *out_descr = dtype->dt_slots->default_descr(dtype);
+        if (*out_descr == NULL) {
+            return -1;
+        }
+    }
+    return 0;
 }
