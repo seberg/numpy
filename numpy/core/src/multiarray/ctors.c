@@ -1276,27 +1276,7 @@ PyArray_DiscoverDTypeAndShapeFromObject(
         stop_at_tuple = (type_num == NPY_VOID &&
                          (fixed_descriptor->names || fixed_descriptor->subarray));
 
-
-        /*
-         * Legacy flexible dtypes need to interpreted as their corresponding
-         * DType class here. This should be deprecated!
-         */
-        if (PyDataType_ISFLEXIBLE(fixed_descriptor) &&
-                    PyDataType_ISUNSIZED(fixed_descriptor)) {
-            fixed_dtype = (PyArray_DTypeMeta *)Py_TYPE(fixed_descriptor);
-            fixed_descriptor = NULL;
-        }
-        else if (PyDataType_ISDATETIME(fixed_descriptor)) {
-            PyArray_DatetimeMetaData *meta;
-            meta = get_datetime_metadata_from_dtype(fixed_descriptor);
-            if (meta == NULL) {
-                return -1;
-            }
-            if (meta->base == NPY_FR_GENERIC) {
-                fixed_dtype = (PyArray_DTypeMeta *)Py_TYPE(fixed_descriptor);
-                fixed_descriptor = NULL;
-            }
-        }
+        fixed_dtype = (PyArray_DTypeMeta *)Py_TYPE(fixed_descriptor);
     }
 
     /* Need to run this in any case to get dimensions */
@@ -1310,16 +1290,6 @@ PyArray_DiscoverDTypeAndShapeFromObject(
     if (*out_dims < 0) {
         npy_free_coercion_cache(*coercion_cache);
         return -1;
-    }
-    if (fixed_descriptor != NULL) {
-        /* Force the use of the fixed descriptor now... */
-        // TODO: Make tidier, eg. with XSETREF.
-        Py_XDECREF(*out_descriptor);
-        *out_descriptor = (PyObject *)fixed_descriptor;
-        Py_INCREF(fixed_descriptor);
-        Py_XDECREF(*out_dtype);
-        *out_dtype = (PyObject *)Py_TYPE(fixed_descriptor);
-        Py_INCREF(*out_dtype);
     }
     if (fixed_dtype != NULL) {
         /* Discard the discovered one, we got a fixed one passed in */
