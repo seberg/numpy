@@ -267,9 +267,11 @@ discover_datetime_and_timedelta_from_pyobject(
         if (meta == NULL) {
             return NULL;
         }
+        PyArray_Descr *new_descr = create_datetime_dtype(cls->type_num, meta);
         Py_DECREF(descr);
-        return create_datetime_dtype(cls->type_num, meta);
-    } else {
+        return new_descr;
+    }
+    else {
         return find_object_datetime_type(obj, cls->type_num);
     }
 }
