@@ -1508,6 +1508,12 @@ force_sequence:
      */
     PyObject *seq = PySequence_Fast(obj, "Could not convert object to sequence");
     if (seq == NULL) {
+        /* Specifically do not fail on things that look like a dictionary */
+        if (PyErr_ExceptionMatches(PyExc_KeyError)) {
+            PyErr_Clear();
+            update_shape(curr_dims, &max_dims, out_shape, 0, NULL);
+            goto ragged_array;
+        }
         goto fail;
     }
     if (npy_new_coercion_cache(obj, seq, 1, &coercion_cache_end, coercion_cache) < 0) {
