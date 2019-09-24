@@ -205,6 +205,43 @@ legacy_common_instance(
     return PyArray_LegacyPromoteTypes(descr1, descr2);
 }
 
+static PyArray_Descr*
+VOID_common_instance(
+        PyArray_DTypeMeta *cls, PyArray_Descr *descr1, PyArray_Descr *descr2) {
+    PyArray_Descr *out_descr = NULL;
+    /* The legacy code thinks that V8 and V9 cannot promote; lets disagree. */
+    if ((descr1->names == NULL) && (descr1->subarray == NULL) &&
+        (descr1->names == NULL) && (descr1->subarray == NULL)) {
+        if (descr1->elsize >= descr2->elsize) {
+            out_descr = descr1;
+        }
+        else {
+            out_descr = descr2;
+        }
+    }
+    /*
+     * If they have fields and subarray, they cannot be promoted, but
+     * they could be equivalent, in which case all is OK.
+     * (Code taken from LegacyPromoteTypes, may be possible to simplify)
+     */
+    if (PyArray_CanCastTypeTo(descr2, descr1, NPY_EQUIV_CASTING)) {
+        out_descr = descr1;
+    }
+    if (out_descr != NULL) {
+        if (PyArray_ISNBO(descr1->byteorder)) {
+            Py_INCREF(descr1);
+            return descr1;
+        }
+        else {
+            return PyArray_DescrNewByteorder(descr1, NPY_NATIVE);
+        }
+    }
+    PyErr_SetString(PyExc_TypeError,
+            "cannot find common VOID dtype instance unless they are "
+            "equivalent or do not have fields/subarrays.");
+    return NULL;
+}
+
 static PyArray_Descr *
 string_discover_descr_from_pyobject(
         PyArray_DTypeMeta *cls, PyObject *obj)
@@ -227,10 +264,10 @@ string_discover_descr_from_pyobject(
             PyErr_Clear();
             return cls->dt_slots->default_descr(cls);
         }
-        if (cls->type_num == NPY_STRING) {
+        if (cls->type_num != NPY_UNICODE) {
+            /* This can also be a VOID type... */
             length = PyUnicode_GetLength(str);
         } else {
-            assert(cls->type_num == NPY_UNICODE);
             length = PyUnicode_GET_DATA_SIZE(str);
 #ifndef Py_UNICODE_WIDE
             length <<= 1;
@@ -380,10 +417,14 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
         dtype_class->dt_slots->discover_descr_from_pyobject =
                 string_discover_descr_from_pyobject;
     }
-    if (dtype_class->type_num == NPY_DATETIME ||
+    else if (dtype_class->type_num == NPY_DATETIME ||
                 dtype_class->type_num == NPY_TIMEDELTA) {
         dtype_class->dt_slots->discover_descr_from_pyobject =
                 discover_datetime_and_timedelta_from_pyobject;
+    }
+    else if (dtype_class->type_num == NPY_VOID) {
+        dtype_class->dt_slots->discover_descr_from_pyobject =
+                string_discover_descr_from_pyobject;
     }
     
     dtype_class->dt_slots->within_dtype_castingimpl = (
@@ -403,7 +444,13 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     }
     if (dtype_class->flexible) {
         /* Common instance is only necessary for flexible dtypes */
-        dtype_class->dt_slots->common_instance = legacy_common_instance;
+        if (dtype_class->type_num != NPY_VOID) {
+            dtype_class->dt_slots->common_instance = legacy_common_instance;
+        }
+        else {
+            /* VOID is not consistent with promotion vs. discovery */
+            dtype_class->dt_slots->common_instance = VOID_common_instance;
+        }
     }
 
     // This seems like it might make sense (but probably not here):

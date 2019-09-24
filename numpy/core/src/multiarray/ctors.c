@@ -1269,7 +1269,36 @@ PyArray_DiscoverDTypeAndShapeFromObject(
         stop_at_tuple = (type_num == NPY_VOID &&
                          (fixed_descriptor->names || fixed_descriptor->subarray));
 
-        fixed_dtype = (PyArray_DTypeMeta *)Py_TYPE(fixed_descriptor);
+        /*
+         * The fixed descriptor is only here, so that we can support flexible
+         * dtypes, which should be handled by DType classes normally. So we
+         * need to convert the fixed descriptor to the correct dtype,
+         * if and only if that descriptor is a "flexible" one.
+         */
+        // TODO: Refactor this into an incredulous function....
+        if (PyDataType_ISFLEXIBLE(fixed_descriptor) &&
+                    PyDataType_ISUNSIZED(fixed_descriptor)) {
+            /* It may still be a void datetime with empty field/subarray */
+            if (fixed_descriptor->type_num == NPY_VOID) {
+                if ((fixed_descriptor->names == NULL) &&
+                        (fixed_descriptor->subarray == NULL)) {
+                    fixed_dtype = (PyArray_DTypeMeta *) Py_TYPE(fixed_descriptor);
+                }
+            }
+            else {
+                fixed_dtype = (PyArray_DTypeMeta *) Py_TYPE(fixed_descriptor);
+            }
+        }
+        else if (PyDataType_ISDATETIME(fixed_descriptor)) {
+            PyArray_DatetimeMetaData *meta;
+            meta = get_datetime_metadata_from_dtype(fixed_descriptor);
+            if (meta == NULL) {
+                return -1;
+            }
+            if (meta->base == NPY_FR_GENERIC) {
+                fixed_dtype = (PyArray_DTypeMeta *)Py_TYPE(fixed_descriptor);
+            }
+        }
     }
 
     /* Need to run this in any case to get dimensions */
