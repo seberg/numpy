@@ -1189,34 +1189,46 @@ new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
 
 
 static int
-update_shape(int curr_dims, int *max_dims,
-             npy_intp out_shape[NPY_MAXDIMS], int new_dims,
-             const npy_intp new_shape[NPY_MAXDIMS])
+update_shape(int curr_ndim, int *max_ndim,
+             npy_intp out_shape[NPY_MAXDIMS], int new_ndim,
+             const npy_intp new_shape[NPY_MAXDIMS], npy_bool sequence)
 {
     int success = 0;  /* unsuccessful if array is ragged */
-    if (curr_dims + new_dims > *max_dims) {
+    if (curr_ndim + new_ndim > *max_ndim) {
         success = -1;
-        /* Only update check as many dims as possible */
-        new_dims = *max_dims - curr_dims;
+        /* Only update check as many dims as possible, max_ndim is unchanged */
+        new_ndim = *max_ndim - curr_ndim;
     }
-    else if (*max_dims != curr_dims + new_dims) {
-        /* Shrink max dims */
-        *max_dims = curr_dims + new_dims;
+    else if (!sequence && (*max_ndim != curr_ndim + new_ndim)) {
+        /*
+         * Sequences do not update max_ndim, otherwise shrink and check.
+         * This is depth first, so if it is already set, `out_shape` is filled.
+         */
+        *max_ndim = curr_ndim + new_ndim;
         /* If a shape was already set, this is also ragged */
-        if (out_shape[*max_dims] >= 0) {
+        if (out_shape[*max_ndim] >= 0) {
             success = -1;
         }
     }
-    for (int i = 0; i < new_dims; i++) {
-        npy_intp curr_dim = out_shape[i + curr_dims];
+    for (int i = 0; i < new_ndim; i++) {
+        npy_intp curr_dim = out_shape[curr_ndim + i];
         npy_intp new_dim = new_shape[i];
+
         if (curr_dim == -1) {
-            out_shape[i + curr_dims] = new_dim;
+            out_shape[curr_ndim + i] = new_dim;
         }
         else if (new_dim != curr_dim) {
             /* The array is ragged, and this dimension is unusable already */
             success = -1;
-            *max_dims -= new_dims + i;
+            if (!sequence) {
+                /* Remove dimensions that we cannot use: */
+                *max_ndim -= new_ndim + i;
+            }
+            else {
+                assert(i == 0);
+                /* max_ndim is usually not updated for sequences, so set now: */
+                *max_ndim = curr_ndim;
+            }
             break;
         }
     }
@@ -1332,7 +1344,7 @@ PyArray_DiscoverDTypeFromObject(
         prev_type = Py_TYPE(obj);
         prev_dtype = dtype;
 
-        if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL) < 0) {
+        if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL, NPY_FALSE) < 0) {
             goto ragged_array;
         }
 
@@ -1365,7 +1377,7 @@ PyArray_DiscoverDTypeFromObject(
     if (stop_at_tuple && PyTuple_Check(obj)) {
         /* Do not bother to promote, dtype instance must have been passed in */
         if (update_shape(
-                curr_dims, &max_dims, out_shape, 0, NULL) < 0) {
+                curr_dims, &max_dims, out_shape, 0, NULL, NPY_FALSE) < 0) {
             /* But do update, if there this is a ragged case */
             goto ragged_array;
         }
@@ -1382,7 +1394,7 @@ PyArray_DiscoverDTypeFromObject(
     if (PyArray_Check(obj)) {
         if (update_shape(curr_dims, &max_dims, out_shape,
                          PyArray_NDIM(obj),
-                         PyArray_SHAPE((PyArrayObject *)obj)) < 0) {
+                         PyArray_SHAPE((PyArrayObject *)obj), NPY_FALSE) < 0) {
             goto ragged_array;
         }
         descriptor = PyArray_DESCR((PyArrayObject *)obj);
@@ -1398,7 +1410,7 @@ PyArray_DiscoverDTypeFromObject(
     /* Check if it's a NumPy scalar */
     // TODO: Should be found before, unless a subclass, which is no good?
     if (PyArray_IsScalar(obj, Generic)) {
-        if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL) < 0) {
+        if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL, NPY_FALSE) < 0) {
             goto ragged_array;
         }
         descriptor = PyArray_DescrFromScalar(obj);
@@ -1422,7 +1434,7 @@ PyArray_DiscoverDTypeFromObject(
     /* Check if it's a Python scalar */
     descriptor = _array_find_python_scalar_type(obj);
     if (descriptor != NULL) {
-        if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL) < 0) {
+        if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL, NPY_FALSE) < 0) {
             goto ragged_array;
         }
         dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
@@ -1453,7 +1465,7 @@ PyArray_DiscoverDTypeFromObject(
         if (tmp == NULL) {
             PyErr_Clear();
             /* Clear the error and set to Object dtype (unless ragged) */
-            if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL) < 0) {
+            if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL, NPY_FALSE) < 0) {
                 goto ragged_array;
             }
             descriptor = PyArray_DescrFromType(NPY_OBJECT);
@@ -1465,7 +1477,7 @@ PyArray_DiscoverDTypeFromObject(
         else if (tmp != Py_NotImplemented) {
             if (update_shape(curr_dims, &max_dims, out_shape,
                              PyArray_NDIM(tmp),
-                             PyArray_SHAPE((PyArrayObject *)tmp)) < 0) {
+                             PyArray_SHAPE((PyArrayObject *)tmp), NPY_FALSE) < 0) {
                 Py_DECREF(tmp);
                 goto ragged_array;
             }
@@ -1498,7 +1510,7 @@ force_sequence:
         PyErr_Clear();
 
         /* This branch always leads to a ragged array */
-        update_shape(curr_dims, &max_dims, out_shape, 0, NULL);
+        update_shape(curr_dims, &max_dims, out_shape, 0, NULL, NPY_FALSE);
         goto ragged_array;
     }
 
@@ -1511,7 +1523,7 @@ force_sequence:
         /* Specifically do not fail on things that look like a dictionary */
         if (PyErr_ExceptionMatches(PyExc_KeyError)) {
             PyErr_Clear();
-            update_shape(curr_dims, &max_dims, out_shape, 0, NULL);
+            update_shape(curr_dims, &max_dims, out_shape, 0, NULL, NPY_FALSE);
             goto ragged_array;
         }
         goto fail;
@@ -1524,16 +1536,15 @@ force_sequence:
     npy_intp size = PySequence_Fast_GET_SIZE(seq);
     PyObject **objects = PySequence_Fast_ITEMS(seq);
 
-    int max_dims_copy = max_dims;  /* Do not update max_dims here. */
-    if (update_shape(curr_dims, &max_dims_copy,
-                     out_shape, 1, &size) < 0) {
+    if (update_shape(curr_dims, &max_dims,
+                     out_shape, 1, &size, NPY_TRUE) < 0) {
         /* But do update, if there this is a ragged case */
-        max_dims = max_dims_copy;
         goto ragged_array;
     }
     if (size == 0) {
         Py_DECREF(seq);
-        return max_dims_copy;
+        /* If the sequence is empty, we have to assume thats it... */
+        return curr_dims+1;
     }
 
     /* Recursive call for each sequence item */
