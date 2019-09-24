@@ -509,13 +509,11 @@ setArrayFromSequence(PyArrayObject *a, PyObject *s,
         goto fail;
     }
 
-    if (dim > 0) {
-        slen = PySequence_Length(s);
-        if (slen < 0) {
-            goto fail;
-        }
+    slen = PySequence_Length(s);
+    if (slen < 0) {
+        goto fail;
     }
-    if ((dim == 0) || (slen > 0)) {
+     if ((dim == 0) || (slen > 0)) {
         /* gh-13659: try __array__ before using s as a sequence */
         PyObject *tmp = _array_from_array_like(s, /*dtype*/NULL, /*writeable*/0,
                                                /*context*/NULL);
@@ -533,13 +531,6 @@ setArrayFromSequence(PyArrayObject *a, PyObject *s,
             }
             Py_DECREF(s);
             return 0;
-        }
-    }
-    if (dim == 0) {
-        /* Check slen afterwards. */
-        slen = PySequence_Length(s);
-        if (slen < 0) {
-            goto fail;
         }
     }
 
@@ -1233,8 +1224,10 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
     if ((coercion_cache != NULL) &&
             (coercion_cache->next == NULL) &&
             !(coercion_cache->sequence)) {
+        /* Set the coerced output array and clear dtype */
         *out_arr = (PyArrayObject *)coercion_cache->arr_or_sequence;
         Py_INCREF(*out_arr);
+        Py_XSETREF(*out_dtype, NULL);
         // TODO: Probably not expected to return the out dtype here :).
     }
     npy_free_coercion_cache(coercion_cache);

@@ -1224,14 +1224,14 @@ update_shape(int curr_dims, int *max_dims,
 }
 
 
-NPY_NO_EXPORT coercion_cache_obj *npy_new_coercion_cache(
+NPY_NO_EXPORT int npy_new_coercion_cache(
         PyObject *converted_obj, PyObject *arr_or_sequence, npy_bool sequence,
-        coercion_cache_obj **prev)
+        coercion_cache_obj **prev, coercion_cache_obj **initial)
 {
     coercion_cache_obj *cache = PyArray_malloc(sizeof(coercion_cache_obj));
     if (cache == NULL) {
         PyErr_NoMemory();
-        return NULL;
+        return -1;
     }
     cache->converted_obj = converted_obj;
     Py_INCREF(arr_or_sequence);
@@ -1240,11 +1240,13 @@ NPY_NO_EXPORT coercion_cache_obj *npy_new_coercion_cache(
     cache->next = NULL;
     if (*prev != NULL) {
         (*prev)->next = cache;
+        *prev = cache;
     }
     else {
         *prev = cache;
+        *initial = cache;
     }
-    return cache;
+    return 0;
 }
 
 NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *next) {
@@ -1286,13 +1288,19 @@ PyArray_DiscoverDTypeFromObject(
 
     static PyTypeObject *prev_type;
     static PyArray_DTypeMeta *prev_dtype;
+    static coercion_cache_obj *coercion_cache_end;
 
+
+    // TODO: This whole recursion needs to be cleaned up a lot...
+    // Have to split it off, and clean up to not use statics, etc!
     /* Do housekeeping for the initial call in the recursion: */
     if (curr_dims == 0) {
         /* Clear the static cache of which types we have already seen */
         prev_type = NULL;
         prev_dtype = NULL;
         *coercion_cache = NULL;
+        coercion_cache_end = NULL;
+
         *single_or_no_element = 1;
 
         /* initialize shape for shape discovery */
@@ -1381,7 +1389,7 @@ PyArray_DiscoverDTypeFromObject(
         dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
         Py_INCREF(dtype);
         /* We must cache it for dtype discovery currently (it hardly hurts) */
-        if (npy_new_coercion_cache(obj, obj, 0, coercion_cache) == NULL) {
+        if (npy_new_coercion_cache(obj, obj, 0, &coercion_cache_end, coercion_cache) < 0) {
             goto fail;
         }
         goto promote_types;
@@ -1462,7 +1470,7 @@ PyArray_DiscoverDTypeFromObject(
                 goto ragged_array;
             }
             descriptor = PyArray_DESCR(tmp);
-            if (npy_new_coercion_cache(obj, tmp, 0, coercion_cache) == NULL) {
+            if (npy_new_coercion_cache(obj, tmp, 0, &coercion_cache_end, coercion_cache) < 0) {
                 Py_DECREF(tmp);
                 goto fail;
             }
@@ -1502,7 +1510,7 @@ force_sequence:
     if (seq == NULL) {
         goto fail;
     }
-    if (npy_new_coercion_cache(obj, seq, 1, coercion_cache) == NULL) {
+    if (npy_new_coercion_cache(obj, seq, 1, &coercion_cache_end, coercion_cache) < 0) {
         Py_DECREF(seq);
         goto fail;
     }
@@ -1586,15 +1594,15 @@ fail:
 static int
 PyArray_DiscoverDescriptorFromObjectRecursive(
         PyObject *obj,
-        PyArray_Descr **out_descr, coercion_cache_obj *coercion_cache,
+        PyArray_Descr **out_descr, coercion_cache_obj **coercion_cache,
         PyArray_DTypeMeta *dtype,
         PyTypeObject **last_dtype, CastingImpl **last_castingimpl)
 {
-    coercion_cache_obj *cache = coercion_cache;
+    coercion_cache_obj *cache = *coercion_cache;
     PyArray_Descr *descr;
     if (cache != NULL && obj == cache->converted_obj) {
         /* Advance the coercion_cache linked list. This one is now used. */
-        coercion_cache = cache->next;
+        *coercion_cache = cache->next;
 
         if (cache->sequence) {
             PyObject *seq = cache->arr_or_sequence;
@@ -1635,7 +1643,9 @@ PyArray_DiscoverDescriptorFromObjectRecursive(
                         return -1;
                     }
                     /* replace the cached casting impl */
+                    Py_INCREF(Py_TYPE(descr));
                     Py_XSETREF(*last_dtype, Py_TYPE(descr));
+                    Py_INCREF(casting_impl);
                     Py_XSETREF(*last_castingimpl, casting_impl);
                 }
 
@@ -1704,8 +1714,10 @@ PyArray_DiscoverDescriptorFromObject(
     }
     PyTypeObject *last_dtype = NULL;
     CastingImpl *last_castingimpl = NULL;
+    /* Copy pointer, so recursive function can advance/share it */
+    coercion_cache_obj *coercion_cache_copy = *coercion_cache;
     int res = PyArray_DiscoverDescriptorFromObjectRecursive(
-            obj, out_descr, *coercion_cache, dtype,
+            obj, out_descr, &coercion_cache_copy, dtype,
             &last_dtype, &last_castingimpl);
     /*
      * It is possible that the above did not return a result
