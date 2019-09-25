@@ -90,13 +90,10 @@ legacy_can_cast(
     PyArray_Descr *from_descr = PyArray_DescrNewFromType(from_dtype->type_num);
     PyArray_Descr *to_descr = PyArray_DescrNewFromType(to_dtype->type_num);
     if (!PyArray_LegacyCanCastTypeTo(from_descr, to_descr, casting)) {
-        // TODO: If either is not a legacy, will need to return NotImplemented
         Py_DECREF(from_descr);
         Py_DECREF(to_descr);
-        PyErr_Format(PyExc_TypeError,
-            "cannot cast from %R to %R under the rule %i! -- from inside legacy",
-             from_dtype, to_dtype, casting);
-        return NULL;
+        Py_INCREF(Py_NotImplemented);
+        return (CastingImpl *)Py_NotImplemented;
     }
     Py_DECREF(from_descr);
     Py_DECREF(to_descr);
@@ -116,7 +113,8 @@ legacy_can_cast_to(
         return (CastingImpl *)Py_NotImplemented;
     }
     if (from_dtype->type_num >= to_dtype->type_num) {
-        // Reject to make things a bit more interesting.
+        // Reject to make things a bit more interesting. Also makes a
+        // check which only wants to know if casting is possible faster.
         Py_INCREF(Py_NotImplemented);
         return (CastingImpl *)Py_NotImplemented;
     }
@@ -378,11 +376,20 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
         // TODO: Need to clean up in this unlikely event.
         return -1;
     }
-    // For now, also register string dtypes (datetimes/timedeleta may be one)
     if (dtype_class->type_num == NPY_BOOL) {
         success = PyDict_SetItem(
                 PyArrayDTypeMeta_associated_types,
                 (PyObject *)&PyBool_Type, (PyObject *)dtype_class);
+        if (success < 0) {
+            // TODO: Need to clean up in this unlikely event.
+            return -1;
+        }
+    }
+    // TODO: Also register the (super common) double, but will need to be abstract.
+    if (dtype_class->type_num == NPY_DOUBLE) {
+        success = PyDict_SetItem(
+                PyArrayDTypeMeta_associated_types,
+                (PyObject *)&PyFloat_Type, (PyObject *)dtype_class);
         if (success < 0) {
             // TODO: Need to clean up in this unlikely event.
             return -1;
