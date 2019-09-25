@@ -4104,7 +4104,7 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs) {
     static char *kwlist[] = {"obj", "minimal", "dtype", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "O|O&O&:_discover_dtype", kwlist,
+            args, kwargs, "O|$O&O&:_discover_dtype", kwlist,
             &obj, PyArray_BoolConverter, &use_minimal,
             PyArray_DescrConverter, &fixed_descriptor)) {
         return NULL;
@@ -4114,10 +4114,11 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs) {
     int res = PyArray_DiscoverDTypeAndShapeFromObject(
             obj, use_minimal,
             fixed_descriptor,
+            NULL,
             &out_dtype,
             &out_descriptor,
             &out_dims, shape,
-            coercion_cache);
+            &coercion_cache);
 
     if (res < 0) {
         return NULL;

@@ -110,6 +110,7 @@ PyArray_DiscoverDTypeAndShapeFromObject(
         npy_bool use_minimal,
         // TODO: Add fixed DType (we do not currently support it)
         PyArray_Descr *fixed_descriptor,
+        PyObject *context,
         /* ouput arguments */
         PyObject **out_dtype,
         PyObject **out_descriptor,

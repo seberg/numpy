@@ -1214,7 +1214,7 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
     PyObject *out_dtypemeta;
     coercion_cache_obj *coercion_cache = NULL;
     int res = PyArray_DiscoverDTypeAndShapeFromObject(
-            op, NPY_FALSE, requested_dtype, &out_dtypemeta,
+            op, NPY_FALSE, requested_dtype, context, &out_dtypemeta,
             (PyObject **)out_dtype, out_ndim, out_dims,
             &coercion_cache);
     if (res < 0) {
@@ -1229,9 +1229,25 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
         Py_INCREF(*out_arr);
         Py_XSETREF(*out_dtype, NULL);
         // TODO: Probably not expected to return the out dtype here :).
+        npy_free_coercion_cache(coercion_cache);
+        Py_DECREF(out_dtypemeta);
+        return 0;
     }
     npy_free_coercion_cache(coercion_cache);
     Py_DECREF(out_dtypemeta);
+    /*
+     * Support legacy scalar behaviour, should possibly added to the
+     * coercion cache path above.
+     */
+    if ((*out_ndim == 0) && (requested_dtype != NULL) &&
+            (requested_dtype != *out_dtype) &&
+            PyArray_IsScalar(op, Generic)) {
+        Py_DECREF(*out_dtype);
+        *out_dtype = PyArray_DescrFromScalar(op);
+        if (*out_dtype == NULL) {
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -1242,6 +1258,7 @@ PyArray_DiscoverDTypeAndShapeFromObject(
         npy_bool use_minimal,
         // TODO: Add fixed DType (we do not currently support it)
         PyArray_Descr *fixed_descriptor,
+        PyObject *context,
         /* ouput arguments */
         PyObject **out_dtype,
         PyObject **out_descriptor,
@@ -1283,10 +1300,15 @@ PyArray_DiscoverDTypeAndShapeFromObject(
                 if ((fixed_descriptor->names == NULL) &&
                         (fixed_descriptor->subarray == NULL)) {
                     fixed_dtype = (PyArray_DTypeMeta *) Py_TYPE(fixed_descriptor);
+                    Py_INCREF(fixed_dtype);
+                    fixed_descriptor = NULL;
                 }
             }
             else {
+                /* String and Unicode */
                 fixed_dtype = (PyArray_DTypeMeta *) Py_TYPE(fixed_descriptor);
+                Py_INCREF(fixed_dtype);
+                fixed_descriptor = NULL;
             }
         }
         else if (PyDataType_ISDATETIME(fixed_descriptor)) {
@@ -1297,7 +1319,27 @@ PyArray_DiscoverDTypeAndShapeFromObject(
             }
             if (meta->base == NPY_FR_GENERIC) {
                 fixed_dtype = (PyArray_DTypeMeta *)Py_TYPE(fixed_descriptor);
+                Py_INCREF(fixed_dtype);
+                fixed_descriptor = NULL;
             }
+        }
+
+        // TODO: This whole fixed descriptor business is annoying, can we remove?
+        //       For now this is just a copy from the old code...
+        //       Note that ArrayScalars ignore this...
+        //       Maybe the solution would be to add scalars to the cache?!
+        if (fixed_descriptor != NULL && (
+                fixed_descriptor->type_num == NPY_STRING ||
+                fixed_descriptor->type_num == NPY_UNICODE ||
+                (fixed_descriptor->type_num == NPY_VOID &&
+                    (fixed_descriptor->names || fixed_descriptor->subarray)) ||
+                 fixed_descriptor->type == NPY_CHARLTR ||
+                 fixed_descriptor->type_num == NPY_OBJECT)) {
+            /* We have to use the fixed descriptor */
+        }
+        else {
+            /* Ignore it */
+            fixed_descriptor = NULL;
         }
     }
 
@@ -1307,28 +1349,49 @@ PyArray_DiscoverDTypeAndShapeFromObject(
     *out_dims = PyArray_DiscoverDTypeFromObject(
             obj, NPY_MAXDIMS, 0, (PyArray_DTypeMeta **)out_dtype,
             shape, use_minimal,
-            coercion_cache, &single_or_no_element, NULL, NULL,
+            coercion_cache, &single_or_no_element, NULL, context,
             stop_at_tuple, string_is_sequence);
     if (*out_dims < 0) {
         npy_free_coercion_cache(*coercion_cache);
+        Py_XDECREF(fixed_dtype);
         return -1;
     }
-    if (fixed_dtype != NULL) {
-        /* Discard the discovered one, we got a fixed one passed in */
+    if (*out_dims == 0) {
+        // TODO: What the heck, lucky us can ignore the the fixed descriptor!
+        fixed_descriptor = NULL;
+    }
+
+    if (fixed_descriptor != NULL) {
+        // TODO: Like the above, this whole code bunch is probably more or less
+        //       useless....
+        /* If a specific descritor was requested, we should honor that?! */
+        Py_INCREF(fixed_descriptor);
+        *out_descriptor = (PyObject *)fixed_descriptor;
+        Py_INCREF(Py_TYPE(fixed_descriptor));
+        Py_XSETREF(*out_dtype, (PyObject *)Py_TYPE(fixed_descriptor));
+    }
+
+    if (fixed_dtype) {
+        /* We ran the old thing, but only for shape discovery, now use input */
         Py_XDECREF(*out_dtype);
         *out_dtype = (PyObject *)fixed_dtype;
-        Py_INCREF(*out_dtype);
+        fixed_dtype = NULL;
     }
 
     if (*out_dtype == NULL) {
         // TODO: Use the default one, but this is possibly not correct
         //       for the minimal code path (which we currently do not use/
         //       support though, or at least only for scalars...)!
-        *out_descriptor = (PyObject *)PyArray_DescrFromType(NPY_DEFAULT_TYPE);
-        if (*out_descriptor == NULL) {
-            return -1;
+        if (fixed_descriptor != NULL) {
+            Py_INCREF(fixed_descriptor);
+            *out_descriptor = (PyObject *)fixed_descriptor;
         }
-
+        else {
+            *out_descriptor = (PyObject *) PyArray_DescrFromType(NPY_DEFAULT_TYPE);
+            if (*out_descriptor == NULL) {
+                return -1;
+            }
+        }
         *out_dtype = (PyObject *)Py_TYPE(*out_descriptor);
         Py_INCREF(*out_dtype);
         return 0;

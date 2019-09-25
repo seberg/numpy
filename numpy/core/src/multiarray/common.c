@@ -1321,12 +1321,15 @@ PyArray_DiscoverDTypeFromObject(
         }
     }
 
-    /* obj is a Tuple, but tuples aren't expanded */
+    /* obj is a string and we have a "c" dtype, so make the string a sequence */
     // TODO: slow, but do this check first (it should never be used)
     if (string_is_sequence) {
         /* Do not bother to promote, it was already defined as a char. */
         if (PyString_Check(obj) || PyUnicode_Check(obj)) {
-            goto force_sequence;
+            /* Of course we can only do that if there is more than one char */
+            if (PySequence_Length(obj) != 1) {
+                goto force_sequence;
+            }
         }
     }
 
@@ -1463,16 +1466,7 @@ PyArray_DiscoverDTypeFromObject(
         PyObject *tmp = _array_from_array_like(
                 obj,  requested_dtype,0, context);
         if (tmp == NULL) {
-            PyErr_Clear();
-            /* Clear the error and set to Object dtype (unless ragged) */
-            if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL, NPY_FALSE) < 0) {
-                goto ragged_array;
-            }
-            descriptor = PyArray_DescrFromType(NPY_OBJECT);
-            dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
-            Py_INCREF(dtype);
-            Py_DECREF(descriptor);
-            goto promote_types;
+            goto fail;
         }
         else if (tmp != Py_NotImplemented) {
             if (update_shape(curr_dims, &max_dims, out_shape,
