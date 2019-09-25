@@ -3495,7 +3495,7 @@ PyArray_GetDTypeTransferFunction(int aligned,
     // But: We could keep the assumption for now and cram the logic into CastingImpl.
     PyArray_StridedUnaryOp *casting_stransfer;
     NpyAuxData *casting_transferdata;
-    int casting_needs_api;
+    int casting_needs_api = 0;  // User initializes it I guess?
     int res = casting_impl->get_transferfunction(casting_impl,
             aligned, src_stride, dst_stride,
             out_descrs[0], out_descrs[1], move_references,
@@ -3508,7 +3508,7 @@ PyArray_GetDTypeTransferFunction(int aligned,
     }
     *out_stransfer = casting_stransfer;
     *out_transferdata = casting_transferdata;
-    *out_needs_api = casting_needs_api;
+    *out_needs_api = (*out_needs_api || casting_needs_api);
     return NPY_SUCCEED;
 
 fallback:
