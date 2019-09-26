@@ -356,7 +356,8 @@ multiarray_funcs_api = {
 }
 
 ufunc_types_api = {
-    'PyUFunc_Type':                             (0,)
+    'PyUFunc_Type':                             (0,),
+    'PyUFuncImpl_Type':                         (44,),
 }
 
 ufunc_funcs_api = {
@@ -407,6 +408,7 @@ ufunc_funcs_api = {
     # End 1.8 API
     'PyUFunc_FromFuncAndDataAndSignatureAndIdentity': (42,),
     # End 1.16 API
+    'PyUFunc_NewStyle_New': (43,),
 }
 
 # List of all the dicts which define the C API

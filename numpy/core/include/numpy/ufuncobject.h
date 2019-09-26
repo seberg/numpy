@@ -230,7 +230,10 @@ typedef struct _tagPyUFuncObject {
         /* Identity for reduction, when identity == PyUFunc_IdentityValue */
         PyObject *identity_value;
 
+        PyObject *resolvers;
+        PyObject *ufunc_impl_cache;
 } PyUFuncObject;
+
 
 #include "arrayobject.h"
 /* Generalized ufunc; 0x0001 reserved for possible use as CORE_ENABLED */
