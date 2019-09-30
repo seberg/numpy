@@ -1494,6 +1494,7 @@ typedef struct {
     int nargs;
 } _ufunc_masker_data;
 
+
 static NpyAuxData *
 ufunc_masker_data_clone(NpyAuxData *data)
 {

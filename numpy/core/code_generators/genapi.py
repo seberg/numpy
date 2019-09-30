@@ -63,6 +63,7 @@ API_FILES = [join('multiarray', 'alloc.c'),
              join('multiarray', 'usertypes.c'),
              join('umath', 'loops.c.src'),
              join('umath', 'ufunc_object.c'),
+             join('umath', 'ufunc_impl.c'),
              join('umath', 'ufunc_type_resolution.c'),
              join('umath', 'reduction.c'),
             ]
