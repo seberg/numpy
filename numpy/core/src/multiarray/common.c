@@ -1464,7 +1464,9 @@ PyArray_DiscoverDTypeFromObject(
 
     {
         PyObject *tmp = _array_from_array_like(
-                obj,  requested_dtype,0, context);
+                obj,  requested_dtype,0,
+                /* context is UFunc call info; not passed to nested objs */
+                curr_dims == 0 ? context : NULL);
         if (tmp == NULL) {
             goto fail;
         }
