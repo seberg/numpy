@@ -34,14 +34,15 @@ ufuncimpl_teardown_check_pyexc_floatstatus(
 
 
 static void
-ufuncimpl_dealloc(PyUFuncImplObject *ufuncimpl)
+ufuncimpl_dealloc(PyUFuncImplObject *ufunc_impl)
 {
     /* TODO: May need cyclic GC support? */
 
-    if (ufuncimpl->identity == PyUFunc_IdentityValue) {
-        Py_DECREF(ufuncimpl->identity_value);
+    if (ufunc_impl->identity == PyUFunc_IdentityValue) {
+        Py_DECREF(ufunc_impl->identity_value);
     }
-    Py_XDECREF(ufuncimpl->adapt_dtype_pyfunc);
+    Py_XDECREF(ufunc_impl->adapt_dtype_pyfunc);
+    PyDataMem_FREE(ufunc_impl->dtype_signature);
 }
 
 

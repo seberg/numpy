@@ -27,6 +27,7 @@
 #define _MULTIARRAYMODULE
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 
+#include <ctors.h>
 #include "Python.h"
 
 #include "npy_config.h"
@@ -1025,6 +1026,144 @@ _borrowed_reference(PyObject *obj, PyObject **out)
     return NPY_SUCCEED;
 }
 
+
+/*
+ * Parses the dtype signature object into DTypeMeta instances.
+ */
+static int
+_parse_dtype_signature_obj(PyUFuncObject *ufunc,
+                     PyObject *type_tup,
+                     PyArray_DTypeMeta **specified_types)
+{
+    // NOTE: REVIEW COMMENT: This is mildly modified code copied from
+    //       ufunc_type_resolution.c, which handled the parsing previously.
+    int i = 0;
+    int n, n_specified;
+    int nop = ufunc->nargs, nin = ufunc->nin;
+
+    /* Fill in specified_types from the tuple or string */
+    if (PyTuple_Check(type_tup)) {
+        int nonecount = 0;
+        n = PyTuple_GET_SIZE(type_tup);
+        if (n != 1 && n != nop) {
+            PyErr_Format(PyExc_ValueError,
+                         "a type-tuple must be specified "
+                         "of length 1 or %d for ufunc '%s'", (int)nop,
+                         ufunc_get_name_cstr(ufunc));
+            return -1;
+        }
+
+        for (i = 0; i < n; ++i) {
+            PyObject *item = PyTuple_GET_ITEM(type_tup, i);
+            PyArray_Descr *descr;
+
+            specified_types[i] = NULL;
+            if (item == Py_None) {
+                ++nonecount;
+            }
+            // TODO: This should fetch the DTypeMeta, not the descriptor.
+            else if (!PyArray_DescrConverter(item, &descr)) {
+                goto fail;
+            }
+            specified_types[i] = (PyArray_DTypeMeta *)Py_TYPE(descr);
+            Py_INCREF(specified_types[i]);
+            Py_DECREF(descr);
+        }
+
+        if (nonecount == n) {
+            PyErr_SetString(PyExc_ValueError,
+                            "the type-tuple provided to the ufunc "
+                            "must specify at least one none-None dtype");
+            goto fail;
+        }
+
+        n_specified = n - nonecount;
+    }
+    else if (PyBytes_Check(type_tup) || PyUnicode_Check(type_tup)) {
+        Py_ssize_t length;
+        char *str;
+        PyObject *str_obj = NULL;
+
+        if (PyUnicode_Check(type_tup)) {
+            str_obj = PyUnicode_AsASCIIString(type_tup);
+            if (str_obj == NULL) {
+                goto fail;
+            }
+            type_tup = str_obj;
+        }
+
+        if (PyBytes_AsStringAndSize(type_tup, &str, &length) < 0) {
+            Py_XDECREF(str_obj);
+            goto fail;
+        }
+        if (length != 1 && (length != nop + 2 ||
+                            str[nin] != '-' || str[nin+1] != '>')) {
+            PyErr_Format(PyExc_ValueError,
+                         "a type-string for %s, "   \
+                                 "requires 1 typecode, or "
+                         "%d typecode(s) before " \
+                                 "and %d after the -> sign",
+                         ufunc_get_name_cstr(ufunc),
+                         ufunc->nin, ufunc->nout);
+            Py_XDECREF(str_obj);
+            goto fail;
+        }
+        if (length == 1) {
+            /*
+             * The current logic is to force the first output dtype, note
+             * that reductions force the inputs.
+             */
+            PyArray_Descr *descr;
+            n_specified = 1;
+            for (i = 0; i < nop; i++) {
+                specified_types[i] = NULL;
+            }
+            descr = PyArray_DescrFromType(str[0]);
+            if (descr == NULL) {
+                goto fail;
+            }
+            specified_types[ufunc->nin] = (PyArray_DTypeMeta *)Py_TYPE(descr);
+            Py_INCREF(specified_types[ufunc->nin]);
+            Py_DECREF(descr);
+        }
+        else {
+            PyArray_Descr *descr;
+
+            n_specified = (int)nop;
+
+            for (i = 0; i < nop; ++i) {
+                npy_intp istr = i < nin ? i : i+2;  /* skip "->" */
+
+                descr = PyArray_DescrFromType(str[istr]);
+                if (descr == NULL) {
+                    goto fail;
+                }
+                specified_types[i] = (PyArray_DTypeMeta *)Py_TYPE(descr);
+                Py_INCREF(specified_types[ufunc->nin]);
+                Py_DECREF(descr);
+            }
+        }
+        Py_XDECREF(str_obj);
+    }
+    else {
+        PyErr_SetString(PyExc_ValueError,
+                "the signature object to a ufunc must be a tuple or a string.");
+        return -1;
+    }
+
+    return n_specified;
+
+fail:
+    nop = i + 1;
+    for (i =0 ; i < nop; i++) {
+        Py_XDECREF(specified_types[i]);
+        specified_types[i] = NULL;
+    }
+    return -1;
+}
+
+
+
 /*
  * Parses the positional and keyword arguments for a generic ufunc call.
  * All returned arguments are new references (with optional ones NULL
@@ -1032,33 +1171,25 @@ _borrowed_reference(PyObject *obj, PyObject **out)
  */
 static int
 get_ufunc_arguments(PyUFuncObject *ufunc,
-                    PyObject *args, PyObject *kwds,
-                    PyArrayObject **out_op,
+                    PyObject *kwds,
                     NPY_ORDER *out_order,
                     NPY_CASTING *out_casting,
                     PyObject **out_extobj,
-                    PyObject **out_typetup,  /* type: Tuple[np.dtype] */
                     int *out_subok,  /* bool */
                     PyArrayObject **out_wheremask, /* PyArray of bool */
                     PyObject **out_axes,  /* type: List[Tuple[T]] */
                     PyObject **out_axis,  /* type: T */
-                    int *out_keepdims)  /* bool */
+                    int *out_keepdims,  /* bool */
+                    PyArray_DTypeMeta **out_dtypes)
 {
-    int i, nargs;
-    int nin = ufunc->nin;
-    int nout = ufunc->nout;
-    int nop = ufunc->nargs;
-    PyObject *obj, *context;
+    int i;
+    PyObject *typetup = NULL;
     PyArray_Descr *dtype = NULL;
     /*
      * Initialize output objects so caller knows when outputs and optional
      * arguments are set (also means we can safely XDECREF on failure).
      */
-    for (i = 0; i < nop; i++) {
-        out_op[i] = NULL;
-    }
     *out_extobj = NULL;
-    *out_typetup = NULL;
     if (out_axes != NULL) {
         *out_axes = NULL;
     }
@@ -1067,53 +1198,6 @@ get_ufunc_arguments(PyUFuncObject *ufunc,
     }
     if (out_wheremask != NULL) {
         *out_wheremask = NULL;
-    }
-
-    /* Check number of arguments */
-    nargs = PyTuple_Size(args);
-    if ((nargs < nin) || (nargs > nop)) {
-        PyErr_SetString(PyExc_ValueError, "invalid number of arguments");
-        return -1;
-    }
-
-    /* Get input arguments */
-    for (i = 0; i < nin; ++i) {
-        obj = PyTuple_GET_ITEM(args, i);
-
-        if (PyArray_Check(obj)) {
-            PyArrayObject *obj_a = (PyArrayObject *)obj;
-            out_op[i] = (PyArrayObject *)PyArray_FromArray(obj_a, NULL, 0);
-        }
-        else {
-            if (!PyArray_IsScalar(obj, Generic)) {
-                /*
-                 * TODO: There should be a comment here explaining what
-                 *       context does.
-                 */
-                context = Py_BuildValue("OOi", ufunc, args, i);
-                if (context == NULL) {
-                    goto fail;
-                }
-            }
-            else {
-                context = NULL;
-            }
-            out_op[i] = (PyArrayObject *)PyArray_FromAny(obj,
-                                    NULL, 0, 0, 0, context);
-            Py_XDECREF(context);
-        }
-
-        if (out_op[i] == NULL) {
-            goto fail;
-        }
-    }
-
-    /* Get positional output arguments */
-    for (i = nin; i < nargs; ++i) {
-        obj = PyTuple_GET_ITEM(args, i);
-        if (_set_out_array(obj, out_op + i) < 0) {
-            goto fail;
-        }
     }
 
     /*
@@ -1145,7 +1229,7 @@ get_ufunc_arguments(PyUFuncObject *ufunc,
          */
         if (parse_ufunc_keywords(
                 ufunc, kwds, kwnames,
-                _borrowed_reference, &out_kwd,
+                _borrowed_reference, &out_kwd,  /* unused result */
                 _wheremask_converter, out_wheremask,  /* new reference */
                 _new_reference, out_axes,
                 _new_reference, out_axis,
@@ -1154,7 +1238,7 @@ get_ufunc_arguments(PyUFuncObject *ufunc,
                 PyArray_OrderConverter, out_order,
                 PyArray_DescrConverter2, &dtype,   /* new reference */
                 _subok_converter, out_subok,
-                _new_reference, out_typetup,
+                _new_reference, &typetup,
                 _borrowed_reference, &sig,
                 _new_reference, out_extobj) < 0) {
             goto fail;
@@ -1164,45 +1248,7 @@ get_ufunc_arguments(PyUFuncObject *ufunc,
          * and that they are either None or an array.
          */
         if (out_kwd) {  /* borrowed reference */
-            /*
-             * Output arrays are generally specified as a tuple of arrays
-             * and None, but may be a single array or None for ufuncs
-             * with a single output.
-             */
-            if (nargs > nin) {
-                PyErr_SetString(PyExc_ValueError,
-                                "cannot specify 'out' as both a "
-                                "positional and keyword argument");
-                goto fail;
-            }
-            if (PyTuple_CheckExact(out_kwd)) {
-                if (PyTuple_GET_SIZE(out_kwd) != nout) {
-                    PyErr_SetString(PyExc_ValueError,
-                                    "The 'out' tuple must have exactly "
-                                    "one entry per ufunc output");
-                    goto fail;
-                }
-                /* 'out' must be a tuple of arrays and Nones */
-                for(i = 0; i < nout; ++i) {
-                    PyObject *val = PyTuple_GET_ITEM(out_kwd, i);
-                    if (_set_out_array(val, out_op+nin+i) < 0) {
-                        goto fail;
-                    }
-                }
-            }
-            else if (nout == 1) {
-                /* Can be an array if it only has one output */
-                if (_set_out_array(out_kwd, out_op + nin) < 0) {
-                    goto fail;
-                }
-            }
-            else {
-                PyErr_SetString(PyExc_TypeError,
-                        nout > 1 ? "'out' must be a tuple of arrays" :
-                                   "'out' must be an array or a tuple with "
-                                   "a single array");
-                goto fail;
-            }
+            /* Do nothing, we already parsed input/output arguments. */
         }
         /*
          * Check we did not get both axis and axes, or multiple ways
@@ -1215,29 +1261,48 @@ get_ufunc_arguments(PyUFuncObject *ufunc,
             goto fail;
         }
         if (sig) {  /* borrowed reference */
-            if (*out_typetup != NULL) {
+            if (typetup != NULL) {
                 PyErr_SetString(PyExc_ValueError,
                                 "cannot specify both 'sig' and 'signature'");
                 goto fail;
             }
             Py_INCREF(sig);
-            *out_typetup = sig;
+            typetup = sig;
+        }
+        if (typetup) {
+            /*
+             * This, as well as the dtype kwarg below, should deprecate passing
+             * in dtype instances. The instance itself is ignored in any case,
+             * so instead the class should be passed in (note that the scalar
+             * type however, should remain valid).
+             */
+            if (_parse_dtype_signature_obj(ufunc, typetup, out_dtypes) < 0) {
+                goto fail;
+            }
         }
         if (dtype) {  /* new reference */
-            if (*out_typetup != NULL) {
+            if (typetup != NULL) {
                 PyErr_SetString(PyExc_RuntimeError,
                                 "cannot specify both 'signature' and 'dtype'");
                 goto fail;
             }
-            /* Note: "N" uses the reference */
-            *out_typetup = Py_BuildValue("(N)", dtype);
+            /*
+             * NOTE: This is legacy behaviour, it should make more sense to
+             *       force the output arguments to the specified dtype, since
+             *       that controls the precision of the loop more directly.
+             *       (in almost all cases, that should still do the same)
+             */
+            out_dtypes[0] = (PyArray_DTypeMeta *)Py_TYPE(dtype);
+            for (i = 1; i < ufunc->nargs; i++) {
+                out_dtypes[i] = NULL;
+            }
         }
     }
     return 0;
 
 fail:
     Py_XDECREF(dtype);
-    Py_XDECREF(*out_typetup);
+    Py_XDECREF(typetup);
     Py_XDECREF(*out_extobj);
     if (out_wheremask != NULL) {
         Py_XDECREF(*out_wheremask);
@@ -1247,9 +1312,6 @@ fail:
     }
     if (out_axis != NULL) {
         Py_XDECREF(*out_axis);
-    }
-    for (i = 0; i < nop; i++) {
-        Py_XDECREF(out_op[i]);
     }
     return -1;
 }
@@ -2604,18 +2666,6 @@ PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
         goto fail;
     }
 
-    NPY_UF_DBG_PRINT("Getting arguments\n");
-
-    /*
-     * Get all the arguments.
-     */
-    retval = get_ufunc_arguments(ufunc, args, kwds,
-                op, &order, &casting, &extobj,
-                &type_tup, &subok, NULL, &axes, &axis, &keepdims);
-    if (retval < 0) {
-        NPY_UF_DBG_PRINT("Failure in getting arguments\n");
-        return retval;
-    }
     /*
      * If keepdims was passed in (and thus changed from the initial value
      * on top), check the gufunc is suitable, i.e., that its inputs share
@@ -3506,17 +3556,6 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
         arr_prep[i] = NULL;
     }
 
-    NPY_UF_DBG_PRINT("Getting arguments\n");
-
-    /* Get all the arguments */
-    retval = get_ufunc_arguments(ufunc, args, kwds,
-                op, &order, &casting, &extobj,
-                &type_tup, &subok, &wheremask, NULL, NULL, NULL);
-    if (retval < 0) {
-        NPY_UF_DBG_PRINT("Failure in getting arguments\n");
-        return retval;
-    }
-
     /* Get the buffersize and errormask */
     if (_get_bufsize_errmask(extobj, ufunc_name, &buffersize, &errormask) < 0) {
         retval = -1;
@@ -3536,27 +3575,15 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
 
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
-    // TODO: Resolution must use the DType(Meta)
-    retval = ufunc_resolve_ufunc_impl(ufunc, dtypes, &ufunc_impl);
-    if (retval < 0) {
+    /* Call a (user) supplied dtype adaptation function */
+    /* TODO: If ufunc impls get more logic, this part might move? */
+    if (ufunc_impl->adapt_dtype_func(ufunc_impl,
+                dtypes, out_descr, casting) < 0) {
         goto fail;
     }
-    if (ufunc_impl == NULL) {
-        /* New style resolution did not find a loop, but no error occurred */
-
-    }
-    // TODO: After the resolution, we finish array coercion (if arrays)
-
-    if (ufunc_impl->adapt_dtype_func != NULL) {
-        /* Call a (user) supplied dtype adaptation function */
-        /* TODO: If ufunc impls get more logic, this part might move? */
-        if (ufunc_impl->adapt_dtype_func(ufunc_impl, dtypes, casting) < 0) {
-            goto fail;
-        }
-        // TODO: Should be necessary to validate casting the first time around!
-        if (PyUFunc_ValidateCasting(ufunc, casting, op, dtypes) < 0) {
-            goto fail;
-        }
+    // TODO: Should be necessary to validate casting the first time around!
+    if (PyUFunc_ValidateCasting(ufunc, casting, op, dtypes) < 0) {
+        goto fail;
     }
 
     if (wheremask != NULL) {
@@ -5074,14 +5101,51 @@ fail:
 static PyObject *
 ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
 {
+    int nargs = ufunc->nargs, nin = ufunc->nin, nout = ufunc->nout;
     int i;
-    PyArrayObject *mps[NPY_MAXARGS];
-    PyObject *retobj[NPY_MAXARGS];
-    PyObject *wraparr[NPY_MAXARGS];
+    PyUFuncImplObject *ufunc_impl = NULL;
+
+    PyArrayObject *mps[nargs];
+    PyObject *retobj[nargs];
+    PyObject *wraparr[nargs];
+
+    PyArray_DTypeMeta *fixed_dtypes[nargs];
+    PyArray_Descr *fixed_descriptors[nargs];  /* only used for legacy */
+
+    PyArrayObject *wheremask = NULL;
+    NPY_ORDER order;
+    NPY_CASTING casting;
+    int subok, keepdims;
+    PyObject *extobj = NULL;
+    PyObject *axes = NULL, *axis = NULL;
     PyObject *override = NULL;
     ufunc_full_args full_args = {NULL, NULL};
     int errval;
 
+    /* Information stored for coercion */
+    // TODO: Refactor into a a struct...
+    PyArray_DTypeMeta *op_dtypes[nin];
+    coercion_cache_obj *op_coercion_cache[nin];
+    npy_bool single_or_no_element[nin];
+    int ndim[nin];
+    npy_intp shapes[nin][NPY_MAXDIMS];
+
+    for (i = 0; i < nargs; i++) {
+        op_dtypes[i] = NULL;
+        op_coercion_cache[i] = NULL;
+        fixed_descriptors[i] = NULL;
+    }
+    /* Borrowed references for dtype resolution: */
+    PyArray_DTypeMeta *resolver_dtypes[nargs];
+
+
+    if (make_full_arg_tuple(&full_args, nin, nout, args, kwds) < 0) {
+        goto fail;
+    }
+
+    // NOTE: the full arg tuple already has much of the parsing work required
+    //       by the override function. It should only do extra work after
+    //       realizing that dispatching is necessary.
     errval = PyUFunc_CheckOverride(ufunc, "__call__", args, kwds, &override);
     if (errval) {
         return NULL;
@@ -5090,6 +5154,197 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         return override;
     }
 
+    /*
+     * We have to fetch at least the passed in type tuple (sig/signature/dtypes)
+     * so it is necessary to do the parsing before finding the DType class
+     * specific UFuncImpl.
+     */
+    NPY_UF_DBG_PRINT("Getting arguments\n");
+    if (ufunc->core_enabled)
+        errval = get_ufunc_arguments(ufunc,
+                kwds, &order, &casting, &extobj,
+                &subok, NULL, &axes, &axis, &keepdims, fixed_dtypes);
+    else {
+        errval = get_ufunc_arguments(ufunc,
+                kwds, &order, &casting, &extobj,
+                &subok, &wheremask, NULL, NULL, NULL, fixed_dtypes);
+    }
+    if (errval < 0) {
+        NPY_UF_DBG_PRINT("Failure in getting arguments\n");
+        return NULL;
+    }
+
+    /*
+     * Do the first pass of array coercion, to be able to find the correct
+     * DTypes for the ufunc call. (the actual coercion may happen later,
+     * since in some cases, knowing the loop dtype may be of advantage
+     * during coercion). TODO: This may be unnecessary, or even too smart?!
+     */
+
+    for (i = 0; i < nin; i++) {
+        // TODO: Really need to clean up that signature, it is hell (and
+        //       much is unnecessary. A single struct for all the output
+        //       information is a start.
+        npy_intp shape[NPY_MAXDIMS];
+        // TODO: We do not actually need context most of the time.
+        PyObject *context = PyTuple_New(3);
+        if (context == NULL) {
+            goto fail;
+        }
+
+        // NOTE: Previously this passed in the args, which could (but usually
+        //       would not) contain also the output arguments.
+        Py_INCREF(ufunc);
+        PyTuple_SET_ITEM(context, 0, (PyObject *)ufunc);
+        Py_INCREF(full_args.in);
+        PyTuple_SET_ITEM(context, 1, full_args.in);
+        PyObject *idx = PyLong_FromLong(i);
+        PyTuple_SET_ITEM(context, 2, idx);
+        if (idx == NULL) {
+            Py_DECREF(context);
+            goto fail;
+        }
+
+        ndim[i] = PyArray_DiscoverDTypeFromObject(
+                PyTuple_GET_ITEM(full_args.in, i),
+                NPY_MAXDIMS, 0, &op_dtypes[i], shape, NPY_TRUE,
+                &op_coercion_cache[i], &single_or_no_element[i], NULL,
+                context, NPY_FALSE, NPY_FALSE);
+        Py_DECREF(context);
+        if (ndim[i] < 0) {
+            goto fail;
+        }
+
+        // TODO: The resolver_dtypes must be abstract if the input is 0D and
+        //       (unless all of them are of course), that should be
+        //       deprecated, but will add seriously annoying logic here.
+
+        /* If passed, fixed_dtypes always have priority. */
+        if (fixed_dtypes[i] != NULL) {
+            resolver_dtypes[i] = fixed_dtypes[i];
+        }
+        else {
+            resolver_dtypes[i] = op_dtypes[i];
+        }
+    }
+    /* output arrays do not take part, but fixed dtypes always have priority */
+    for (i = nin; i < nargs; i++) {
+        resolver_dtypes[i] = fixed_dtypes[i];
+    }
+
+    errval = ufunc_resolve_ufunc_impl(ufunc, resolver_dtypes, &ufunc_impl);
+    /* Note that for support of legacy behaviour, ufunc_impl may not be set */
+    if (errval < 0) {
+        return NULL;
+    }
+    if (ufunc_impl != NULL) {
+        /*
+         * Use the ufunc implementations dtypes to finish coercion.
+         * They could differ in which case we may need one cast less.
+         */
+        for (i = 0; i < nargs; i++) {
+            resolver_dtypes[i] = ufunc_impl->dtype_signature[i];
+        }
+    }
+
+    /* Finish the actual array coercion for the input arrays */
+    // TODO: Probably should refactor, and things will also change in general
+    //       here ... :(
+    for (i = 0; i < nin; i++) {
+        PyArray_Descr *descr;
+
+        if (single_or_no_element[i] &&
+                op_coercion_cache[i] != NULL &&
+                !op_coercion_cache[i]->sequence) {
+            mps[i] = (PyArrayObject *)op_coercion_cache[i]->arr_or_sequence;
+        }
+        else {
+            errval = PyArray_DiscoverDescriptorFromObject(
+                    PyTuple_GET_ITEM(full_args.in, i), &descr,
+                    &op_coercion_cache[i],
+                    single_or_no_element[i], fixed_dtypes[i]);
+            npy_free_coercion_cache(op_coercion_cache[i]);
+            op_coercion_cache[i] = NULL;
+
+            if (errval) {
+                goto fail;
+            }
+
+            mps[i] = (PyArrayObject *)PyArray_NewFromDescr(
+                    &PyArray_Type, descr, ndim[i], shapes[i], NULL, NULL, 0,
+                    NULL);
+
+            errval = PyArray_AssignFromSequence(
+                    mps[i], PyTuple_GET_ITEM(full_args.in, i));
+            if (errval < 0) {
+                goto fail;
+            }
+        }
+    }
+
+    /* And handle the output arrays */
+    if (full_args.out != NULL) {
+        for (i = nin; i < nargs; i++) {
+            errval = _set_out_array(
+                    PyTuple_GET_ITEM(full_args.out, i-nin), mps);
+            if (errval < 0) {
+                goto fail;
+            }
+        }
+    }
+
+    if (ufunc_impl == NULL) {
+        int any_fixed = 0;
+        PyObject *type_tuple = PyTuple_New(nargs);
+        /* New style resolution did not find a loop, but no error occurred */
+        for (i = 0; i < nargs; i++) {
+            if (mps[i] != NULL) {
+                PyArray_DTypeMeta *dtype = (
+                        (PyArray_DTypeMeta *)Py_TYPE(PyArray_DESCR(mps[i])));
+                if (!dtype->is_legacy_wrapper) {
+                    // TODO: Fix error, do not try legacy for non-legacy dtypes
+                    // TODO: Build in ones will need to stay "legacy" here...
+                    PyErr_SetString(PyExc_TypeError,
+                            "no ufunc loop");
+                    goto fail;
+                }
+            }
+            if (fixed_dtypes[i] != NULL) {
+                any_fixed = 1;
+                PyArray_Descr *descr = fixed_dtypes[i]->dt_slots->default_descr(
+                        fixed_dtypes[i]);
+                if ((descr == NULL) || !fixed_dtypes[i]->is_legacy_wrapper) {
+                    // TODO: Maybe chain here, if it is flexible, this should not
+                    //       work...
+                    Py_XDECREF(descr);
+                    PyErr_SetString(PyExc_TypeError,
+                                    "no ufunc loop");
+                    goto fail;
+                }
+                PyTuple_SET_ITEM(type_tuple, i, (PyObject *)descr);
+            }
+            else {
+                Py_INCREF(Py_None);
+                PyTuple_SET_ITEM(type_tuple, i, Py_None);
+            }
+        }
+        if (!any_fixed) {
+            Py_DECREF(type_tuple);
+            type_tuple = NULL;
+        }
+        errval = ufunc->type_resolver(ufunc,
+                casting, mps, type_tuple, fixed_descriptors);
+        if (errval < 0) {
+            goto fail;
+        }
+    }
+
+    // TODO: At this point, we already should have array objects!
+    //       So need to do the type resolution/dispatching before here.
+    //       Live with the fact that I may need to do duplicate work for
+    //       old style resolution!? (Probably better to just do that.)
+    // TODO: Array-wrap logic can stay inside the UFunc, but scalar logic
+    //       may actually make more sense in the UFuncImpl, hmmm!
     errval = PyUFunc_GenericFunction(ufunc, args, kwds, mps);
     if (errval < 0) {
         return NULL;
@@ -5117,9 +5372,6 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
      * None --- array-object passed in don't call PyArray_Return
      * method --- the __array_wrap__ method to call.
      */
-    if (make_full_arg_tuple(&full_args, ufunc->nin, ufunc->nout, args, kwds) < 0) {
-        goto fail;
-    }
     _find_array_wrap(full_args, kwds, wraparr, ufunc->nin, ufunc->nout);
 
     /* wrap outputs */

@@ -9,3 +9,4 @@ Compatibility breaking changes in UFuncs:
     Void type loops registered within numpy, should be generic
     enough to never clash (the main/only candidate being equal
     which is well defined, assuming metadata is not used).
+
