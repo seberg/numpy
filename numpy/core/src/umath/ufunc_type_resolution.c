@@ -1487,6 +1487,22 @@ PyUFunc_DefaultLegacyInnerLoopSelector(PyUFuncObject *ufunc,
     return raise_no_loop_found_error(ufunc, dtypes);
 }
 
+
+NPY_NO_EXPORT int
+object_ufunc_loop_selector(PyUFuncObject *ufunc,
+                           PyArray_Descr **NPY_UNUSED(dtypes),
+                           PyUFuncGenericFunction *out_innerloop,
+                           void **out_innerloopdata,
+                           int *out_needs_api)
+{
+    *out_innerloop = ufunc->functions[0];
+    *out_innerloopdata = ufunc->data[0];
+    *out_needs_api = 1;
+
+    return 0;
+}
+
+
 typedef struct {
     NpyAuxData base;
     PyUFuncGenericFunction unmasked_innerloop;

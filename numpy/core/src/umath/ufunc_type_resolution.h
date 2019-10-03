@@ -141,6 +141,14 @@ PyUFunc_DefaultLegacyInnerLoopSelector(PyUFuncObject *ufunc,
                                        void **out_innerloopdata,
                                        int *out_needs_api);
 
+
+static int
+NPY_NO_EXPORT(PyUFuncObject *ufunc,
+                           PyArray_Descr **NPY_UNUSED(dtypes),
+                           PyUFuncGenericFunction *out_innerloop,
+                           void **out_innerloopdata,
+                           int *out_needs_api);
+
 NPY_NO_EXPORT int
 PyUFunc_DefaultMaskedInnerLoopSelector(PyUFuncObject *ufunc,
                                       PyArray_Descr **dtypes,

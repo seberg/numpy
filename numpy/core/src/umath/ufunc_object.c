@@ -3449,6 +3449,30 @@ ufunc_legacy_resolve_ufunc_impl(
     }
 
     /*
+     * Sanity check that nothing crazy is going on. Since all of these
+     * structs are public, in principle the loop selector _could_ be
+     * overwritten by an external library.
+     * Lets make sure that this is not the case, since it might be
+     * problematic.
+     */
+    if ((ufunc->legacy_inner_loop_selector !=
+                &PyUFunc_DefaultLegacyInnerLoopSelector) &&
+            (ufunc->legacy_inner_loop_selector !=
+                &object_ufunc_loop_selector)) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "custom ufunc loop resolvers are not supported anymore; "
+                "please contact the NumPy developers.");
+        return -1;
+    }
+    if (ufunc->masked_inner_loop_selector !=
+                &PyUFunc_DefaultMaskedInnerLoopSelector) {
+        PyErr_SetString(PyExc_RuntimeError,
+                        "custom ufunc masked loop resolvers are not supported "
+                        "anymore; please contact the NumPy developers.");
+        return -1;
+    }
+
+    /*
      * We will validate casting later-on, it should not matter for resolving.
      * The fixed type tuple is something we use for legacy support.
      * This forces a safe casting/matching type resolution the output dtypes.
@@ -3501,6 +3525,21 @@ NPY_NO_EXPORT int
 PyUFunc_GenericFunction(PyUFuncObject *ufunc,
                         PyObject *args, PyObject *kwds,
                         PyArrayObject **op)
+{
+    // TODO: We can readd this with a bit of magic by refactoring the
+    //       current/new python side a bit, not that I can find any actual
+    //       usage out there.
+    //       Either fix it, or fix the documentation.
+    PyErr_SetString(PyExc_RuntimeError,
+            "PyUfunc_GenericFunction has been unceremoniously removed.");
+    return -1;
+}
+
+
+NPY_NO_EXPORT int
+PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
+                      PyObject *args, PyObject *kwds,
+                      PyArrayObject **op)
 {
     int nin, nout;
     int i, nop;
@@ -3562,7 +3601,6 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
         goto fail;
     }
 
-    if (subok) {
         if (make_full_arg_tuple(&full_args, nin, nout, args, kwds) < 0) {
             goto fail;
         }
@@ -5105,7 +5143,9 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     int i;
     PyUFuncImplObject *ufunc_impl = NULL;
 
-    PyArrayObject *mps[nargs];
+    // TODO: Should probably just copy over the arrays in the next function,
+    //       or explicitely fill in wheremask already here.
+    PyArrayObject *mps[nargs + 1];  /* extra storage for wheremask */
     PyObject *retobj[nargs];
     PyObject *wraparr[nargs];
 
@@ -5314,8 +5354,8 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 PyArray_Descr *descr = fixed_dtypes[i]->dt_slots->default_descr(
                         fixed_dtypes[i]);
                 if ((descr == NULL) || !fixed_dtypes[i]->is_legacy_wrapper) {
-                    // TODO: Maybe chain here, if it is flexible, this should not
-                    //       work...
+                    // TODO: Maybe chain exceptions here, if it is flexible,
+                    //       this should not work...
                     Py_XDECREF(descr);
                     PyErr_SetString(PyExc_TypeError,
                                     "no ufunc loop");
@@ -5332,8 +5372,9 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             Py_DECREF(type_tuple);
             type_tuple = NULL;
         }
-        errval = ufunc->type_resolver(ufunc,
-                casting, mps, type_tuple, fixed_descriptors);
+        errval = ufunc_legacy_resolve_ufunc_impl(
+                ufunc, mps, type_tuple, &ufunc_impl,
+                fixed_descriptors, casting);
         if (errval < 0) {
             goto fail;
         }
@@ -5345,7 +5386,10 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     //       old style resolution!? (Probably better to just do that.)
     // TODO: Array-wrap logic can stay inside the UFunc, but scalar logic
     //       may actually make more sense in the UFuncImpl, hmmm!
-    errval = PyUFunc_GenericFunction(ufunc, args, kwds, mps);
+    errval = PyUFunc_CallUFuncLoop(ufunc, ufunc_impl,
+            fixed_dtypes,
+            mps, order, casting, extobj, subok, NULL,
+            axes, axis, keepdims);
     if (errval < 0) {
         return NULL;
     }
@@ -6691,9 +6735,9 @@ static struct PyMethodDef ufunc_methods[] = {
     {"register_resolver",
         (PyCFunction)ufunc_newstyle_register_resolver,
         METH_VARARGS, NULL},
-    {"resolve_ufunc_impl",
-        (PyCFunction)ufunc_resolve_ufunc_impl_python,
-        METH_VARARGS | METH_KEYWORDS, NULL},
+    //{"resolve_ufunc_impl",
+    //    (PyCFunction)ufunc_resolve_ufunc_impl_python,
+    //   METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL, NULL, 0, NULL}           /* sentinel */
 };
 

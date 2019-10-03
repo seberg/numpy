@@ -33,6 +33,70 @@ ufuncimpl_teardown_check_pyexc_floatstatus(
 /******************************************************************************/
 
 
+
+NPY_NO_EXPORT PyObject *
+ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_Descr **dtypes)
+{
+    PyUFuncImplObject *ufunc_impl = (PyUFuncImplObject *)PyObject_New(
+            PyUFuncImplObject, &PyUFuncImpl_Type);
+    if (ufunc_impl == NULL) {
+        return NULL;
+    }
+    ufunc_impl->dtype_signature = PyDataMem_NEW_ZEROED(ufunc->nargs);
+    if (ufunc_impl->dtype_signature == NULL) {
+        PyObject_FREE(ufunc_impl);
+        return NULL;
+    }
+
+    ufunc_impl->nin = ufunc->nin;
+    ufunc_impl->nout = ufunc->nout;
+
+    ufunc_impl->identity = ufunc->identity;
+    Py_XINCREF(ufunc->identity_value);
+    ufunc_impl->identity_value = ufunc->identity_value;
+    if (ufunc->op_flags != NULL) {
+        ufunc_impl->op_flags = PyArray_malloc(sizeof(npy_uint32)*ufunc->nargs);
+        memcpy(ufunc_impl->op_flags, ufunc->op_flags,
+               sizeof(npy_uint32)*ufunc->nargs);
+    }
+    else {
+        ufunc_impl->op_flags = NULL;
+    }
+    ufunc_impl->iter_flags = ufunc->iter_flags;
+
+    /* Default is not to have one (we do not currently) */
+    ufunc_impl->adapt_dtype_func = NULL;
+    ufunc_impl->adapt_dtype_pyfunc = NULL;
+
+    if (ufunc->legacy_inner_loop_selector(
+            ufunc, dtypes,
+            &(ufunc_impl->innerloop), &(ufunc_impl->innerloopdata),
+            &(ufunc_impl->needs_api)) < 0) {
+        Py_XDECREF(ufunc->identity_value);
+        PyObject_FREE(ufunc_impl);
+        return NULL;
+    }
+
+    for (int i = 0; i < ufunc->nargs; i++) {
+        ufunc_impl->dtype_signature[i] = (
+                (PyArray_DTypeMeta *)Py_TYPE(dtypes[i]));
+        Py_INCREF(ufunc_impl->dtype_signature[i]);
+    }
+
+    /* TODO: What the heck to do about errors during casting? */
+    /*
+     * Python errors could occur, check everything. In some cases
+     * we may be able to optimize this, especially to not check floating
+     * point errors.
+     */
+    ufunc_impl->setup = ufuncimpl_setup_clear_fp;
+    ufunc_impl->teardown = ufuncimpl_teardown_check_pyexc_floatstatus;
+
+    return (PyObject *)ufunc_impl;
+}
+
+
+
 static void
 ufuncimpl_dealloc(PyUFuncImplObject *ufunc_impl)
 {

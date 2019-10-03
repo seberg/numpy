@@ -71,6 +71,8 @@ typedef struct _tagPyUFuncImplObject {
     PyUfuncImplSetupFunc *setup;
     PyUfuncImplTeardownFunc *teardown;
     PyArray_DTypeMeta **dtype_signature;
+
+    npy_bool is_userloop;
 } PyUFuncImplObject;
 
-#endif //_NPY_UFUNC_IMPL_H
+#endif /*_NPY_UFUNC_IMPL_H */
