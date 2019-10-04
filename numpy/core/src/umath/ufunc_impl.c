@@ -1,3 +1,17 @@
+#define _UMATHMODULE
+#define _MULTIARRAYMODULE
+#define NPY_NO_DEPRECATED_API NPY_API_VERSION
+
+#include "Python.h"
+
+#include "npy_config.h"
+#include "alloc.h"
+
+#include "numpy/arrayobject.h"
+#include "numpy/ufuncobject.h"
+
+#include "extobj.h"
+
 #include "ufunc_impl.h"
 
 
@@ -10,12 +24,14 @@ ufuncimpl_setup_clear_fp(
 }
 
 
+/*
 static int
 ufuncimpl_teardown_check_floatstatus(
         PyUFuncImplObject *ufunc_impl, PyUFuncObject * ufunc,
         void **data, PyObject *extobj, int errormask) {
     return _check_ufunc_fperr(errormask, extobj, ufunc->name);
 }
+*/
 
 
 static int
@@ -41,7 +57,7 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
     if (ufunc_impl == NULL) {
         return NULL;
     }
-    ufunc_impl->dtype_signature = PyDataMem_NEW_ZEROED(ufunc->nargs);
+    ufunc_impl->dtype_signature = calloc(ufunc->nargs, sizeof(PyObject *));
     if (ufunc_impl->dtype_signature == NULL) {
         PyObject_FREE(ufunc_impl);
         return NULL;
@@ -112,6 +128,7 @@ ufuncimpl_dealloc(PyUFuncImplObject *ufunc_impl)
 }
 
 
+/*
 static int
 ufuncimpl_adapt_dtype_from_pyfunc(PyUFuncImplObject *ufunc_impl,
                                   PyArray_Descr **dtypes) {
@@ -160,6 +177,7 @@ ufuncimpl_adapt_dtype_from_pyfunc(PyUFuncImplObject *ufunc_impl,
     }
     return 0;
 }
+*/
 
 
 static PyUFuncImplObject *
@@ -208,9 +226,9 @@ ufuncimpl_replaced_dtype_adapt(PyUFuncImplObject *self, PyObject *callable)
     PyUFuncImplObject *new_impl = ufuncimpl_copy(self);
 
     Py_INCREF(callable);
-    new_impl->adapt_dtype_func = ufuncimpl_adapt_dtype_from_pyfunc;
+    //new_impl->adapt_dtype_func = ufuncimpl_adapt_dtype_from_pyfunc;
     new_impl->adapt_dtype_pyfunc = callable;
-    return (PyObject *)new_impl;
+    return (PyObject *)NULL;
 }
 
 

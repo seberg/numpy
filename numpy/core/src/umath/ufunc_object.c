@@ -3590,7 +3590,7 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
 
     if (ufunc->core_enabled) {
         // TODO: FIXME, IMPORTANT!
-        //return PyUFunc_GeneralizedFunction(ufunc, args, kwds, op);
+        return PyUFunc_GeneralizedFunction(ufunc, NULL, NULL, op);
     }
 
     nin = ufunc->nin;
@@ -5697,9 +5697,9 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
         PyObject *dtype_tup = PyTuple_New(ufunc->nargs);
         /* Create tuple of types */
         for (int i = 0; i < ufunc->nargs; i++) {
-            PyObject *descr = PyArray_DescrFromType(
+            PyObject *descr = (PyObject *)PyArray_DescrFromType(
                     ufunc->types[loop * ufunc->nargs + i]);
-            if (descr == 0) {
+            if (descr == NULL) {
                 Py_DECREF(ufunc);
                 return NULL;
             }

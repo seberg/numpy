@@ -28,6 +28,8 @@
 #include "numpy/npy_3kcompat.h"
 #include "abstract.h"
 
+#include "ufunc_type_resolution.h"
+
 #include "numpy/npy_math.h"
 #include "number.h"
 
