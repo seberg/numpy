@@ -27,11 +27,9 @@
 #define _MULTIARRAYMODULE
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 
-#include <ctors.h>
 #include "Python.h"
 
 #include "npy_config.h"
-
 #include "npy_pycompat.h"
 
 #include "numpy/arrayobject.h"
@@ -41,8 +39,10 @@
 #include "ufunc_type_resolution.h"
 #include "reduction.h"
 #include "mem_overlap.h"
+#include "ctors.h"
 
 #include "ufunc_object.h"
+
 #include "override.h"
 #include "npy_import.h"
 #include "extobj.h"
@@ -3355,7 +3355,8 @@ ufunc_resolve_ufunc_impl(
                                     "inheritance is unsupported for use with "
                                     "UFunc type resolution. (You may resolve "
                                     "this by inserting an additional common "
-                                    "subclass).");
+                                    "subclass). This limitation may be "
+                                    "partially resolved in the future.");
                             Py_DECREF(dtype_tuple);
                             return -1;
                         }
@@ -3414,6 +3415,8 @@ ufunc_resolve_ufunc_impl(
             return call_ufuncimpl_resolver(
                     best_resolver, dtype_tuple, ufunc_impl);
         }
+
+        return 0;
     }
 
     /* Could not resolve using the new-style type resolution (or cache) */
@@ -3489,28 +3492,42 @@ ufunc_legacy_resolve_ufunc_impl(
      * After finding the exact dtype signature, we can just fall back to the
      * existing system.
      */
-    // TODO: This _will_ break numba since they change UFuncs loops in a wonky
-    //       way. I feel this should be OK, let them fix it on their end.
+    // TODO: This likely breaks numba since they change UFuncs loops in a
+    //       wonky way. I feel this should be OK, let them fix it on their end.
     // TODO: Add a sanity check to the UFuncImpl (wrapping legacy loops)
     //       that they still point to the same loop.
     //       Then we can just die printing: "Are you on numba?! UPDATE!"
 
 
     for (int i = 0; i < ufunc->nargs; i++) {
-        dtypes[i] = (PyArray_DTypeMeta *)out_descriptors[i];
+        dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(out_descriptors[i]);
         Py_INCREF(dtypes[i]);
     }
 
     /*
      * For the old loops (mostly datetime), the resolver step doubles as
      * the dtype adjustment step.
-     * Thus if this path is taken, we should just use the descriptors
+     * Thus if this path is taken, we could just use the descriptors
      * that are returned. In many cases (after the first time around)
      * we will simply not take this path, and do the descriptor logic
      * manually.
      */
 
-    return ufunc_resolve_ufunc_impl(ufunc, dtypes, ufunc_impl);
+    res = ufunc_resolve_ufunc_impl(ufunc, dtypes, ufunc_impl);
+    if (res < 0) {
+        return -1;
+    }
+    /*
+     * It is possible to replace loops in old-style numpy functions.
+     * Since in the old layout, these are stored on the ufunc, simply
+     * set/update the inner loop function here to ensure we are up to
+     * date.
+     */
+    res = PyUFunc_DefaultLegacyInnerLoopSelector(ufunc,
+            out_descriptors,
+            &(*ufunc_impl)->innerloop, &(*ufunc_impl)->innerloopdata,
+            &(*ufunc_impl)->needs_api);
+    return res;
 }
 
 
@@ -3538,24 +3555,24 @@ PyUFunc_GenericFunction(PyUFuncObject *ufunc,
 
 NPY_NO_EXPORT int
 PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
-                      PyObject *args, PyObject *kwds,
-                      PyArrayObject **op)
+        PyUFuncImplObject *ufunc_impl,
+        ufunc_full_args full_args,
+        PyArray_Descr **input_dtypes, PyArrayObject **op,
+        NPY_ORDER order, NPY_CASTING casting,
+        PyObject *extobj, npy_bool subok, PyArrayObject *wheremask,
+        PyObject *axes, PyObject *axis, npy_bool keepdims)
 {
     int nin, nout;
     int i, nop;
     const char *ufunc_name;
-    int retval = -1, subok = 1;
+    int retval = -1;
     npy_uint32 op_flags[NPY_MAXARGS];
     npy_intp default_op_out_flags;
 
     PyArray_Descr *dtypes[NPY_MAXARGS];
-    PyUFuncImplObject *ufunc_impl = NULL;
 
     /* These parameters come from extobj= or from a TLS global */
     int buffersize = 0, errormask = 0;
-
-    /* The mask provided in the 'where=' parameter */
-    PyArrayObject *wheremask = NULL;
 
     /* The __array_prepare__ function to call for each output */
     PyObject *arr_prep[NPY_MAXARGS];
@@ -3563,14 +3580,8 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
      * This is either args, or args with the out= parameter from
      * kwds added appropriately.
      */
-    ufunc_full_args full_args = {NULL, NULL};
 
     int trivial_loop_ok = 0;
-
-    NPY_ORDER order = NPY_KEEPORDER;
-    /* Use the default assignment casting rule */
-    NPY_CASTING casting = NPY_DEFAULT_ASSIGN_CASTING;
-    PyObject *extobj, *type_tup;
 
     if (ufunc == NULL) {
         PyErr_SetString(PyExc_ValueError, "function not supported");
@@ -3578,7 +3589,8 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
     }
 
     if (ufunc->core_enabled) {
-        return PyUFunc_GeneralizedFunction(ufunc, args, kwds, op);
+        // TODO: FIXME, IMPORTANT!
+        //return PyUFunc_GeneralizedFunction(ufunc, args, kwds, op);
     }
 
     nin = ufunc->nin;
@@ -3601,25 +3613,29 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
         goto fail;
     }
 
-        if (make_full_arg_tuple(&full_args, nin, nout, args, kwds) < 0) {
-            goto fail;
-        }
-        /*
-         * Get the appropriate __array_prepare__ function to call
-         * for each output
-         */
-        _find_array_prepare(full_args, arr_prep, nin, nout);
-    }
+    _find_array_prepare(full_args, arr_prep, nin, nout);
 
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
     /* Call a (user) supplied dtype adaptation function */
-    /* TODO: If ufunc impls get more logic, this part might move? */
     if (ufunc_impl->adapt_dtype_func(ufunc_impl,
-                dtypes, out_descr, casting) < 0) {
+                input_dtypes, dtypes, casting) < 0) {
         goto fail;
     }
-    // TODO: Should be necessary to validate casting the first time around!
+
+    // If the UFuncImpl wraps a legacy implementation, we need to set/reset
+    // the inner loop information
+    if (ufunc_impl->is_legacy_wrapper) {
+        /* Fetch/update the correct inner loop from the ufunc object */
+        retval = ufunc->legacy_inner_loop_selector(
+                ufunc, dtypes,
+                &ufunc_impl->innerloop, &ufunc_impl->innerloopdata,
+                &ufunc_impl->needs_api);
+        if (retval < 0) {
+            goto fail;
+        }
+    }
+
     if (PyUFunc_ValidateCasting(ufunc, casting, op, dtypes) < 0) {
         goto fail;
     }
@@ -3712,7 +3728,6 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
         Py_XDECREF(dtypes[i]);
         Py_XDECREF(arr_prep[i]);
     }
-    Py_XDECREF(type_tup);
     Py_XDECREF(extobj);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
@@ -3731,7 +3746,6 @@ fail:
         Py_XDECREF(dtypes[i]);
         Py_XDECREF(arr_prep[i]);
     }
-    Py_XDECREF(type_tup);
     Py_XDECREF(extobj);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
@@ -5155,7 +5169,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     PyArrayObject *wheremask = NULL;
     NPY_ORDER order;
     NPY_CASTING casting;
-    int subok, keepdims;
+    int subok = 1, keepdims = 0;
     PyObject *extobj = NULL;
     PyObject *axes = NULL, *axis = NULL;
     PyObject *override = NULL;
@@ -5386,9 +5400,8 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     //       old style resolution!? (Probably better to just do that.)
     // TODO: Array-wrap logic can stay inside the UFunc, but scalar logic
     //       may actually make more sense in the UFuncImpl, hmmm!
-    errval = PyUFunc_CallUFuncLoop(ufunc, ufunc_impl,
-            fixed_dtypes,
-            mps, order, casting, extobj, subok, NULL,
+    errval = PyUFunc_CallUFuncLoop(ufunc, ufunc_impl, full_args,
+            fixed_descriptors, mps, order, casting, extobj, subok, NULL,
             axes, axis, keepdims);
     if (errval < 0) {
         return NULL;
@@ -5673,6 +5686,31 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
     if (ufunc->ufunc_impl_cache == NULL) {
         Py_DECREF(ufunc);
         return NULL;
+    }
+
+    ufunc->resolvers = PyList_New(0);
+    if (ufunc->resolvers == NULL) {
+        Py_DECREF(ufunc);
+        return NULL;
+    }
+    for (int loop = 0; loop < ufunc->ntypes; loop++) {
+        PyObject *dtype_tup = PyTuple_New(ufunc->nargs);
+        /* Create tuple of types */
+        for (int i = 0; i < ufunc->nargs; i++) {
+            PyObject *descr = PyArray_DescrFromType(
+                    ufunc->types[loop * ufunc->nargs + i]);
+            if (descr == 0) {
+                Py_DECREF(ufunc);
+                return NULL;
+            }
+            PyObject *dtype = (PyObject *)Py_TYPE(descr);
+            Py_INCREF(dtype);
+            Py_DECREF(descr);
+            PyTuple_SET_ITEM(dtype_tup, i, dtype);
+        }
+
+        PyObject *ufunc_impl = ufuncimpl_legacy_new(
+                ufunc, (PyArray_DTypeMeta **)PySequence_Fast_ITEMS(dtype_tup));
     }
 
     return (PyObject *)ufunc;

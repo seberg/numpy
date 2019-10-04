@@ -1,5 +1,4 @@
 #include "ufunc_impl.h"
-#include "extobj.h"
 
 
 static int
@@ -35,7 +34,7 @@ ufuncimpl_teardown_check_pyexc_floatstatus(
 
 
 NPY_NO_EXPORT PyObject *
-ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_Descr **dtypes)
+ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
 {
     PyUFuncImplObject *ufunc_impl = (PyUFuncImplObject *)PyObject_New(
             PyUFuncImplObject, &PyUFuncImpl_Type);
@@ -48,6 +47,7 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_Descr **dtypes)
         return NULL;
     }
 
+    ufunc_impl->is_legacy_wrapper = NPY_TRUE;
     ufunc_impl->nin = ufunc->nin;
     ufunc_impl->nout = ufunc->nout;
 
@@ -68,14 +68,16 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_Descr **dtypes)
     ufunc_impl->adapt_dtype_func = NULL;
     ufunc_impl->adapt_dtype_pyfunc = NULL;
 
-    if (ufunc->legacy_inner_loop_selector(
-            ufunc, dtypes,
-            &(ufunc_impl->innerloop), &(ufunc_impl->innerloopdata),
-            &(ufunc_impl->needs_api)) < 0) {
-        Py_XDECREF(ufunc->identity_value);
-        PyObject_FREE(ufunc_impl);
-        return NULL;
-    }
+    /*
+     * The correct loop will be fetched on every execution (or rather
+     * every time the resolution finished). This is to ensure that we pick
+     * up changes that use the loop replacement API. It should also make
+     * things more robust towards downstream modifying the ufunc object
+     * directly.
+     */
+    ufunc_impl->innerloop = NULL;
+    ufunc_impl->innerloopdata = NULL;
+    ufunc_impl->needs_api = 1;
 
     for (int i = 0; i < ufunc->nargs; i++) {
         ufunc_impl->dtype_signature[i] = (

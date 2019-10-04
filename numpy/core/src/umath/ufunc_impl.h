@@ -1,10 +1,14 @@
 #ifndef _NPY_UFUNC_IMPL_H
 #define _NPY_UFUNC_IMPL_H
 
-#include <numpy/ufuncobject.h>
 
 /* Forward declaration for the dtype adaption function typedef */
 struct _tagPyUFuncImplObject;
+
+
+NPY_NO_EXPORT PyObject *
+ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes);
+
 
 // TODO: Synchronize with CastingImpl adaptation function, which should
 //       just be this one! (`adjust_descriptors_func`)
@@ -72,7 +76,8 @@ typedef struct _tagPyUFuncImplObject {
     PyUfuncImplTeardownFunc *teardown;
     PyArray_DTypeMeta **dtype_signature;
 
-    npy_bool is_userloop;
+    npy_bool is_legacy_wrapper;
 } PyUFuncImplObject;
+
 
 #endif /*_NPY_UFUNC_IMPL_H */
