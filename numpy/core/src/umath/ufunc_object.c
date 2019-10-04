@@ -54,7 +54,7 @@
 
 
 /********** PRINTF DEBUG TRACING **************/
-#define NPY_UF_DBG_TRACING 0
+#define NPY_UF_DBG_TRACING 1
 
 #if NPY_UF_DBG_TRACING
 #define NPY_UF_DBG_PRINT(s) {printf("%s", s);fflush(stdout);}
@@ -3221,6 +3221,7 @@ ufunc_resolve_ufunc_impl(
     if (cached != NULL) {
         /* Cache hit, if any dtype was abstract, this is a resolver */
         if (is_any_dtype_abstract) {
+            printf("this is not a possible path right now, correct?\n");
             return call_ufuncimpl_resolver(cached, dtype_tuple, ufunc_impl);
         }
         *ufunc_impl = (PyUFuncImplObject *)ufunc_impl;
@@ -3241,7 +3242,6 @@ ufunc_resolve_ufunc_impl(
             PyObject *resolver_info = PySequence_Fast_GET_ITEM(
                     ufunc->resolvers, res_idx);
             PyObject *curr_dtypes = PyTuple_GET_ITEM(resolver_info, 0);
-
             /*
              * Test if the current resolver matches, it could make sense to
              * reorder these checks to avoid the IsSubclass check as much as
@@ -3252,13 +3252,15 @@ ufunc_resolve_ufunc_impl(
                 PyArray_DTypeMeta *given_dtype = (
                         (PyArray_DTypeMeta *)PyTuple_GET_ITEM(dtype_tuple, i));
                 PyArray_DTypeMeta *resolver_dtype = (
-                        (PyArray_DTypeMeta *)PyTuple_GET_ITEM(dtype_tuple, i));
+                        (PyArray_DTypeMeta *)PyTuple_GET_ITEM(curr_dtypes, i));
                 if (given_dtype == (PyArray_DTypeMeta *)Py_None) {
                     /* If None is given, anything will match. */
                     continue;
                 }
-                if (!resolver_dtype->abstract &&
-                        (resolver_dtype != given_dtype)) {
+                if (given_dtype == resolver_dtype) {
+                    continue;
+                }
+                if (!resolver_dtype->abstract) {
                     matches = NPY_FALSE;
                     break;
                 }
@@ -3379,6 +3381,14 @@ ufunc_resolve_ufunc_impl(
                     }
                     current_best = best;
                 }
+
+#if 1
+                printf("Comparisong between the two tuples gave %d\n",
+                       current_best);
+                PyObject_Print(best_dtypes, stdout, 0);
+                PyObject_Print(curr_dtypes, stdout, 0);
+                printf("\n");
+#endif
                 if (current_best == -1) {
                     PyErr_SetString(PyExc_TypeError,
                             "Could not resolve UFunc loop, two loops "
@@ -3501,7 +3511,6 @@ ufunc_legacy_resolve_ufunc_impl(
 
     for (int i = 0; i < ufunc->nargs; i++) {
         dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(out_descriptors[i]);
-        Py_INCREF(dtypes[i]);
     }
 
     /*
@@ -3516,6 +3525,10 @@ ufunc_legacy_resolve_ufunc_impl(
     res = ufunc_resolve_ufunc_impl(ufunc, dtypes, ufunc_impl);
     if (res < 0) {
         return -1;
+    }
+    if (*ufunc_impl == NULL) {
+        PyErr_SetString(PyExc_TypeError,
+                "no loop found!");
     }
     /*
      * It is possible to replace loops in old-style numpy functions.
@@ -5187,7 +5200,9 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     for (i = 0; i < nargs; i++) {
         op_dtypes[i] = NULL;
         op_coercion_cache[i] = NULL;
+        fixed_dtypes[i] = NULL;
         fixed_descriptors[i] = NULL;
+        mps[i] = NULL;
     }
     /* Borrowed references for dtype resolution: */
     PyArray_DTypeMeta *resolver_dtypes[nargs];
@@ -5207,7 +5222,6 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     else if (override) {
         return override;
     }
-
     /*
      * We have to fetch at least the passed in type tuple (sig/signature/dtypes)
      * so it is necessary to do the parsing before finding the DType class
@@ -5311,6 +5325,10 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 op_coercion_cache[i] != NULL &&
                 !op_coercion_cache[i]->sequence) {
             mps[i] = (PyArrayObject *)op_coercion_cache[i]->arr_or_sequence;
+            printf("checking descriptor of input\n");
+            descr = PyArray_DESCR(mps[i]);
+            printf("done\n");
+            Py_INCREF(descr);
         }
         else {
             errval = PyArray_DiscoverDescriptorFromObject(
@@ -5323,13 +5341,22 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             if (errval) {
                 goto fail;
             }
+            if (descr == NULL) {
+                descr = PyArray_DescrFromType(NPY_DEFAULT_TYPE);
+            }
 
             mps[i] = (PyArrayObject *)PyArray_NewFromDescr(
                     &PyArray_Type, descr, ndim[i], shapes[i], NULL, NULL, 0,
                     NULL);
 
-            errval = PyArray_AssignFromSequence(
-                    mps[i], PyTuple_GET_ITEM(full_args.in, i));
+            if (ndim[i] == 0) {
+                errval = PyArray_SETITEM(mps[i], PyArray_DATA(mps[i]),
+                        PyTuple_GET_ITEM(full_args.in, i));
+            }
+            else {
+                errval = PyArray_AssignFromSequence(
+                        mps[i], PyTuple_GET_ITEM(full_args.in, i));
+            }
             if (errval < 0) {
                 goto fail;
             }
@@ -5340,7 +5367,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     if (full_args.out != NULL) {
         for (i = nin; i < nargs; i++) {
             errval = _set_out_array(
-                    PyTuple_GET_ITEM(full_args.out, i-nin), mps);
+                    PyTuple_GET_ITEM(full_args.out, i-nin), &mps[i]);
             if (errval < 0) {
                 goto fail;
             }
@@ -5711,6 +5738,19 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
 
         PyObject *ufunc_impl = ufuncimpl_legacy_new(
                 ufunc, (PyArray_DTypeMeta **)PySequence_Fast_ITEMS(dtype_tup));
+
+        if (ufunc_impl == NULL) {
+            Py_DECREF(dtype_tup);
+            Py_DECREF(ufunc);
+            return NULL;
+        }
+        int errval = PyList_Append(ufunc->resolvers,
+                PyTuple_Pack(2, dtype_tup, ufunc_impl));
+        if (errval < 0) {
+            Py_DECREF(dtype_tup);
+            Py_DECREF(ufunc_impl);
+            Py_DECREF(ufunc);
+        }
     }
 
     return (PyObject *)ufunc;
@@ -5724,6 +5764,7 @@ PyUFunc_NewStyle_New(
     const char *name, const char *doc,
     int unused, const char *signature)
 {
+    return NULL;
     PyUFuncObject *ufunc;
     if (nin + nout > NPY_MAXARGS) {
         PyErr_Format(PyExc_ValueError,

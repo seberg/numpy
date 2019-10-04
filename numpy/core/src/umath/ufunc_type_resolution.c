@@ -1476,6 +1476,7 @@ PyUFunc_DefaultLegacyInnerLoopSelector(PyUFuncObject *ufunc,
             }
         }
         if (j == nargs) {
+            printf("hmm, this hsould not be an issue? %d ufunc: %s\n", i, ufunc->name);
             *out_innerloop = ufunc->functions[i];
             *out_innerloopdata = ufunc->data[i];
             return 0;

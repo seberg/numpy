@@ -57,11 +57,12 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
     if (ufunc_impl == NULL) {
         return NULL;
     }
-    ufunc_impl->dtype_signature = calloc(ufunc->nargs, sizeof(PyObject *));
+    ufunc_impl->dtype_signature = malloc(ufunc->nargs * sizeof(PyObject *));
     if (ufunc_impl->dtype_signature == NULL) {
         PyObject_FREE(ufunc_impl);
         return NULL;
     }
+    memset(ufunc_impl->dtype_signature, 0, ufunc->nargs * sizeof(PyObject *));
 
     ufunc_impl->is_legacy_wrapper = NPY_TRUE;
     ufunc_impl->nin = ufunc->nin;
