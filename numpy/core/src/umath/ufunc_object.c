@@ -3247,6 +3247,12 @@ ufunc_resolve_ufunc_impl(
              * reorder these checks to avoid the IsSubclass check as much as
              * possible.
              */
+#if 1
+            printf("Check if the resolver/loop matches:\n");
+            PyObject_Print(dtype_tuple, stdout, 0);
+            PyObject_Print(curr_dtypes, stdout, 0);
+            printf("\n");
+#endif
             npy_bool matches = NPY_TRUE;
             for (Py_ssize_t i = 0; i < nop; i++) {
                 PyArray_DTypeMeta *given_dtype = (
@@ -3279,6 +3285,9 @@ ufunc_resolve_ufunc_impl(
                 continue;
             }
 
+#if 1
+            printf("    Found a match!\n");
+#endif
             /* The resolver matches, but we have to check if it is better */
             if (best_dtypes != NULL) {
                 int current_best = -1;  /* -1 neither, 0 current best, 1 new */
@@ -3383,7 +3392,7 @@ ufunc_resolve_ufunc_impl(
                 }
 
 #if 1
-                printf("Comparisong between the two tuples gave %d\n",
+                printf("Comparison between the two tuples gave %d\n",
                        current_best);
                 PyObject_Print(best_dtypes, stdout, 0);
                 PyObject_Print(curr_dtypes, stdout, 0);
@@ -3425,7 +3434,8 @@ ufunc_resolve_ufunc_impl(
             return call_ufuncimpl_resolver(
                     best_resolver, dtype_tuple, ufunc_impl);
         }
-
+        assert(PyObject_TypeCheck(best_resolver, &PyUFuncImpl_Type));
+        *ufunc_impl = (PyUFuncImplObject *)best_resolver;
         return 0;
     }
 
@@ -3529,6 +3539,7 @@ ufunc_legacy_resolve_ufunc_impl(
     if (*ufunc_impl == NULL) {
         PyErr_SetString(PyExc_TypeError,
                 "no loop found!");
+        return -1;
     }
     /*
      * It is possible to replace loops in old-style numpy functions.
@@ -3536,6 +3547,8 @@ ufunc_legacy_resolve_ufunc_impl(
      * set/update the inner loop function here to ensure we are up to
      * date.
      */
+    PyObject_Print(*ufunc_impl, stdout, 0);
+    printf("asdf: %ld\n", *ufunc_impl);
     res = PyUFunc_DefaultLegacyInnerLoopSelector(ufunc,
             out_descriptors,
             &(*ufunc_impl)->innerloop, &(*ufunc_impl)->innerloopdata,

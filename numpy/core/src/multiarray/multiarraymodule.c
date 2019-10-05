@@ -4665,23 +4665,8 @@ PyMODINIT_FUNC init_multiarray_umath(void) {
      */
     PyArray_Type.tp_hash = PyObject_HashNotImplemented;
 
-    if (PyType_Ready(&PyUFunc_Type) < 0) {
-        goto err;
-    }
-
-    /* Load the ufunc operators into the array module's namespace */
-    if (InitOperators(d) < 0) {
-        goto err;
-    }
-
-    if (set_matmul_flags(d) < 0) {
-        goto err;
-    }
     initialize_casting_tables();
     initialize_numeric_types();
-    if (initscalarmath(m) < 0) {
-        goto err;
-    }
 
     if (PyType_Ready(&PyArray_Type) < 0) {
         goto err;
@@ -4826,6 +4811,23 @@ PyMODINIT_FUNC init_multiarray_umath(void) {
     }
 
     if (init_pyvalue_abstractdtypes() < 0) {
+        goto err;
+    }
+
+    if (PyType_Ready(&PyUFunc_Type) < 0) {
+        goto err;
+    }
+
+    /* Load the ufunc operators into the array module's namespace */
+    if (InitOperators(d) < 0) {
+        printf("error here1\n");
+        goto err;
+    }
+    if (initscalarmath(m) < 0) {
+        goto err;
+    }
+    if (set_matmul_flags(d) < 0) {
+        printf("and this one!\n");
         goto err;
     }
 
