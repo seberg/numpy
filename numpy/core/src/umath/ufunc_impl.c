@@ -48,6 +48,82 @@ ufuncimpl_teardown_check_pyexc_floatstatus(
 /******************************************************************************/
 
 
+static int
+default_ufunc_adapt_function(PyUFuncImplObject *self,
+        PyArray_Descr **descr, PyArray_Descr **out_descr,
+        NPY_CASTING casting)
+{
+    /*
+     * For typical ufuncs all descriptors being used must be native byte order.
+     * There are two interesting possibilities:
+     *   1. We try to preserve metadata on the dtypes. The old style type
+     *      resolution function does this only for the first input.
+     *   2. We need to call the old style type resolution for flexible dtypes.
+     * Before returning, we also need to validate the casting.
+     */
+    int i = 0;
+    int nop = self->nin + self->nout;
+
+    for (i = 0; i < self->nin; i++) {
+        if (PyDataType_ISNOTSWAPPED(descr[i])) {
+            out_descr[i] = descr[i];
+            Py_INCREF(out_descr[i]);
+        }
+        else {
+            PyArray_DTypeMeta *dt = (PyArray_DTypeMeta *)Py_TYPE(descr[i]);
+            out_descr[i] = dt->dt_slots->ensure_native(dt, descr);
+            if (out_descr[i] == NULL) {
+                goto fail;
+            }
+        }
+    }
+    for (i = self->nin; i < nop; i++) {
+        PyArray_DTypeMeta *dt = (PyArray_DTypeMeta *)Py_TYPE(descr[i]);
+        if (descr[i] == NULL) {
+            /* The first branch here preserves metadata of first input */
+            if (dt == ((PyArray_DTypeMeta *)Py_TYPE(out_descr[0]))) {
+                out_descr[i] = out_descr[0];
+            }
+            else {
+                out_descr[i] = dt->dt_slots->default_descr(dt);
+            }
+            if (out_descr[i] == NULL) {
+                goto fail;
+            }
+        }
+    }
+
+    // TODO: previously we had the ufunc here if a single loop
+    //       could attach to multiple ufuncs this info may not be
+    //       available here. Alternatively we could pass in the
+    //       ufunc, but say that it may be NULL.
+    for (i = 0; i < nop; i++) {
+           if (i < self->nin) {
+               if (!PyArray_CanCastTypeTo(descr[i], out_descr[i], casting)) {
+                   PyErr_SetString(PyExc_TypeError,
+                           "Cannot cast input (error message needs improvement)");
+                   i = nop;
+                   goto fail;
+               }
+           }
+           else if (descr[i] != NULL) {
+               /* If the input is NULL, we can assume casting is fine */
+               if (!PyArray_CanCastTypeTo(out_descr[i], descr[i], casting)) {
+                   PyErr_SetString(PyExc_TypeError,
+                                   "Cannot cast output (error message needs improvement)");
+                   i = nop;
+                   goto fail;
+               }
+           }
+    }
+
+fail:
+    for (int j; j < i; j++) {
+        Py_DECREF(out_descr[i]);
+    }
+}
+
+
 
 NPY_NO_EXPORT PyObject *
 ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
@@ -81,8 +157,10 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
     }
     ufunc_impl->iter_flags = ufunc->iter_flags;
 
-    /* Default is not to have one (we do not currently) */
-    ufunc_impl->adapt_dtype_func = NULL;
+    // TODO: This function does not work for flexible dtypes
+    //       (specifically, it does not work for datetimes, where we would
+    //       have to use the olds tyle TypeResolution function).
+    ufunc_impl->adapt_dtype_func = default_ufunc_adapt_function;
     ufunc_impl->adapt_dtype_pyfunc = NULL;
 
     /*

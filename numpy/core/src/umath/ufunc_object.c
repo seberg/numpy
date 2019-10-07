@@ -3643,7 +3643,10 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
 
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
-    /* Call a (user) supplied dtype adaptation function */
+    /*
+     * Call a (user) supplied dtype adaptation function, this function
+     * is also in charge of checking whether the casting is valid or not.
+     */
     if (ufunc_impl->adapt_dtype_func(ufunc_impl,
                 input_dtypes, dtypes, casting) < 0) {
         goto fail;
@@ -3660,10 +3663,6 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
         if (retval < 0) {
             goto fail;
         }
-    }
-
-    if (PyUFunc_ValidateCasting(ufunc, casting, op, dtypes) < 0) {
-        goto fail;
     }
 
     if (wheremask != NULL) {
