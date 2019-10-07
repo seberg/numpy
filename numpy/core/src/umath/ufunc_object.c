@@ -5268,7 +5268,6 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         // TODO: Really need to clean up that signature, it is hell (and
         //       much is unnecessary. A single struct for all the output
         //       information is a start.
-        npy_intp shape[NPY_MAXDIMS];
         // TODO: We do not actually need context most of the time.
         PyObject *context = PyTuple_New(3);
         if (context == NULL) {
@@ -5290,7 +5289,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
 
         ndim[i] = PyArray_DiscoverDTypeFromObject(
                 PyTuple_GET_ITEM(full_args.in, i),
-                NPY_MAXDIMS, 0, &op_dtypes[i], shape, NPY_TRUE,
+                NPY_MAXDIMS, 0, &op_dtypes[i], shapes[i], NPY_TRUE,
                 &op_coercion_cache[i], &single_or_no_element[i], NULL,
                 context, NPY_FALSE, NPY_FALSE);
         Py_DECREF(context);
@@ -5333,6 +5332,10 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     /* Finish the actual array coercion for the input arrays */
     // TODO: Probably should refactor, and things will also change in general
     //       here ... :(
+    // TODO: We use the resolver_dtypes here, in principle the input dtype,
+    //       especially if abstract, could be passed into the first coercion
+    //       step. However, that is a matter of opinion. The question is then
+    //       whether abstract dtypes should be forbidden as fixed signature.
     for (i = 0; i < nin; i++) {
         PyArray_Descr *descr;
 
@@ -5344,10 +5347,27 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             Py_INCREF(descr);
         }
         else {
+            PyArray_DTypeMeta *dtype = resolver_dtypes[i];
+            if (dtype->abstract) {
+                PyArray_DTypeMeta *abstract_dtype = dtype;
+                dtype = abstract_dtype->dt_slots->default_dtype(
+                        abstract_dtype);
+                if (dtype == NULL) {
+                    goto fail;
+                }
+                Py_DECREF(abstract_dtype);
+                assert(!dtype->abstract);
+            }
+            else {
+                Py_INCREF(dtype);
+            }
+
             errval = PyArray_DiscoverDescriptorFromObject(
                     PyTuple_GET_ITEM(full_args.in, i), &descr,
                     &op_coercion_cache[i],
-                    single_or_no_element[i], fixed_dtypes[i]);
+                    single_or_no_element[i],
+                    dtype);
+            Py_DECREF(dtype);
             npy_free_coercion_cache(op_coercion_cache[i]);
             op_coercion_cache[i] = NULL;
 
@@ -5361,6 +5381,10 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             mps[i] = (PyArrayObject *)PyArray_NewFromDescr(
                     &PyArray_Type, descr, ndim[i], shapes[i], NULL, NULL, 0,
                     NULL);
+
+            if (mps[i] == NULL) {
+                goto fail;
+            }
 
             if (ndim[i] == 0) {
                 errval = PyArray_SETITEM(mps[i], PyArray_DATA(mps[i]),
