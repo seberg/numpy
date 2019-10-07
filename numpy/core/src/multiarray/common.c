@@ -1236,14 +1236,32 @@ update_shape(int curr_ndim, int *max_ndim,
 }
 
 
+/*
+ * This cache is necessary for the simple case of an array input mostly.
+ * Since that is the main reason, this may be removed if the single array
+ * case is handled specifically up-front.
+ * This may be better as a different caching mechanism...
+ */
+#define COERCION_CACHE_SIZE 5
+static coercion_cache_obj *global_coercion_cache[COERCION_CACHE_SIZE] = {NULL};
+
 NPY_NO_EXPORT int npy_new_coercion_cache(
         PyObject *converted_obj, PyObject *arr_or_sequence, npy_bool sequence,
         coercion_cache_obj **prev, coercion_cache_obj **initial)
 {
-    coercion_cache_obj *cache = PyArray_malloc(sizeof(coercion_cache_obj));
+    coercion_cache_obj *cache = NULL;
+    for (int i = 0; i < COERCION_CACHE_SIZE; i++) {
+        if (global_coercion_cache[i] != NULL) {
+            cache = global_coercion_cache[i];
+            global_coercion_cache[i] = NULL;
+        }
+    }
     if (cache == NULL) {
-        PyErr_NoMemory();
-        return -1;
+        cache = PyArray_malloc(sizeof(coercion_cache_obj));
+        if (cache == NULL) {
+            PyErr_NoMemory();
+            return -1;
+        }
     }
     cache->converted_obj = converted_obj;
     Py_INCREF(arr_or_sequence);
@@ -1262,14 +1280,28 @@ NPY_NO_EXPORT int npy_new_coercion_cache(
 }
 
 NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *next) {
+    npy_bool cache_is_full = NPY_FALSE;
+
+    /* We only need to check from the last used cache pos */
+    int cache_pos = 0;
     while (next != NULL) {
         coercion_cache_obj *current = next;
         next = current->next;
 
         Py_DECREF(current->arr_or_sequence);
-        PyArray_free(current);
+        for (; cache_pos < COERCION_CACHE_SIZE; cache_pos++) {
+            if (global_coercion_cache[cache_pos] == NULL) {
+                global_coercion_cache[cache_pos] = current;
+                break;
+            }
+        }
+        if (cache_pos == COERCION_CACHE_SIZE) {
+            PyArray_free(current);
+        }
     }
 }
+
+#undef COERCION_CACHE_SIZE
 
 /*
  * Internal helper to find the correct DType (class). Must be called with
