@@ -65,30 +65,57 @@ default_ufunc_adapt_function(PyUFuncImplObject *self,
     int nop = self->nin + self->nout;
 
     for (i = 0; i < self->nin; i++) {
-        if (PyDataType_ISNOTSWAPPED(descr[i])) {
+        PyArray_DTypeMeta *given_dt = self->dtype_signature[i];
+        PyArray_DTypeMeta *dt = (PyArray_DTypeMeta *)Py_TYPE(descr[i]);
+
+        if (given_dt != dt) {
+            /* Casting is necessary, so use the default descriptor. */
+            out_descr[i] = given_dt->dt_slots->default_descr(given_dt);
+        }
+        else if (PyDataType_ISNOTSWAPPED(descr[i])) {
+            /* No casting necessary, fast path reusing input. */
             out_descr[i] = descr[i];
             Py_INCREF(out_descr[i]);
         }
         else {
-            PyArray_DTypeMeta *dt = (PyArray_DTypeMeta *)Py_TYPE(descr[i]);
-            out_descr[i] = dt->dt_slots->ensure_native(dt, descr);
+            /* Same as above, but ensure input is native */
+            out_descr[i] = dt->dt_slots->ensure_native(descr[i]);
             if (out_descr[i] == NULL) {
                 goto fail;
             }
         }
     }
     for (i = self->nin; i < nop; i++) {
-        PyArray_DTypeMeta *dt = (PyArray_DTypeMeta *)Py_TYPE(descr[i]);
+        PyArray_DTypeMeta *given_dt = self->dtype_signature[i];
         if (descr[i] == NULL) {
             /* The first branch here preserves metadata of first input */
-            if (dt == ((PyArray_DTypeMeta *)Py_TYPE(out_descr[0]))) {
+            if (given_dt == ((PyArray_DTypeMeta *) Py_TYPE(out_descr[0]))) {
                 out_descr[i] = out_descr[0];
-            }
-            else {
-                out_descr[i] = dt->dt_slots->default_descr(dt);
+            } else {
+                out_descr[i] = given_dt->dt_slots->default_descr(given_dt);
             }
             if (out_descr[i] == NULL) {
                 goto fail;
+            }
+        }
+        else {
+            PyArray_DTypeMeta *dt = (PyArray_DTypeMeta *)Py_TYPE(descr[i]);
+
+            if (given_dt != dt) {
+                /* Casting is necessary, so use the default descriptor. */
+                out_descr[i] = given_dt->dt_slots->default_descr(given_dt);
+            }
+            else if (PyDataType_ISNOTSWAPPED(descr[i])) {
+                /* No casting necessary, fast path reusing input. */
+                out_descr[i] = descr[i];
+                Py_INCREF(out_descr[i]);
+            }
+            else {
+                /* Same as above, but ensure input is native */
+                out_descr[i] = dt->dt_slots->ensure_native(descr[i]);
+                if (out_descr[i] == NULL) {
+                    goto fail;
+                }
             }
         }
     }
@@ -116,11 +143,13 @@ default_ufunc_adapt_function(PyUFuncImplObject *self,
                }
            }
     }
+    return 0;
 
 fail:
     for (int j; j < i; j++) {
         Py_DECREF(out_descr[i]);
     }
+    return -1;
 }
 
 
@@ -175,8 +204,7 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
     ufunc_impl->needs_api = 1;
 
     for (int i = 0; i < ufunc->nargs; i++) {
-        ufunc_impl->dtype_signature[i] = (
-                (PyArray_DTypeMeta *)Py_TYPE(dtypes[i]));
+        ufunc_impl->dtype_signature[i] = dtypes[i];
         Py_INCREF(ufunc_impl->dtype_signature[i]);
     }
 

@@ -54,7 +54,7 @@
 
 
 /********** PRINTF DEBUG TRACING **************/
-#define NPY_UF_DBG_TRACING 1
+#define NPY_UF_DBG_TRACING 0
 
 #if NPY_UF_DBG_TRACING
 #define NPY_UF_DBG_PRINT(s) {printf("%s", s);fflush(stdout);}
@@ -1364,7 +1364,6 @@ check_for_trivial_loop(PyUFuncObject *ufunc,
             }
         }
     }
-
     return 1;
 }
 
@@ -1655,7 +1654,7 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
                     PyObject *extobj, int errormask)
 {
     int error_occured = 0;
-    npy_intp nin = ufunc->nin, nout = ufunc->nout;
+    npy_intp nin = ufunc_impl->nin, nout = ufunc_impl->nout;
     PyUFuncGenericFunction innerloop = ufunc_impl->innerloop;
     void *innerloopdata = ufunc_impl->innerloopdata;
     int needs_api = ufunc_impl->needs_api;
@@ -1758,7 +1757,6 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
 
                 NPY_UF_DBG_PRINT("trivial 2 input with allocated output\n");
                 trivial_three_operand_loop(op, innerloop, innerloopdata);
-
                 goto teardown;
             }
             else if (op[2] != NULL &&
@@ -2021,9 +2019,11 @@ make_full_arg_tuple(
     npy_intp nargs = PyTuple_GET_SIZE(args);
     npy_intp i;
 
-    /* This should have been checked by the caller */
-    assert(nin <= nargs && nargs <= nin + nout);
-
+    if ((nargs < nin) || (nargs > nin + nout)) {
+        // Note: This reproduces current behaviour:
+        PyErr_SetString(PyExc_ValueError, "invalid number of arguments");
+        return -1;
+    }
     /* Initialize so we can XDECREF safely */
     full_args->in = NULL;
     full_args->out = NULL;
@@ -3029,7 +3029,7 @@ PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
     memcpy(inner_strides, NpyIter_GetInnerStrideArray(iter),
                                     NPY_SIZEOF_INTP * nop);
 
-#if 0
+#if NPY_UF_DBG_TRACING
     printf("strides: ");
     for (i = 0; i < nop+core_dim_ixs_size; ++i) {
         printf("%d ", (int)inner_strides[i]);
@@ -3224,7 +3224,8 @@ ufunc_resolve_ufunc_impl(
             printf("this is not a possible path right now, correct?\n");
             return call_ufuncimpl_resolver(cached, dtype_tuple, ufunc_impl);
         }
-        *ufunc_impl = (PyUFuncImplObject *)ufunc_impl;
+        *ufunc_impl = (PyUFuncImplObject *)cached;
+        Py_INCREF(*ufunc_impl);
         Py_DECREF(dtype_tuple);
         return 0;
     }
@@ -3247,7 +3248,7 @@ ufunc_resolve_ufunc_impl(
              * reorder these checks to avoid the IsSubclass check as much as
              * possible.
              */
-#if 1
+#if NPY_UF_DBG_TRACING
             printf("Check if the resolver/loop matches:\n");
             PyObject_Print(dtype_tuple, stdout, 0);
             PyObject_Print(curr_dtypes, stdout, 0);
@@ -3285,7 +3286,7 @@ ufunc_resolve_ufunc_impl(
                 continue;
             }
 
-#if 1
+#if NPY_UF_DBG_TRACING
             printf("    Found a match!\n");
 #endif
             /* The resolver matches, but we have to check if it is better */
@@ -3391,12 +3392,12 @@ ufunc_resolve_ufunc_impl(
                     current_best = best;
                 }
 
-#if 1
-                printf("Comparison between the two tuples gave %d\n",
+#if NPY_UF_DBG_TRACING
+                printf("Comparison between the two tuples gave %d\n ",
                        current_best);
                 PyObject_Print(best_dtypes, stdout, 0);
                 PyObject_Print(curr_dtypes, stdout, 0);
-                printf("\n");
+                printf("in ufunc %s\n", ufunc->name);
 #endif
                 if (current_best == -1) {
                     PyErr_SetString(PyExc_TypeError,
@@ -3436,6 +3437,7 @@ ufunc_resolve_ufunc_impl(
         }
         assert(PyObject_TypeCheck(best_resolver, &PyUFuncImpl_Type));
         *ufunc_impl = (PyUFuncImplObject *)best_resolver;
+        Py_INCREF(*ufunc_impl);
         return 0;
     }
 
@@ -3547,8 +3549,6 @@ ufunc_legacy_resolve_ufunc_impl(
      * set/update the inner loop function here to ensure we are up to
      * date.
      */
-    PyObject_Print(*ufunc_impl, stdout, 0);
-    printf("asdf: %ld\n", *ufunc_impl);
     res = PyUFunc_DefaultLegacyInnerLoopSelector(ufunc,
             out_descriptors,
             &(*ufunc_impl)->innerloop, &(*ufunc_impl)->innerloopdata,
@@ -3616,6 +3616,9 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
 
     if (ufunc->core_enabled) {
         // TODO: FIXME, IMPORTANT!
+        PyErr_SetString(PyExc_NotImplementedError,
+                "this path is not implemented, apparently important?");
+        return NULL;
         return PyUFunc_GeneralizedFunction(ufunc, NULL, NULL, op);
     }
 
@@ -3749,15 +3752,15 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
 
 
     /* The caller takes ownership of all the references in op */
-    for (i = 0; i < nop; ++i) {
-        Py_XDECREF(dtypes[i]);
-        Py_XDECREF(arr_prep[i]);
-    }
-    Py_XDECREF(extobj);
-    Py_XDECREF(full_args.in);
-    Py_XDECREF(full_args.out);
-    Py_XDECREF(wheremask);
-    Py_XDECREF(ufunc_impl);
+    //for (i = 0; i < nop; ++i) {
+    //    Py_XDECREF(dtypes[i]);
+    //    Py_XDECREF(arr_prep[i]);
+    //}
+    //Py_XDECREF(extobj);
+    //Py_XDECREF(full_args.in);
+    //Py_XDECREF(full_args.out);
+    //Py_XDECREF(wheremask);
+    //Py_XDECREF(ufunc_impl);
 
     NPY_UF_DBG_PRINT("Returning success code 0\n");
 
@@ -3765,17 +3768,17 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
 
 fail:
     NPY_UF_DBG_PRINT1("Returning failure code %d\n", retval);
-    for (i = 0; i < nop; ++i) {
-        Py_XDECREF(op[i]);
-        op[i] = NULL;
-        Py_XDECREF(dtypes[i]);
-        Py_XDECREF(arr_prep[i]);
-    }
-    Py_XDECREF(extobj);
-    Py_XDECREF(full_args.in);
-    Py_XDECREF(full_args.out);
-    Py_XDECREF(wheremask);
-    Py_XDECREF(ufunc_impl);
+    //for (i = 0; i < nop; ++i) {
+    //    Py_XDECREF(op[i]);
+    //    op[i] = NULL;
+    //    Py_XDECREF(dtypes[i]);
+    //    Py_XDECREF(arr_prep[i]);
+    //}
+    //Py_XDECREF(extobj);
+    //Py_XDECREF(full_args.in);
+    //Py_XDECREF(full_args.out);
+    //Py_XDECREF(wheremask);
+    //Py_XDECREF(ufunc_impl);
 
     return retval;
 }
@@ -5192,8 +5195,8 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     PyArray_Descr *fixed_descriptors[nargs];  /* only used for legacy */
 
     PyArrayObject *wheremask = NULL;
-    NPY_ORDER order;
-    NPY_CASTING casting;
+    NPY_ORDER order = NPY_KEEPORDER;
+    NPY_CASTING casting = NPY_SAME_KIND_CASTING;
     int subok = 1, keepdims = 0;
     PyObject *extobj = NULL;
     PyObject *axes = NULL, *axis = NULL;
@@ -5203,11 +5206,11 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
 
     /* Information stored for coercion */
     // TODO: Refactor into a a struct...
-    PyArray_DTypeMeta *op_dtypes[nin];
-    coercion_cache_obj *op_coercion_cache[nin];
-    npy_bool single_or_no_element[nin];
+    PyArray_DTypeMeta *op_dtypes[nargs];
+    coercion_cache_obj *op_coercion_cache[nargs];
+    npy_bool single_or_no_element[nargs];
     int ndim[nin];
-    npy_intp shapes[nin][NPY_MAXDIMS];
+    npy_intp shapes[nargs][NPY_MAXDIMS];
 
     for (i = 0; i < nargs; i++) {
         op_dtypes[i] = NULL;
@@ -5337,9 +5340,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 op_coercion_cache[i] != NULL &&
                 !op_coercion_cache[i]->sequence) {
             mps[i] = (PyArrayObject *)op_coercion_cache[i]->arr_or_sequence;
-            printf("checking descriptor of input\n");
             descr = PyArray_DESCR(mps[i]);
-            printf("done\n");
             Py_INCREF(descr);
         }
         else {
@@ -5373,6 +5374,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 goto fail;
             }
         }
+        fixed_descriptors[i] = PyArray_DESCR(mps[i]);
     }
 
     /* And handle the output arrays */
@@ -5382,6 +5384,12 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                     PyTuple_GET_ITEM(full_args.out, i-nin), &mps[i]);
             if (errval < 0) {
                 goto fail;
+            }
+            if (mps[i] == NULL) {
+                fixed_descriptors[i] = NULL;
+            }
+            else {
+                fixed_descriptors[i] = PyArray_DESCR(mps[i]);
             }
         }
     }
@@ -5746,6 +5754,25 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
             Py_INCREF(dtype);
             Py_DECREF(descr);
             PyTuple_SET_ITEM(dtype_tup, i, dtype);
+        }
+
+        // TODO: We sometimes currently register two ufunc loops, of which
+        //       only ever the first one is used (for simd support), check
+        //       this, and simply ignore the second one.
+        npy_bool skip_duplicate_ufunc_impl = NPY_FALSE;
+        for (int i = 0; i < PySequence_Length(ufunc->resolvers); i++) {
+            PyObject *tmp = PySequence_Fast_GET_ITEM(
+                    ufunc->resolvers, i);
+            tmp = PySequence_Fast_GET_ITEM(tmp, 0);
+            if (PyObject_RichCompareBool(tmp, dtype_tup, Py_EQ)) {
+                /* Do not append to resolvers, because this is identical */
+                skip_duplicate_ufunc_impl = NPY_TRUE;
+                break;
+            }
+        }
+        if (skip_duplicate_ufunc_impl) {
+            Py_DECREF(dtype_tup);
+            continue;
         }
 
         PyObject *ufunc_impl = ufuncimpl_legacy_new(
