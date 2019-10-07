@@ -3039,7 +3039,6 @@ PyArray_DescrNewByteorder(PyArray_Descr *self, char newendian)
 
     new = PyArray_DescrNew(self);
     if (new == NULL) {
-    printf("HASDHFASDHFKASDJF KASDFJDKAS FJDASf]\n");
         return NULL;
     }
     endian = new->byteorder;

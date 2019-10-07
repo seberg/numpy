@@ -1880,6 +1880,9 @@ typedef struct _PyArray_DTypeMeta *(dtype_from_discovery_function)(
 typedef PyArray_Descr *(descr_from_discovery_function)(
         struct _PyArray_DTypeMeta *cls, PyObject *obj);
 
+typedef PyArray_Descr *(ensure_native_function)(
+        PyArray_Descr *self);
+
 /*
  * This struct must remain fully opaque to the user, direct access is
  * solely allowed from within NumPy!
@@ -1902,9 +1905,10 @@ typedef struct {
     common_instance_function *common_instance;
     default_descr_func *default_descr;
 
-    /* Slots only intersting for abstract dtypes */
+    /* Slots only interesting for abstract dtypes */
     dtype_from_dtype_function *default_dtype;
     dtype_from_dtype_function *minimal_dtype;  /* can default to the default_dtype */
+    ensure_native_function *ensure_native;
 
     /* Slots for legacy wrapper (needed?) */
     //PyObject *legacy_castingimpls_from;
@@ -1930,8 +1934,9 @@ typedef struct {
 #define NPY_dt_minimal_dtype 10
 #define NPY_dt_discover_dtype_from_pytype 11
 #define NPY_discover_descr_from_pyobject 12
+#define NPY_dt_ensure_native 13
 
-#define NPY_dt_associated_python_types 13
+#define NPY_dt_associated_python_types 14
 
 typedef struct{
   int flexible;

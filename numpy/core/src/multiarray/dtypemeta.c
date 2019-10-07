@@ -311,6 +311,16 @@ discover_datetime_and_timedelta_from_pyobject(
     }
 }
 
+
+static PyArray_Descr *
+legacy_ensure_native(PyArray_Descr *descr) {
+    if (PyDataType_ISNOTSWAPPED(descr)) {
+        Py_INCREF(descr);
+        return descr;
+    }
+    return PyArray_DescrNewByteorder(descr, NPY_NATIVE);
+}
+
 /*
  * This is brutal. Because it seems tricky to do otherwise, use
  * the static full Python API on malloc allocated objects, so that they
@@ -419,6 +429,8 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     dtype_class->dt_slots->default_descr = legacy_default_descr;
     dtype_class->dt_slots->discover_descr_from_pyobject =
                 discover_descr_using_default;
+    dtype_class->dt_slots->ensure_native = legacy_ensure_native;
+
     if (dtype_class->type_num == NPY_STRING ||
                     dtype_class->type_num == NPY_UNICODE) {
         dtype_class->dt_slots->discover_descr_from_pyobject =
