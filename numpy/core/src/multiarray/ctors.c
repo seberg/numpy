@@ -1397,13 +1397,13 @@ PyArray_DiscoverDTypeAndShapeFromObject(
         return 0;
     }
     if (*out_descriptor == NULL) {
+        /*
+         * AbstractDTypes cannot work here for coercion, they must
+         * be resolved now. Casting is possible but we may need many casts
+         * here, so the situation is different. The AbstractDType already
+         * had a chance to look at things.
+         */
         if (((PyArray_DTypeMeta *)*out_dtype)->abstract) {
-            /*
-             * AbstractDTypes cannot work here for coercion, they must
-             * be resolved now. Casting is possible but we may need many casts
-             * here, so the situation is different. The AbstractDType already
-             * had a chance to look at things.
-             */
             PyArray_DTypeMeta *abstract_dtype = ((PyArray_DTypeMeta *)*out_dtype);
             PyArray_DTypeMeta *concrete_dtype;
             if (use_minimal) {
