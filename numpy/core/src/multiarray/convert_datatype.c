@@ -758,21 +758,6 @@ PyArray_CanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
         //       comparison/hash slots)
         return PyArray_EquivTypes(from, to);
     }
-    if (from_dtype == to_dtype) {
-        if (!(from_dtype->flexible)) {
-            return 1;
-        }
-        // TODO: This has to jump to use the within_dtype_castingimpl!
-        casting_impl = from_dtype->dt_slots->within_dtype_castingimpl;
-        if (casting_impl->adjust_descriptors(
-                casting_impl, in_descrs, out_descrs, casting) < 0) {
-            PyErr_Clear();
-            return 0;
-        }
-        Py_DECREF(out_descrs[0]);
-        Py_DECREF(out_descrs[1]);
-        return 1;
-    }
 
     casting_impl = get_casting_impl(from_dtype, to_dtype, casting);
     if (casting_impl == NULL) {
@@ -780,7 +765,6 @@ PyArray_CanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
         return 0;
     }
     // Note: The above fast path means that from != to here.
-    assert(casting_impl->adjust_descriptors != NULL);  // TODO: remove assert
     int res = casting_impl->adjust_descriptors(
                 casting_impl, in_descrs, out_descrs, casting);
     Py_DECREF(casting_impl);
