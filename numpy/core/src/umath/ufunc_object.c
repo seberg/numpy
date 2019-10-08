@@ -5347,6 +5347,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             descr = PyArray_DESCR(mps[i]);
             Py_INCREF(descr);
             npy_free_coercion_cache(op_coercion_cache[i]);
+            op_coercion_cache[i] = NULL;
         }
         else {
             PyArray_DTypeMeta *dtype = resolver_dtypes[i];
@@ -5362,6 +5363,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 dtype = abstract_dtype->dt_slots->default_dtype(abstract_dtype);
                 if (dtype == NULL) {
                     npy_free_coercion_cache(op_coercion_cache[i]);
+                    op_coercion_cache[i] = NULL;
                     goto fail;
                 }
                 Py_DECREF(abstract_dtype);

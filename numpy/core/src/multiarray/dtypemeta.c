@@ -87,8 +87,8 @@ legacy_can_cast(
         NPY_CASTING casting)
 {
     // TODO: Practically doesn't matter, but error checks missing.
-    PyArray_Descr *from_descr = PyArray_DescrNewFromType(from_dtype->type_num);
-    PyArray_Descr *to_descr = PyArray_DescrNewFromType(to_dtype->type_num);
+    PyArray_Descr *from_descr = PyArray_DescrFromType(from_dtype->type_num);
+    PyArray_Descr *to_descr = PyArray_DescrFromType(to_dtype->type_num);
     if (!PyArray_LegacyCanCastTypeTo(from_descr, to_descr, casting)) {
         Py_DECREF(from_descr);
         Py_DECREF(to_descr);
@@ -283,7 +283,7 @@ string_discover_descr_from_pyobject(
         // TODO: Legacy behaviour of not allowing empty strings!
         length = cls->type_num == NPY_UNICODE ? 4 : 1;
     }
-    PyArray_Descr *descr = PyArray_DescrNewFromType(cls->type_num);
+    PyArray_Descr *descr = PyArray_DescrFromType(cls->type_num);
     if (descr == NULL) {
         return NULL;
     }

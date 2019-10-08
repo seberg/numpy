@@ -1254,6 +1254,7 @@ NPY_NO_EXPORT int npy_new_coercion_cache(
         if (global_coercion_cache[i] != NULL) {
             cache = global_coercion_cache[i];
             global_coercion_cache[i] = NULL;
+            break;
         }
     }
     if (cache == NULL) {
@@ -1280,8 +1281,6 @@ NPY_NO_EXPORT int npy_new_coercion_cache(
 }
 
 NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *next) {
-    npy_bool cache_is_full = NPY_FALSE;
-
     /* We only need to check from the last used cache pos */
     int cache_pos = 0;
     while (next != NULL) {
@@ -1296,6 +1295,7 @@ NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *next) {
             }
         }
         if (cache_pos == COERCION_CACHE_SIZE) {
+            printf("     actually freeing completely!\n");
             PyArray_free(current);
         }
     }
