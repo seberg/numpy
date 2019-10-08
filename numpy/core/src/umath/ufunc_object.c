@@ -5348,7 +5348,14 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         }
         else {
             PyArray_DTypeMeta *dtype = resolver_dtypes[i];
-            if (dtype->abstract) {
+            if (dtype == NULL) {
+                /* An empty list, etc. can have this */
+                PyObject *def_descr = PyArray_DescrFromType(NPY_DEFAULT_TYPE);
+                dtype = (PyArray_DTypeMeta *)Py_TYPE(def_descr);
+                Py_INCREF(dtype);
+                Py_DECREF(def_descr);
+            }
+            else if (dtype->abstract) {
                 PyArray_DTypeMeta *abstract_dtype = dtype;
                 dtype = abstract_dtype->dt_slots->default_dtype(
                         abstract_dtype);
