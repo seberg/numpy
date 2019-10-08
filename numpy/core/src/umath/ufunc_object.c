@@ -3186,7 +3186,7 @@ call_ufuncimpl_resolver(
  */
 static int
 ufunc_resolve_ufunc_impl(
-        PyUFuncObject *ufunc, PyArray_DTypeMeta *dtypes[NPY_MAXARGS],
+        PyUFuncObject *ufunc, PyObject *dtype_tuple,
         PyUFuncImplObject **ufunc_impl)
 {
     *ufunc_impl = NULL;
@@ -3194,24 +3194,13 @@ ufunc_resolve_ufunc_impl(
 
     /* Try to load from cache */
     // TODO: This assumes that the complex resolver only uses dtype info!
-    PyObject *dtype_tuple = PyTuple_New(nop);
     PyObject *cached;
-    if (dtype_tuple == NULL) {
-        return -1;
-    }
 
     npy_bool is_any_dtype_abstract = NPY_FALSE;
     for (Py_ssize_t i = 0; i < nop; i++) {
-        PyObject *tmp;
-        if (dtypes[i] == NULL ) {
-            tmp = Py_None;
-        }
-        else {
-            tmp = (PyObject *)dtypes[i];
-            is_any_dtype_abstract |= dtypes[i]->abstract;
-        }
-        Py_INCREF(tmp);
-        PyTuple_SET_ITEM(dtype_tuple, i, tmp);
+        PyArray_DTypeMeta *tmp;
+        tmp = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(dtype_tuple, i);
+        is_any_dtype_abstract |= tmp->abstract;
     }
     // TODO: When there are no type resolvers and there is an abstract dtype
     //       there is simply no point in looking up in the cache. It will
@@ -3226,7 +3215,6 @@ ufunc_resolve_ufunc_impl(
         }
         *ufunc_impl = (PyUFuncImplObject *)cached;
         Py_INCREF(*ufunc_impl);
-        Py_DECREF(dtype_tuple);
         return 0;
     }
 
@@ -3274,7 +3262,6 @@ ufunc_resolve_ufunc_impl(
                 int subclass = PyObject_IsSubclass(
                         (PyObject *)given_dtype, (PyObject *)resolver_dtype);
                 if (subclass < 0) {
-                    Py_DECREF(dtype_tuple);
                     return -1;
                 }
                 if (!subclass) {
@@ -3336,7 +3323,6 @@ ufunc_resolve_ufunc_impl(
                         int new_is_subclass = PyObject_IsSubclass(
                                 new_dtype, prev_dtype);
                         if (new_is_subclass < 0) {
-                            Py_DECREF(dtype_tuple);
                             return -1;
                         }
                         /*
@@ -3346,7 +3332,6 @@ ufunc_resolve_ufunc_impl(
                         int prev_is_subclass = PyObject_IsSubclass(
                                 prev_dtype, new_dtype);
                         if (prev_is_subclass < 0) {
-                            Py_DECREF(dtype_tuple);
                             return -1;
                         }
                         if (prev_is_subclass && new_is_subclass) {
@@ -3355,7 +3340,6 @@ ufunc_resolve_ufunc_impl(
                                     "inconsistent subclassing of DTypes; if "
                                     "this happens, two dtypes claim to be a "
                                     "superclass of the other one.");
-                            Py_DECREF(dtype_tuple);
                             return -1;
                         }
                         if (!prev_is_subclass && !new_is_subclass) {
@@ -3369,7 +3353,6 @@ ufunc_resolve_ufunc_impl(
                                     "this by inserting an additional common "
                                     "subclass). This limitation may be "
                                     "partially resolved in the future.");
-                            Py_DECREF(dtype_tuple);
                             return -1;
                         }
                         if (new_is_subclass) {
@@ -3403,7 +3386,6 @@ ufunc_resolve_ufunc_impl(
                     PyErr_SetString(PyExc_TypeError,
                             "Could not resolve UFunc loop, two loops "
                             "matched equally well.");
-                    Py_DECREF(dtype_tuple);
                     return -1;
                 }
                 else if (current_best == 0) {
@@ -3419,7 +3401,6 @@ ufunc_resolve_ufunc_impl(
             /* The non-legacy lookup failed */
             // TODO: Should this be supported? I.e. a ufunc that has both
             //       legacy and non-legacy resolving (Seems right to me)
-            Py_DECREF(dtype_tuple);
             *ufunc_impl = NULL;
             return 0;
         }
@@ -3427,7 +3408,6 @@ ufunc_resolve_ufunc_impl(
         /* We have found a UFuncImpl or a resolver so add it to the cache */
         int res = PyDict_SetItem(ufunc->ufunc_impl_cache,
                 dtype_tuple, best_resolver);
-        Py_DECREF(dtype_tuple);
         if (res < 0) {
             return -1;
         }
@@ -3463,14 +3443,12 @@ ufunc_legacy_resolve_ufunc_impl(
         // TODO: Important: make sure fixed tuple is always a tuple
         //       (moving/changing the parsing logic as I did before.)
         PyObject *fixed_types_tuple, PyUFuncImplObject **ufunc_impl,
-        PyArray_DTypeMeta *resolver_dtypes,
+        PyObject *dtype_tuple,
         PyArray_Descr *out_descriptors[NPY_MAXARGS],
         NPY_CASTING casting)
 {
-    PyArray_DTypeMeta* dtypes[NPY_MAXARGS];
-
     if (ufunc->type_resolver == NULL) {
-        /* No loop available, legacy_redo nothing and return. */
+        /* No loop available, do nothing and return. */
         return 0;
     }
 
@@ -3521,9 +3499,18 @@ ufunc_legacy_resolve_ufunc_impl(
     //       that they still point to the same loop.
     //       Then we can just die printing: "Are you on numba?! UPDATE!"
 
-
+    PyObject *new_dtype_tuple = PyTuple_New(ufunc->nargs);
+    if (new_dtype_tuple < 0) {
+        for (int i = 0; i < ufunc->nargs; i++) {
+            Py_DECREF(out_descriptors[i]);
+        }
+        return -1;
+    }
     for (int i = 0; i < ufunc->nargs; i++) {
-        dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(out_descriptors[i]);
+        PyObject *tmp = (PyObject *)Py_TYPE(out_descriptors[i]);
+        PyTuple_SET_ITEM(new_dtype_tuple, i, tmp);
+        Py_INCREF(tmp);
+        Py_DECREF(out_descriptors[i]);
     }
 
     /*
@@ -3535,7 +3522,8 @@ ufunc_legacy_resolve_ufunc_impl(
      * manually.
      */
 
-    res = ufunc_resolve_ufunc_impl(ufunc, dtypes, ufunc_impl);
+    res = ufunc_resolve_ufunc_impl(ufunc, new_dtype_tuple, ufunc_impl);
+    Py_DECREF(new_dtype_tuple);
     if (res < 0) {
         return -1;
     }
@@ -3543,6 +3531,20 @@ ufunc_legacy_resolve_ufunc_impl(
         PyErr_SetString(PyExc_TypeError,
                 "no loop found!");
         return -1;
+    }
+    /*
+     * Add the new loop to the ufunc_impl resolution cache, but only
+     * if there is no abstract dtype around.
+     */
+    npy_bool is_any_dtype_abstract = NPY_FALSE;
+    for (Py_ssize_t i = 0; i < ufunc->nargs; i++) {
+        PyArray_DTypeMeta *tmp;
+        tmp = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(dtype_tuple, i);
+        is_any_dtype_abstract |= tmp->abstract;
+    }
+    if (!is_any_dtype_abstract) {
+        res = PyDict_SetItem(ufunc->ufunc_impl_cache,
+                             dtype_tuple, (PyObject *) *ufunc_impl);
     }
     return res;
 }
@@ -5191,7 +5193,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
 
     PyArrayObject *wheremask = NULL;
     NPY_ORDER order = NPY_KEEPORDER;
-    NPY_CASTING casting = NPY_SAME_KIND_CASTING;
+    NPY_CASTING casting = NPY_DEFAULT_ASSIGN_CASTING;
     int subok = 1, keepdims = 0;
     PyObject *extobj = NULL;
     PyObject *axes = NULL, *axis = NULL;
@@ -5214,9 +5216,11 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         fixed_descriptors[i] = NULL;
         mps[i] = NULL;
     }
-    /* Borrowed references for dtype resolution: */
-    PyArray_DTypeMeta *resolver_dtypes[nargs];
-
+    /* DTypes for the resolution: */
+    PyObject *resolver_dtypes = PyTuple_New(nargs);
+    if (resolver_dtypes < 0) {
+        return NULL;
+    }
 
     if (make_full_arg_tuple(&full_args, nin, nout, args, kwds) < 0) {
         goto fail;
@@ -5268,8 +5272,9 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         if (PyArray_Check(PyTuple_GET_ITEM(full_args.in, i))) {
             mps[i] = (PyArrayObject *)PyTuple_GET_ITEM(full_args.in, i);
             Py_INCREF(mps[i]);
-            resolver_dtypes[i] = (
-                    (PyArray_DTypeMeta *)Py_TYPE(PyArray_DESCR(mps[i])));
+            PyObject *tmp = (PyObject *)Py_TYPE(PyArray_DESCR(mps[i]));
+            PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
+            Py_INCREF(tmp);
             continue;
         }
 
@@ -5310,16 +5315,27 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         //       deprecated, but will add seriously annoying logic here.
 
         /* If passed, fixed_dtypes always have priority. */
+        PyObject *tmp;
         if (fixed_dtypes[i] != NULL) {
-            resolver_dtypes[i] = fixed_dtypes[i];
+            tmp = (PyObject *)fixed_dtypes[i];
         }
         else {
-            resolver_dtypes[i] = op_dtypes[i];
+            tmp = (PyObject *)op_dtypes[i];
         }
+        PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
+        Py_INCREF(tmp);
     }
     /* output arrays do not take part, but fixed dtypes always have priority */
     for (i = nin; i < nargs; i++) {
-        resolver_dtypes[i] = fixed_dtypes[i];
+        PyObject *tmp;
+        if (fixed_dtypes[i] == NULL) {
+            tmp = Py_None;
+        }
+        else {
+            tmp = (PyObject *) fixed_dtypes[i];
+        }
+        PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
+        Py_INCREF(tmp);
     }
 
     errval = ufunc_resolve_ufunc_impl(ufunc, resolver_dtypes, &ufunc_impl);
@@ -5333,17 +5349,19 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
          * They could differ in which case we may need one cast less.
          */
         for (i = 0; i < nargs; i++) {
-            resolver_dtypes[i] = ufunc_impl->dtype_signature[i];
+            Py_XSETREF(op_dtypes[i], ufunc_impl->dtype_signature[i]);
+            Py_INCREF(op_dtypes[i]);
         }
     }
 
     /* Finish the actual array coercion for the input arrays */
     // TODO: Probably should refactor, and things will also change in general
     //       here ... :(
-    // TODO: We use the resolver_dtypes here, in principle the input dtype,
+    // TODO: We use the ufunc_impls here, in principle the input dtype,
     //       especially if abstract, could be passed into the first coercion
     //       step. However, that is a matter of opinion. The question is then
     //       whether abstract dtypes should be forbidden as fixed signature.
+    //       (right now that basically makes no difference in either case).
     for (i = 0; i < nin; i++) {
         if (mps[i] != NULL) {
             /* We already have the array object, so do nothing... */
@@ -5357,7 +5375,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             op_coercion_cache[i] = NULL;
         }
         else {
-            PyArray_DTypeMeta *dtype = resolver_dtypes[i];
+            PyArray_DTypeMeta *dtype = op_dtypes[i];
             if (dtype == NULL) {
                 /* An empty list, etc. can have this */
                 PyObject *def_descr = PyArray_DescrFromType(NPY_DEFAULT_TYPE);
@@ -5544,6 +5562,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         retobj[i] = wrapped;
     }
 
+    Py_DECREF(resolver_dtypes);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
 
@@ -5561,6 +5580,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     }
 
 fail:
+    Py_DECREF(resolver_dtypes);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
     for (i = ufunc->nin; i < ufunc->nargs; i++) {
