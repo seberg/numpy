@@ -2042,8 +2042,13 @@ make_full_arg_tuple(
         if (out_kwd == Py_None) {
             return 0;
         }
-        else if (PyTuple_Check(out_kwd)) {
-            assert(PyTuple_GET_SIZE(out_kwd) == nout);
+        else if (PyTuple_CheckExact(out_kwd)) {
+            if (PyTuple_GET_SIZE(out_kwd) != nout) {
+                PyErr_SetString(PyExc_ValueError,
+                                "The 'out' tuple must have exactly "
+                                "one entry per ufunc output");
+                goto fail;
+            }
             if (tuple_all_none(out_kwd)) {
                 return 0;
             }
@@ -2051,17 +2056,16 @@ make_full_arg_tuple(
             full_args->out = out_kwd;
             return 0;
         }
-        else {
-            /* A single argument x is promoted to (x, None, None ...) */
-            full_args->out = PyTuple_New(nout);
-            if (full_args->out == NULL) {
+        else if (PyArray_Check(out_kwd)) {
+            if (nout != 1) {
+                PyErr_SetString(PyExc_TypeError,
+                                "'out' must be a tuple of arrays or None");
                 goto fail;
             }
             Py_INCREF(out_kwd);
-            PyTuple_SET_ITEM(full_args->out, 0, out_kwd);
-            for (i = 1; i < nout; ++i) {
-                Py_INCREF(Py_None);
-                PyTuple_SET_ITEM(full_args->out, i, Py_None);
+            full_args->out = PyTuple_Pack(1, out_kwd);
+            if (full_args->out == NULL) {
+                goto fail;
             }
             return 0;
         }
@@ -2095,7 +2099,9 @@ make_full_arg_tuple(
 
 fail:
     Py_XDECREF(full_args->in);
+    full_args->in = NULL;
     Py_XDECREF(full_args->out);
+    full_args->out = NULL;
     return -1;
 }
 
@@ -3196,9 +3202,12 @@ ufunc_resolve_ufunc_impl(
 
     npy_bool is_any_dtype_abstract = NPY_FALSE;
     for (Py_ssize_t i = 0; i < nop; i++) {
-        PyArray_DTypeMeta *tmp;
-        tmp = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(dtype_tuple, i);
-        is_any_dtype_abstract |= tmp->abstract;
+        PyObject *tmp;
+        tmp = (PyObject *)PyTuple_GET_ITEM(dtype_tuple, i);
+        if (tmp != Py_None) {
+            is_any_dtype_abstract |=(
+                    (PyArray_DTypeMeta *)tmp)->abstract;
+        }
     }
     // TODO: When there are no type resolvers and there is an abstract dtype
     //       there is simply no point in looking up in the cache. It will
@@ -3442,7 +3451,6 @@ ufunc_legacy_resolve_ufunc_impl(
         //       (moving/changing the parsing logic as I did before.)
         PyObject *fixed_types_tuple, PyUFuncImplObject **ufunc_impl,
         PyObject *dtype_tuple,
-        PyArray_Descr *out_descriptors[NPY_MAXARGS],
         NPY_CASTING casting)
 {
     if (ufunc->type_resolver == NULL) {
@@ -3481,6 +3489,7 @@ ufunc_legacy_resolve_ufunc_impl(
      * New style type resolvers are required to honor this agreement, not
      * doing so is considered a bug.
      */
+    PyArray_Descr *out_descriptors[NPY_MAXARGS];
     int res = ufunc->type_resolver(
             ufunc, casting, operands, fixed_types_tuple, out_descriptors);
     if (res < 0) {
@@ -3536,9 +3545,12 @@ ufunc_legacy_resolve_ufunc_impl(
      */
     npy_bool is_any_dtype_abstract = NPY_FALSE;
     for (Py_ssize_t i = 0; i < ufunc->nargs; i++) {
-        PyArray_DTypeMeta *tmp;
-        tmp = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(dtype_tuple, i);
-        is_any_dtype_abstract |= tmp->abstract;
+        PyObject *tmp;
+        tmp = (PyObject *)PyTuple_GET_ITEM(dtype_tuple, i);
+        if (tmp != Py_None) {
+            is_any_dtype_abstract |=(
+                    (PyArray_DTypeMeta *)tmp)->abstract;
+        }
     }
     if (!is_any_dtype_abstract) {
         res = PyDict_SetItem(ufunc->ufunc_impl_cache,
@@ -5315,6 +5327,13 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             tmp = (PyObject *)fixed_dtypes[i];
         }
         else {
+            if (op_dtypes[i] == NULL) {
+                /* An empty list, etc. can have this */
+                PyObject *def_descr = (PyObject *)PyArray_DescrFromType(NPY_DEFAULT_TYPE);
+                op_dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(def_descr);
+                Py_INCREF(op_dtypes[i]);
+                Py_DECREF(def_descr);
+            }
             tmp = (PyObject *)op_dtypes[i];
         }
         PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
@@ -5371,14 +5390,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         }
         else {
             PyArray_DTypeMeta *dtype = op_dtypes[i];
-            if (dtype == NULL) {
-                /* An empty list, etc. can have this */
-                PyObject *def_descr = PyArray_DescrFromType(NPY_DEFAULT_TYPE);
-                dtype = (PyArray_DTypeMeta *)Py_TYPE(def_descr);
-                Py_INCREF(dtype);
-                Py_DECREF(def_descr);
-            }
-            else if (dtype->abstract) {
+            if (dtype->abstract) {
                 PyArray_DTypeMeta *abstract_dtype = dtype;
                 dtype = abstract_dtype->dt_slots->default_dtype(abstract_dtype);
                 if (dtype == NULL) {
@@ -5491,8 +5503,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         }
         errval = ufunc_legacy_resolve_ufunc_impl(
                 ufunc, mps, type_tuple, &ufunc_impl,
-                resolver_dtypes,
-                fixed_descriptors, casting);
+                resolver_dtypes, casting);
         if (errval < 0) {
             goto fail;
         }
