@@ -2587,17 +2587,19 @@ _initialize_variable_parts(PyUFuncObject *ufunc,
 }
 
 static int
-PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
-                        PyObject *args, PyObject *kwds,
-                        PyArrayObject **op)
+PyUFunc_CallGeneralizedUFuncLoop(
+        PyUFuncObject *ufunc, PyUFuncImplObject *ufunc_impl,
+        ufunc_full_args full_args,
+        PyArray_Descr **input_dtypes, PyArrayObject **op,
+        NPY_ORDER order, NPY_CASTING casting,
+        PyObject *extobj, npy_bool subok,
+        PyObject *axes, PyObject *axis, int keepdims)
 {
     int nin, nout;
     int i, j, idim, nop;
     const char *ufunc_name;
-    int retval, subok = 1;
+    int retval;
     int needs_api = 0;
-
-    PyArray_Descr *dtypes[NPY_MAXARGS];
 
     /* Use remapped axes for generalized ufunc */
     int broadcast_ndim, iter_ndim;
@@ -2629,25 +2631,20 @@ PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
     /* swapping around of axes */
     int *remap_axis_memory = NULL;
     int **remap_axis = NULL;
+
+    PyArray_Descr *dtypes[NPY_MAXARGS];
     /* The __array_prepare__ function to call for each output */
     PyObject *arr_prep[NPY_MAXARGS];
-    /* The separated input and output arguments, parsed from args and kwds */
-    ufunc_full_args full_args = {NULL, NULL};
 
-    NPY_ORDER order = NPY_KEEPORDER;
-    /* Use the default assignment casting rule */
-    NPY_CASTING casting = NPY_DEFAULT_ASSIGN_CASTING;
-    /* other possible keyword arguments */
-    PyObject *extobj, *type_tup, *axes, *axis;
-    int keepdims = -1;
-
+    // TODO: This should be supported, for an "unbound" ufunc impl object
+    //       since ufunc should only be necessary for prettier errors here.
     if (ufunc == NULL) {
         PyErr_SetString(PyExc_ValueError, "function not supported");
         return -1;
     }
 
-    nin = ufunc->nin;
-    nout = ufunc->nout;
+    nin = ufunc_impl->nin;
+    nout = ufunc_impl->nout;
     nop = nin + nout;
 
     ufunc_name = ufunc_get_name_cstr(ufunc);
@@ -2852,14 +2849,6 @@ PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
         goto fail;
     }
 
-    NPY_UF_DBG_PRINT("Finding inner loop\n");
-
-
-    retval = ufunc->type_resolver(ufunc, casting,
-                            op, type_tup, dtypes);
-    if (retval < 0) {
-        goto fail;
-    }
     /*
      * We don't write to all elements, and the iterator may make
      * UPDATEIFCOPY temporary copies. The output arrays (unless they are
@@ -2872,12 +2861,6 @@ PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
                        NPY_ITER_READWRITE |
                        NPY_UFUNC_DEFAULT_OUTPUT_FLAGS,
                        op_flags);
-    /* For the generalized ufunc, we get the loop right away too */
-    retval = ufunc->legacy_inner_loop_selector(ufunc, dtypes,
-                                    &innerloop, &innerloopdata, &needs_api);
-    if (retval < 0) {
-        goto fail;
-    }
 
 #if NPY_UF_DBG_TRACING
     printf("input types:\n");
@@ -2894,16 +2877,44 @@ PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
 #endif
 
     if (subok) {
-        if (make_full_arg_tuple(&full_args, nin, nout, args, kwds) < 0) {
-            goto fail;
-        }
-
         /*
          * Get the appropriate __array_prepare__ function to call
          * for each output
          */
+        // TODO: Array prepare should likely be handled before this, so that the
+        //       UFuncImpl does not need to worry about it.
+        //       (OTOH, for now we could force subok=False)
         _find_array_prepare(full_args, arr_prep, nin, nout);
     }
+
+    /*
+     * Call a (user) supplied dtype adaptation function, this function
+     * is also in charge of checking whether the casting is valid or not.
+     */
+    if (ufunc_impl->adapt_dtype_func(ufunc_impl,
+                                     input_dtypes, dtypes, casting) < 0) {
+        goto fail;
+    }
+
+    /*
+     * It is possible to replace loops in old-style numpy functions.
+     * Since in the old layout, these are stored on the ufunc, simply
+     * set/update the inner loop function here to ensure we are up to
+     * date.
+     */
+    if (ufunc_impl->is_legacy_wrapper) {
+        /* Fetch/update the correct inner loop from the ufunc object */
+        retval = ufunc->legacy_inner_loop_selector(
+                ufunc, dtypes,
+                &ufunc_impl->innerloop, &ufunc_impl->innerloopdata,
+                &ufunc_impl->needs_api);
+        if (retval < 0) {
+            goto fail;
+        }
+    }
+
+    innerloop = ufunc_impl->innerloop;
+    innerloopdata = ufunc_impl->innerloop;
 
     /* If the loop wants the arrays, provide them */
     if (_does_loop_use_arrays(innerloopdata)) {
@@ -3100,6 +3111,7 @@ PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
     }
 
     /* Check whether any errors occurred during the loop */
+    // TODO: Fixup to use new setup/teardown functions!
     if (PyErr_Occurred() ||
         _check_ufunc_fperr(errormask, extobj, ufunc_name) < 0) {
         retval = -1;
@@ -3116,12 +3128,6 @@ PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
         Py_XDECREF(dtypes[i]);
         Py_XDECREF(arr_prep[i]);
     }
-    Py_XDECREF(type_tup);
-    Py_XDECREF(extobj);
-    Py_XDECREF(axes);
-    Py_XDECREF(axis);
-    Py_XDECREF(full_args.in);
-    Py_XDECREF(full_args.out);
     PyArray_free(remap_axis_memory);
     PyArray_free(remap_axis);
 
@@ -3134,17 +3140,9 @@ fail:
     PyArray_free(inner_strides);
     NpyIter_Deallocate(iter);
     for (i = 0; i < nop; ++i) {
-        Py_XDECREF(op[i]);
-        op[i] = NULL;
         Py_XDECREF(dtypes[i]);
         Py_XDECREF(arr_prep[i]);
     }
-    Py_XDECREF(type_tup);
-    Py_XDECREF(extobj);
-    Py_XDECREF(axes);
-    Py_XDECREF(axis);
-    Py_XDECREF(full_args.in);
-    Py_XDECREF(full_args.out);
     PyArray_free(remap_axis_memory);
     PyArray_free(remap_axis);
     return retval;
@@ -3578,8 +3576,8 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
         ufunc_full_args full_args,
         PyArray_Descr **input_dtypes, PyArrayObject **op,
         NPY_ORDER order, NPY_CASTING casting,
-        PyObject *extobj, npy_bool subok, PyArrayObject *wheremask,
-        PyObject *axes, PyObject *axis, npy_bool keepdims)
+        PyObject *extobj, npy_bool subok,
+        PyArrayObject *wheremask)
 {
     int nin, nout;
     int i, nop;
@@ -3602,17 +3600,11 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
 
     int trivial_loop_ok = 0;
 
+    // TODO: Remove this check, this should use ufunc only for error
+    //       message improvements really.
     if (ufunc == NULL) {
         PyErr_SetString(PyExc_ValueError, "function not supported");
         return -1;
-    }
-
-    if (ufunc->core_enabled) {
-        // TODO: FIXME, IMPORTANT!
-        PyErr_SetString(PyExc_NotImplementedError,
-                "this path is not implemented, apparently important?");
-        return NULL;
-        return PyUFunc_GeneralizedFunction(ufunc, NULL, NULL, op);
     }
 
     nin = ufunc->nin;
@@ -3635,7 +3627,10 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
         goto fail;
     }
 
-    _find_array_prepare(full_args, arr_prep, nin, nout);
+    if (subok) {
+        // TODO: May want to move this out (but forcing subok=False may be OK)
+        _find_array_prepare(full_args, arr_prep, nin, nout);
+    }
 
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
@@ -5194,7 +5189,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     PyArrayObject *wheremask = NULL;
     NPY_ORDER order = NPY_KEEPORDER;
     NPY_CASTING casting = NPY_DEFAULT_ASSIGN_CASTING;
-    int subok = 1, keepdims = 0;
+    int subok = 1, keepdims = -1;
     PyObject *extobj = NULL;
     PyObject *axes = NULL, *axis = NULL;
     PyObject *override = NULL;
@@ -5242,14 +5237,14 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
      * specific UFuncImpl.
      */
     NPY_UF_DBG_PRINT("Getting arguments\n");
-    if (ufunc->core_enabled)
-        errval = get_ufunc_arguments(ufunc,
-                kwds, &order, &casting, &extobj,
-                &subok, NULL, &axes, &axis, &keepdims, fixed_dtypes);
-    else {
+    if (!ufunc->core_enabled)
         errval = get_ufunc_arguments(ufunc,
                 kwds, &order, &casting, &extobj,
                 &subok, &wheremask, NULL, NULL, NULL, fixed_dtypes);
+    else {
+        errval = get_ufunc_arguments(ufunc,
+                kwds, &order, &casting, &extobj,
+                &subok, NULL, &axes, &axis, &keepdims, fixed_dtypes);
     }
     if (errval < 0) {
         NPY_UF_DBG_PRINT("Failure in getting arguments\n");
@@ -5509,9 +5504,20 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     //       old style resolution!? (Probably better to just do that.)
     // TODO: Array-wrap logic can stay inside the UFunc, but scalar logic
     //       may actually make more sense in the UFuncImpl, hmmm!
-    errval = PyUFunc_CallUFuncLoop(ufunc, ufunc_impl, full_args,
-            fixed_descriptors, mps, order, casting, extobj, subok, NULL,
-            axes, axis, keepdims);
+    if (!ufunc->core_enabled) {
+        assert(axes == NULL);
+        assert(axis == NULL);
+        assert(keepdims == -1);
+        errval = PyUFunc_CallUFuncLoop(ufunc, ufunc_impl,
+                full_args, fixed_descriptors, mps, order, casting,
+                extobj, subok, wheremask);
+    }
+    else {
+        assert(wheremask == NULL);
+        errval = PyUFunc_CallGeneralizedUFuncLoop(ufunc, ufunc_impl,
+                full_args, fixed_descriptors, mps, order, casting,
+                extobj, subok, axes, axis, keepdims);
+    }
     if (errval < 0) {
         return NULL;
     }
