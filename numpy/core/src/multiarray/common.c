@@ -1295,7 +1295,6 @@ NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *next) {
             }
         }
         if (cache_pos == COERCION_CACHE_SIZE) {
-            printf("     actually freeing completely!\n");
             PyArray_free(current);
         }
     }
