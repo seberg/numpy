@@ -176,14 +176,11 @@ castingimpl_legacynew(
 {
     CastingImpl *casting_impl = NULL;
 
-    casting_impl = (CastingImpl *)PyArray_malloc(sizeof(CastingImpl));
+    casting_impl = (CastingImpl *)PyObject_New(
+            CastingImpl, &PyArrayCastingImpl_Type);
     if (casting_impl == NULL) {
         return NULL;
     }
-    memset(casting_impl, 0, sizeof(CastingImpl));
-    // TODO: Can Init fail? This is likely not the nicest way anyway?
-    PyObject_Init((PyObject *)casting_impl, &PyArrayCastingImpl_Type);
-    Py_INCREF(casting_impl);
 
     // TODO: Borrowed references may actually be fine here? But needs to be defined.
     casting_impl->from_dtype = from_dtype;
@@ -219,6 +216,12 @@ castingimpl_legacynew(
     return (PyObject *)casting_impl;
 }
 
+static void
+casting_impl_dealloc(CastingImpl *casting_impl)
+{
+    PyObject_FREE(casting_impl);
+}
+
 
 /*
  * CastingImpl type, this should be a subclass of in the future.
@@ -228,5 +231,6 @@ NPY_NO_EXPORT PyTypeObject PyArrayCastingImpl_Type = {
     .tp_name = "numpy.CastingImpl",
     .tp_basicsize = sizeof(CastingImpl),
     .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_dealloc = (destructor)casting_impl_dealloc,
 };
 
