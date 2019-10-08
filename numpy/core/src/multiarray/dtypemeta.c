@@ -146,7 +146,12 @@ legacy_default_descr(PyArray_DTypeMeta *cls) {
     // For current flexible types (strings and void, but also
     // datetime/timedelta this practically exists currently, but should
     // not exist.
-    return PyArray_DescrFromType(cls->type_num);
+    if (cls->flexible) {
+        return PyArray_DescrNewFromType(cls->type_num);
+    }
+    else {
+        return PyArray_DescrFromType(cls->type_num);
+    }
 }
 
 static PyArray_Descr *
@@ -283,7 +288,7 @@ string_discover_descr_from_pyobject(
         // TODO: Legacy behaviour of not allowing empty strings!
         length = cls->type_num == NPY_UNICODE ? 4 : 1;
     }
-    PyArray_Descr *descr = PyArray_DescrFromType(cls->type_num);
+    PyArray_Descr *descr = PyArray_DescrNewFromType(cls->type_num);
     if (descr == NULL) {
         return NULL;
     }
