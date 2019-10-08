@@ -3463,13 +3463,14 @@ ufunc_legacy_resolve_ufunc_impl(
         // TODO: Important: make sure fixed tuple is always a tuple
         //       (moving/changing the parsing logic as I did before.)
         PyObject *fixed_types_tuple, PyUFuncImplObject **ufunc_impl,
+        PyArray_DTypeMeta *resolver_dtypes,
         PyArray_Descr *out_descriptors[NPY_MAXARGS],
         NPY_CASTING casting)
 {
     PyArray_DTypeMeta* dtypes[NPY_MAXARGS];
 
     if (ufunc->type_resolver == NULL) {
-        /* No loop available, do nothing and return. */
+        /* No loop available, legacy_redo nothing and return. */
         return 0;
     }
 
@@ -3543,16 +3544,6 @@ ufunc_legacy_resolve_ufunc_impl(
                 "no loop found!");
         return -1;
     }
-    /*
-     * It is possible to replace loops in old-style numpy functions.
-     * Since in the old layout, these are stored on the ufunc, simply
-     * set/update the inner loop function here to ensure we are up to
-     * date.
-     */
-    res = PyUFunc_DefaultLegacyInnerLoopSelector(ufunc,
-            out_descriptors,
-            &(*ufunc_impl)->innerloop, &(*ufunc_impl)->innerloopdata,
-            &(*ufunc_impl)->needs_api);
     return res;
 }
 
@@ -3655,8 +3646,12 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
         goto fail;
     }
 
-    // If the UFuncImpl wraps a legacy implementation, we need to set/reset
-    // the inner loop information
+    /*
+     * It is possible to replace loops in old-style numpy functions.
+     * Since in the old layout, these are stored on the ufunc, simply
+     * set/update the inner loop function here to ensure we are up to
+     * date.
+     */
     if (ufunc_impl->is_legacy_wrapper) {
         /* Fetch/update the correct inner loop from the ufunc object */
         retval = ufunc->legacy_inner_loop_selector(
@@ -5265,6 +5260,19 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
      */
 
     for (i = 0; i < nin; i++) {
+        // TODO: This fast path is not pretty, but probably necessary to avoid
+        //       a larger performance regression? However, should be moved?!
+        // TODO: Revisit fast path once coercion is sped up for this case.
+        //       (fast path leads to mps[i] != NULL path below)
+        /* fast path for the common case that input is an array */
+        if (PyArray_Check(PyTuple_GET_ITEM(full_args.in, i))) {
+            mps[i] = (PyArrayObject *)PyTuple_GET_ITEM(full_args.in, i);
+            Py_INCREF(mps[i]);
+            resolver_dtypes[i] = (
+                    (PyArray_DTypeMeta *)Py_TYPE(PyArray_DESCR(mps[i])));
+            continue;
+        }
+
         // TODO: Really need to clean up that signature, it is hell (and
         //       much is unnecessary. A single struct for all the output
         //       information is a start.
@@ -5337,15 +5345,14 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     //       step. However, that is a matter of opinion. The question is then
     //       whether abstract dtypes should be forbidden as fixed signature.
     for (i = 0; i < nin; i++) {
-        PyArray_Descr *descr;
-
-        if (single_or_no_element[i] &&
+        if (mps[i] != NULL) {
+            /* We already have the array object, so do nothing... */
+        }
+        else if (single_or_no_element[i] &&
                 op_coercion_cache[i] != NULL &&
                 !op_coercion_cache[i]->sequence) {
             mps[i] = (PyArrayObject *)op_coercion_cache[i]->arr_or_sequence;
             Py_INCREF(mps[i]);
-            descr = PyArray_DESCR(mps[i]);
-            Py_INCREF(descr);
             npy_free_coercion_cache(op_coercion_cache[i]);
             op_coercion_cache[i] = NULL;
         }
@@ -5373,6 +5380,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 Py_INCREF(dtype);
             }
 
+            PyArray_Descr *descr;
             errval = PyArray_DiscoverDescriptorFromObject(
                     PyTuple_GET_ITEM(full_args.in, i), &descr,
                     &op_coercion_cache[i],
@@ -5470,6 +5478,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         }
         errval = ufunc_legacy_resolve_ufunc_impl(
                 ufunc, mps, type_tuple, &ufunc_impl,
+                resolver_dtypes,
                 fixed_descriptors, casting);
         if (errval < 0) {
             goto fail;
