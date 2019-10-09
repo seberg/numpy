@@ -147,7 +147,7 @@ default_ufunc_adapt_function(PyUFuncImplObject *self,
     return 0;
 
 fail:
-    for (int j; j < i; j++) {
+    for (int j = 0; j < i; j++) {
         Py_DECREF(out_descr[j]);
     }
     return -1;

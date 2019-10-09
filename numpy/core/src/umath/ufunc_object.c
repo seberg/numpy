@@ -3568,9 +3568,9 @@ ufunc_legacy_resolve_ufunc_impl(
  * 'op' is an array of at least NPY_MAXARGS PyArrayObject *.
  */
 NPY_NO_EXPORT int
-PyUFunc_GenericFunction(PyUFuncObject *ufunc,
-                        PyObject *args, PyObject *kwds,
-                        PyArrayObject **op)
+PyUFunc_GenericFunction(PyUFuncObject *NPY_UNUSED(ufunc),
+                        PyObject *NPY_UNUSED(args), PyObject *NPY_UNUSED(kwds),
+                        PyArrayObject **NPY_UNUSED(op))
 {
     // TODO: We can readd this with a bit of magic by refactoring the
     //       current/new python side a bit, not that I can find any actual
@@ -3760,11 +3760,6 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
         Py_XDECREF(dtypes[i]);
         Py_XDECREF(arr_prep[i]);
     }
-    //Py_XDECREF(extobj);
-    //Py_XDECREF(full_args.in);
-    //Py_XDECREF(full_args.out);
-    //Py_XDECREF(wheremask);
-    //Py_XDECREF(ufunc_impl);
 
     NPY_UF_DBG_PRINT("Returning success code 0\n");
 
@@ -3776,11 +3771,6 @@ fail:
         Py_XDECREF(dtypes[i]);
         Py_XDECREF(arr_prep[i]);
     }
-    //Py_XDECREF(extobj);
-    //Py_XDECREF(full_args.in);
-    //Py_XDECREF(full_args.out);
-    //Py_XDECREF(wheremask);
-    //Py_XDECREF(ufunc_impl);
 
     return retval;
 }
@@ -5354,7 +5344,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     errval = ufunc_resolve_ufunc_impl(ufunc, resolver_dtypes, &ufunc_impl);
     /* Note that for support of legacy behaviour, ufunc_impl may not be set */
     if (errval < 0) {
-        return NULL;
+        goto fail;
     }
     if (ufunc_impl != NULL) {
         /*
@@ -5539,6 +5529,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     /* Free the input references */
     for (i = 0; i < ufunc->nin; i++) {
         Py_XDECREF(mps[i]);
+        mps[i] = NULL;
     }
 
     /*
@@ -5615,6 +5606,7 @@ fail:
     }
     return NULL;
 }
+
 
 NPY_NO_EXPORT PyObject *
 ufunc_geterr(PyObject *NPY_UNUSED(dummy), PyObject *args)
@@ -5851,7 +5843,7 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
         //       only ever the first one is used (for simd support), check
         //       this, and simply ignore the second one.
         npy_bool skip_duplicate_ufunc_impl = NPY_FALSE;
-        for (int i = 0; i < PySequence_Length(ufunc->resolvers); i++) {
+        for (Py_ssize_t i = 0; i < PySequence_Length(ufunc->resolvers); i++) {
             PyObject *tmp = PySequence_Fast_GET_ITEM(
                     ufunc->resolvers, i);
             tmp = PySequence_Fast_GET_ITEM(tmp, 0);
