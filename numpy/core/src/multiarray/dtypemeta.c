@@ -58,7 +58,8 @@ dtypemeta_dealloc(PyArray_DTypeMeta *self) {
 }
 
 static PyObject *
-dtypemeta_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+dtypemeta_new(PyTypeObject *NPY_UNUSED(type),
+        PyObject *NPY_UNUSED(args), PyObject *NPY_UNUSED(kwds))
 {
     // PyObject *self = (&PyType_Type)->tp_new(type, args, kwds);
 
@@ -194,7 +195,8 @@ legacy_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
 }
 
 static PyArray_DTypeMeta*
-object_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
+object_common_dtype(PyArray_DTypeMeta *cls,
+        PyArray_DTypeMeta *NPY_UNUSED(other))
 {
     /* Object dtype always wins boojah! */
     Py_INCREF(cls);
@@ -202,16 +204,16 @@ object_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
 }
 
 static PyArray_Descr*
-legacy_common_instance(
-        PyArray_DTypeMeta *NPY_UNUSED(cls),
+legacy_common_instance(PyArray_DTypeMeta *NPY_UNUSED(cls),
         PyArray_Descr *descr1, PyArray_Descr *descr2)
 {
     return PyArray_LegacyPromoteTypes(descr1, descr2);
 }
 
 static PyArray_Descr*
-VOID_common_instance(
-        PyArray_DTypeMeta *cls, PyArray_Descr *descr1, PyArray_Descr *descr2) {
+VOID_common_instance(PyArray_DTypeMeta *NPY_UNUSED(cls),
+        PyArray_Descr *descr1, PyArray_Descr *descr2)
+{
     PyArray_Descr *out_descr = NULL;
     /* The legacy code thinks that V8 and V9 cannot promote; lets disagree. */
     if ((descr1->names == NULL) && (descr1->subarray == NULL) &&
