@@ -1554,7 +1554,8 @@ force_sequence:
         }
         goto fail;
     }
-    if (npy_new_coercion_cache(obj, seq, 1, &coercion_cache_end, coercion_cache) < 0) {
+    if (npy_new_coercion_cache(obj, seq, 1,
+                    &coercion_cache_end, coercion_cache) < 0) {
         Py_DECREF(seq);
         goto fail;
     }
@@ -1565,6 +1566,7 @@ force_sequence:
     if (update_shape(curr_dims, &max_dims,
                      out_shape, 1, &size, NPY_TRUE) < 0) {
         /* But do update, if there this is a ragged case */
+        Py_DECREF(seq);
         goto ragged_array;
     }
     if (size == 0) {
@@ -1674,7 +1676,8 @@ PyArray_DiscoverDescriptorFromObjectRecursive(
                 if (Py_TYPE(descr) == *last_dtype) {
                     casting_impl = *last_castingimpl;
                     Py_INCREF(casting_impl);
-                } else {
+                }
+                else {
                     casting_impl = get_casting_impl(
                             (PyArray_DTypeMeta *) Py_TYPE(descr), dtype,
                             NPY_UNSAFE_CASTING);
