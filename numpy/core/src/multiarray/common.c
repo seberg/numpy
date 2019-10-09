@@ -1367,7 +1367,6 @@ PyArray_DiscoverDTypeFromObject(
     if (prev_type == Py_TYPE(obj)) {
         /* super-fast check for the common case of homogeneous sequences */
         dtype = prev_dtype;
-        Py_INCREF(dtype);
     }
     else {
         dtype = (PyArray_DTypeMeta *)PyDict_GetItem(

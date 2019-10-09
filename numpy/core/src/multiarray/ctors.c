@@ -1364,7 +1364,7 @@ PyArray_DiscoverDTypeAndShapeFromObject(
     if (fixed_descriptor != NULL) {
         // TODO: Like the above, this whole code bunch is probably more or less
         //       useless....
-        /* If a specific descritor was requested, we should honor that?! */
+        /* If a specific descriptor was requested, we should honor that?! */
         Py_INCREF(fixed_descriptor);
         *out_descriptor = (PyObject *)fixed_descriptor;
         Py_INCREF(Py_TYPE(fixed_descriptor));

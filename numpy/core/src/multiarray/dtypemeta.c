@@ -203,7 +203,8 @@ object_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
 
 static PyArray_Descr*
 legacy_common_instance(
-        PyArray_DTypeMeta *cls, PyArray_Descr *descr1, PyArray_Descr *descr2)
+        PyArray_DTypeMeta *NPY_UNUSED(cls),
+        PyArray_Descr *descr1, PyArray_Descr *descr2)
 {
     return PyArray_LegacyPromoteTypes(descr1, descr2);
 }
