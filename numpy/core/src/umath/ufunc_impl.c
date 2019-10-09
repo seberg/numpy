@@ -91,6 +91,7 @@ default_ufunc_adapt_function(PyUFuncImplObject *self,
             /* The first branch here preserves metadata of first input */
             if (given_dt == ((PyArray_DTypeMeta *) Py_TYPE(out_descr[0]))) {
                 out_descr[i] = out_descr[0];
+                Py_INCREF(out_descr[i]);
             } else {
                 out_descr[i] = given_dt->dt_slots->default_descr(given_dt);
             }

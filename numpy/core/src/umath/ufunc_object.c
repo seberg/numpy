@@ -3756,10 +3756,10 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
 
 
     /* The caller takes ownership of all the references in op */
-    //for (i = 0; i < nop; ++i) {
-    //    Py_XDECREF(dtypes[i]);
-    //    Py_XDECREF(arr_prep[i]);
-    //}
+    for (i = 0; i < nop; ++i) {
+        Py_XDECREF(dtypes[i]);
+        Py_XDECREF(arr_prep[i]);
+    }
     //Py_XDECREF(extobj);
     //Py_XDECREF(full_args.in);
     //Py_XDECREF(full_args.out);
@@ -3772,12 +3772,10 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
 
 fail:
     NPY_UF_DBG_PRINT1("Returning failure code %d\n", retval);
-    //for (i = 0; i < nop; ++i) {
-    //    Py_XDECREF(op[i]);
-    //    op[i] = NULL;
-    //    Py_XDECREF(dtypes[i]);
-    //    Py_XDECREF(arr_prep[i]);
-    //}
+    for (i = 0; i < nop; ++i) {
+        Py_XDECREF(dtypes[i]);
+        Py_XDECREF(arr_prep[i]);
+    }
     //Py_XDECREF(extobj);
     //Py_XDECREF(full_args.in);
     //Py_XDECREF(full_args.out);
@@ -5329,7 +5327,8 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         else {
             if (op_dtypes[i] == NULL) {
                 /* An empty list, etc. can have this */
-                PyObject *def_descr = (PyObject *)PyArray_DescrFromType(NPY_DEFAULT_TYPE);
+                PyObject *def_descr = (
+                        (PyObject *)PyArray_DescrFromType(NPY_DEFAULT_TYPE));
                 op_dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(def_descr);
                 Py_INCREF(op_dtypes[i]);
                 Py_DECREF(def_descr);
@@ -5391,14 +5390,12 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         else {
             PyArray_DTypeMeta *dtype = op_dtypes[i];
             if (dtype->abstract) {
-                PyArray_DTypeMeta *abstract_dtype = dtype;
-                dtype = abstract_dtype->dt_slots->default_dtype(abstract_dtype);
+                dtype = dtype->dt_slots->default_dtype(dtype);
                 if (dtype == NULL) {
                     npy_free_coercion_cache(op_coercion_cache[i]);
                     op_coercion_cache[i] = NULL;
                     goto fail;
                 }
-                Py_DECREF(abstract_dtype);
                 assert(!dtype->abstract);
             }
             else {
@@ -5465,6 +5462,9 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     if (ufunc_impl == NULL) {
         int any_fixed = 0;
         PyObject *type_tuple = PyTuple_New(nargs);
+        if (type_tuple == NULL) {
+            goto fail;
+        }
         /* New style resolution did not find a loop, but no error occurred */
         for (i = 0; i < nargs; i++) {
             if (mps[i] != NULL) {
@@ -5475,6 +5475,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                     // TODO: Build in ones will need to stay "legacy" here...
                     PyErr_SetString(PyExc_TypeError,
                             "no ufunc loop");
+                    Py_DECREF(type_tuple);
                     goto fail;
                 }
             }
@@ -5488,6 +5489,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                     Py_XDECREF(descr);
                     PyErr_SetString(PyExc_TypeError,
                                     "no ufunc loop");
+                    Py_DECREF(type_tuple);
                     goto fail;
                 }
                 PyTuple_SET_ITEM(type_tuple, i, (PyObject *)descr);
@@ -5504,6 +5506,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         errval = ufunc_legacy_resolve_ufunc_impl(
                 ufunc, mps, type_tuple, &ufunc_impl,
                 resolver_dtypes, casting);
+        Py_XDECREF(type_tuple);
         if (errval < 0) {
             goto fail;
         }
@@ -5530,7 +5533,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 extobj, subok, axes, axis, keepdims);
     }
     if (errval < 0) {
-        return NULL;
+        goto fail;
     }
 
     /* Free the input references */
@@ -5579,9 +5582,14 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         retobj[i] = wrapped;
     }
 
+    Py_DECREF(ufunc_impl);
     Py_DECREF(resolver_dtypes);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
+
+    for (i = 0; i < ufunc->nargs; i++) {
+        Py_XDECREF(op_dtypes[i]);
+    }
 
     if (ufunc->nout == 1) {
         return retobj[0];
@@ -5597,10 +5605,12 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     }
 
 fail:
+    Py_XDECREF(ufunc_impl);
     Py_DECREF(resolver_dtypes);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
-    for (i = ufunc->nin; i < ufunc->nargs; i++) {
+    for (i = 0; i < ufunc->nargs; i++) {
+        Py_XDECREF(op_dtypes[i]);
         Py_XDECREF(mps[i]);
     }
     return NULL;
