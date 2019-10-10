@@ -154,6 +154,33 @@ fail:
 }
 
 
+static int
+type_resolver_ufunc_adapt_function(PyUFuncImplObject *self,
+         PyArray_Descr **descr, PyArray_Descr **out_descr,
+         NPY_CASTING casting)
+{
+    int nargs = self->nin + self->nout;
+    PyArrayObject_fields fake_array_structs[nargs];
+    PyArrayObject *fake_arrays[nargs];
+
+    // TODO: The fact that we use fake arrays here should probably be
+    //       documented, even if it it should not really matter except
+    //       for datetime/timedelta which is numpy internal.
+    for (int i = 0; i < nargs; i++) {
+        fake_array_structs[i].nd = 1;
+        fake_array_structs[i].dimensions = NULL;
+        fake_array_structs[i].descr = descr[i];
+        if (descr[i] == NULL) {
+            fake_arrays[i] = NULL;
+        }
+        else {
+            fake_arrays[i] = (PyArrayObject *)&fake_array_structs[i];
+        }
+    }
+    PyUFuncObject *ufunc = self->bound_ufunc;
+    return ufunc->type_resolver(ufunc, casting, fake_arrays, NULL, out_descr);
+}
+
 
 NPY_NO_EXPORT PyObject *
 ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
@@ -187,12 +214,6 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
     }
     ufunc_impl->iter_flags = ufunc->iter_flags;
 
-    // TODO: This function does not work for flexible dtypes
-    //       (specifically, it does not work for datetimes, where we would
-    //       have to use the olds tyle TypeResolution function).
-    ufunc_impl->adapt_dtype_func = default_ufunc_adapt_function;
-    ufunc_impl->adapt_dtype_pyfunc = NULL;
-
     /*
      * The correct loop will be fetched on every execution (or rather
      * every time the resolution finished). This is to ensure that we pick
@@ -204,9 +225,27 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
     ufunc_impl->innerloopdata = NULL;
     ufunc_impl->needs_api = 1;
 
+    npy_bool any_flexible = NPY_FALSE;
     for (int i = 0; i < ufunc->nargs; i++) {
         ufunc_impl->dtype_signature[i] = dtypes[i];
         Py_INCREF(ufunc_impl->dtype_signature[i]);
+        if (dtypes[i]->flexible) {
+            any_flexible = NPY_TRUE;
+        }
+    }
+
+    if (!any_flexible) {
+        ufunc_impl->adapt_dtype_func = default_ufunc_adapt_function;
+        ufunc_impl->adapt_dtype_pyfunc = NULL;
+        ufunc_impl->bound_ufunc = NULL;
+    }
+    else {
+        ufunc_impl->adapt_dtype_func = type_resolver_ufunc_adapt_function;
+        Py_INCREF(ufunc);
+        // TODO: Should ensure that the bound ufunc is never
+        //       actually registered to another ufunc, and add tests
+        //       for it!.
+        ufunc_impl->bound_ufunc = ufunc;
     }
 
     /* TODO: What the heck to do about errors during casting? */
@@ -232,6 +271,7 @@ ufuncimpl_dealloc(PyUFuncImplObject *ufunc_impl)
         Py_DECREF(ufunc_impl->identity_value);
     }
     Py_XDECREF(ufunc_impl->adapt_dtype_pyfunc);
+    Py_XDECREF(ufunc_impl->bound_ufunc);
     PyDataMem_FREE(ufunc_impl->dtype_signature);
 }
 

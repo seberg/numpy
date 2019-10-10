@@ -72,6 +72,8 @@ typedef struct _tagPyUFuncImplObject {
     PyUfuncAdaptFlexibleDTypes *adapt_dtype_func;
     PyObject *adapt_dtype_pyfunc;
 
+    PyUFuncObject *bound_ufunc;
+
     PyUfuncImplSetupFunc *setup;
     PyUfuncImplTeardownFunc *teardown;
     PyArray_DTypeMeta **dtype_signature;
