@@ -1373,7 +1373,7 @@ trivial_two_operand_loop(PyArrayObject **op,
     npy_intp count[2], stride[2];
     int needs_api;
     NPY_BEGIN_THREADS_DEF;
-
+    // TODO: This is nonsense, needs_api should be decided by the UFuncImpl.
     needs_api = PyDataType_REFCHK(PyArray_DESCR(op[0])) ||
                 PyDataType_REFCHK(PyArray_DESCR(op[1]));
 
@@ -1549,8 +1549,7 @@ iterator_loop(PyUFuncObject *ufunc,  // TODO: Only needed for name...
 
     /*
      * Allocate the iterator.  Because the types of the inputs
-     * were already checked, we use the casting rule 'unsafe' which
-     * is faster to calculate.
+     * were already checked, we use the casting rule 'unsafe'.
      */
     iter = NpyIter_AdvancedNew(nop, op,
                         iter_flags,
@@ -1650,22 +1649,21 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
                     npy_uint32 *op_flags,
                     PyObject *extobj, int errormask)
 {
-    int error_occured = 0;
+    int error_occured = 0, ret;
     npy_intp nin = ufunc_impl->nin, nout = ufunc_impl->nout;
     PyUFuncGenericFunction innerloop = ufunc_impl->innerloop;
     void *innerloopdata = ufunc_impl->innerloopdata;
     int needs_api = ufunc_impl->needs_api;
 
     /* If the loop wants the arrays, provide them. */
+    // TODO: Could move this into a default setup function.
     if (_does_loop_use_arrays(innerloopdata)) {
         innerloopdata = (void*)op;
     }
 
-    if (ufunc_impl->setup != NULL) {
-        if (ufunc_impl->setup(ufunc_impl, ufunc, innerloopdata,
-                              extobj, errormask) < 0) {
-            goto fail;
-        }
+    if (ufunc_impl->setup(ufunc_impl, ufunc, &innerloopdata,
+                          extobj, errormask) < 0) {
+        goto fail;
     }
 
     /* First check for the trivial cases that don't need an iterator */
@@ -1799,14 +1797,13 @@ fail:
 
 teardown:
 
-    if (ufunc_impl->teardown != NULL) {
-        int ret = ufunc_impl->teardown(ufunc_impl, ufunc, innerloopdata,
-                                       extobj, errormask);
-        if (ret < 0 && error_occured == 0) {
-            /* This is the correct error. */
-            return -1;
-        }
+    ret = ufunc_impl->teardown(ufunc_impl, ufunc, innerloopdata,
+                                   extobj, errormask);
+    if (ret < 0 && error_occured == 0) {
+        /* This is the correct error. */
+        return -1;
     }
+
     if (error_occured < 0) {
         PyErr_Restore(type, value, traceback);
     }
@@ -1827,6 +1824,7 @@ teardown:
  */
 static int
 execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
+                    PyUFuncImplObject *ufunc_impl,
                     PyArrayObject *wheremask,
                     PyArrayObject **op,
                     PyArray_Descr **dtypes,
@@ -1834,12 +1832,15 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
                     npy_intp buffersize,
                     PyObject **arr_prep,
                     ufunc_full_args full_args,
-                    npy_uint32 *op_flags)
+                    npy_uint32 *op_flags,
+                    PyObject *extobj, int errormask)
 {
-    int i, nin = ufunc->nin, nout = ufunc->nout;
+    int i, nin = ufunc_impl->nin, nout = ufunc_impl->nout;
     int nop = nin + nout;
     NpyIter *iter;
-    int needs_api;
+    // TODO: Should move into the setup function
+    int needs_api = ufunc_impl->needs_api;
+    int error_occured = 0, ret;
 
     NpyIter_IterNextFunc *iternext;
     char **dataptr;
@@ -1848,6 +1849,13 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
 
     PyArrayObject **op_it;
     npy_uint32 iter_flags;
+
+    void *innerloopdata = ufunc_impl->innerloopdata;
+
+    if (ufunc_impl->setup(ufunc_impl, ufunc, &innerloopdata,
+                          extobj, errormask) < 0) {
+        goto fail;
+    }
 
     for (i = nin; i < nop; ++i) {
         op_flags[i] |= (op[i] != NULL ? NPY_ITER_READWRITE : NPY_ITER_WRITEONLY);
@@ -1859,7 +1867,7 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
 
     NPY_UF_DBG_PRINT("Making iterator\n");
 
-    iter_flags = ufunc->iter_flags |
+    iter_flags = ufunc_impl->iter_flags |
                  NPY_ITER_EXTERNAL_LOOP |
                  NPY_ITER_REFS_OK |
                  NPY_ITER_ZEROSIZE_OK |
@@ -1869,8 +1877,7 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
 
     /*
      * Allocate the iterator.  Because the types of the inputs
-     * were already checked, we use the casting rule 'unsafe' which
-     * is faster to calculate.
+     * were already checked, we use the casting rule 'unsafe'.
      */
     iter = NpyIter_AdvancedNew(nop + ((wheremask != NULL) ? 1 : 0), op,
                         iter_flags,
@@ -1878,7 +1885,7 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
                         op_flags, dtypes,
                         -1, NULL, NULL, buffersize);
     if (iter == NULL) {
-        return -1;
+        goto fail;
     }
 
     NPY_UF_DBG_PRINT("Made iterator\n");
@@ -1909,7 +1916,7 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
         if (prepare_ufunc_output(ufunc, &op_tmp,
                                  arr_prep[i], full_args, i) < 0) {
             NpyIter_Deallocate(iter);
-            return -1;
+            goto fail;
         }
 
         /* Validate that the prepare_ufunc_output didn't mess with pointers */
@@ -1919,7 +1926,7 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
                         "pointer addresses in an invalid fashion");
             Py_DECREF(op_tmp);
             NpyIter_Deallocate(iter);
-            return -1;
+            goto fail;
         }
 
         /*
@@ -1933,8 +1940,8 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
 
     /* Only do the loop if the iteration size is non-zero */
     if (NpyIter_GetIterSize(iter) != 0) {
-        PyUFunc_MaskedStridedInnerLoopFunc *innerloop;
-        NpyAuxData *innerloopdata;
+        PyUFunc_MaskedStridedInnerLoopFunc *masked_innerloop;
+        NpyAuxData *masked_innerloopdata;
         npy_intp fixed_strides[2*NPY_MAXARGS];
         PyArray_Descr **iter_dtypes;
         NPY_BEGIN_THREADS_DEF;
@@ -1945,22 +1952,18 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
          */
         NpyIter_GetInnerFixedStrideArray(iter, fixed_strides);
         iter_dtypes = NpyIter_GetDescrArray(iter);
-        if (ufunc->masked_inner_loop_selector(ufunc, dtypes,
-                        wheremask != NULL ? iter_dtypes[nop]
-                                          : iter_dtypes[nop + nin],
-                        fixed_strides,
-                        wheremask != NULL ? fixed_strides[nop]
-                                          : fixed_strides[nop + nin],
-                        &innerloop, &innerloopdata, &needs_api) < 0) {
+        if (PyUFunc_WrapInnerloopIntoMasked(
+                nop, ufunc_impl->innerloop, innerloopdata,
+                &masked_innerloop, &masked_innerloopdata) < 0) {
             NpyIter_Deallocate(iter);
-            return -1;
+            goto fail;
         }
 
         /* Get the variables needed for the loop */
         iternext = NpyIter_GetIterNext(iter, NULL);
         if (iternext == NULL) {
             NpyIter_Deallocate(iter);
-            return -1;
+            goto fail;
         }
         dataptr = NpyIter_GetDataPtrArray(iter);
         strides = NpyIter_GetInnerStrideArray(iter);
@@ -1972,18 +1975,44 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
         /* Execute the loop */
         do {
             NPY_UF_DBG_PRINT1("iterator loop count %d\n", (int)*countptr);
-            innerloop(dataptr, strides,
+            masked_innerloop(dataptr, strides,
                         dataptr[nop], strides[nop],
-                        *countptr, innerloopdata);
+                        *countptr, masked_innerloopdata);
         } while (iternext(iter));
 
         NPY_END_THREADS;
 
-        NPY_AUXDATA_FREE(innerloopdata);
+        NPY_AUXDATA_FREE(masked_innerloopdata);
     }
 
-    return NpyIter_Deallocate(iter);
+    if (NpyIter_Deallocate(iter) < 0) {
+        goto fail;
+    }
+
+    goto teardown;
+
+fail:
+    error_occured = -1;
+
+    PyObject *type, *value, *traceback;
+    PyErr_Fetch(&type, &value, &traceback);
+
+teardown:
+
+    ret = ufunc_impl->teardown(ufunc_impl, ufunc, innerloopdata,
+                               extobj, errormask);
+    if (ret < 0 && error_occured == 0) {
+        /* This is the correct error. */
+        return -1;
+    }
+
+    if (error_occured < 0) {
+        PyErr_Restore(type, value, traceback);
+    }
+
+    return error_occured;
 }
+
 
 static npy_bool
 tuple_all_none(PyObject *tup) {
@@ -3853,9 +3882,10 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
         /* Set up the flags */
 
         npy_clear_floatstatus_barrier((char*)&ufunc);
-        retval = execute_fancy_ufunc_loop(ufunc, wheremask,
+        retval = execute_fancy_ufunc_loop(ufunc, ufunc_impl, wheremask,
                             op, dtypes, order,
-                            buffersize, arr_prep, full_args, op_flags);
+                            buffersize, arr_prep, full_args, op_flags,
+                            extobj, errormask);
         if (retval < 0) {
             goto fail;
         }
@@ -5315,7 +5345,8 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
 
     // TODO: Should probably just copy over the arrays in the next function,
     //       or explicitely fill in wheremask already here.
-    PyArrayObject *mps[nargs + 1];  /* extra storage for wheremask */
+    /* extra storage for wheremask (not used here), should likely be changed */
+    PyArrayObject *mps[nargs + 1];
     PyObject *retobj[nargs];
     PyObject *wraparr[nargs];
 
