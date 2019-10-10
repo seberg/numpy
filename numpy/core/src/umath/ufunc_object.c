@@ -404,7 +404,7 @@ _ufunc_setup_flags(PyUFuncObject *ufunc, npy_uint32 op_in_flags,
  */
 static void
 _find_array_wrap(ufunc_full_args args, PyObject *kwds,
-                PyObject **output_wrap, int nin, int nout)
+                PyObject **output_wrap, int nin, int nout, int subok)
 {
     int i;
     PyObject *obj;
@@ -414,12 +414,9 @@ _find_array_wrap(ufunc_full_args args, PyObject *kwds,
      * If a 'subok' parameter is passed and isn't True, don't wrap but put None
      * into slots with out arguments which means return the out argument
      */
-    if (kwds != NULL && (obj = PyDict_GetItem(kwds,
-                                              npy_um_str_subok)) != NULL) {
-        if (obj != Py_True) {
-            /* skip search for wrap members */
-            goto handle_out;
-        }
+    if (!subok) {
+        /* skip search for wrap members */
+        goto handle_out;
     }
 
     /*
@@ -2038,7 +2035,12 @@ make_full_arg_tuple(
     out_kwd = kwds ? PyDict_GetItem(kwds, npy_um_str_out) : NULL;
 
     if (out_kwd != NULL) {
-        assert(nargs == nin);
+        if (nargs != nin) {
+            PyErr_SetString(PyExc_ValueError,
+                    "cannot specify 'out' as both a positional "
+                    "and keyword argument");
+            goto fail;
+        }
         if (out_kwd == Py_None) {
             return 0;
         }
@@ -2062,7 +2064,6 @@ make_full_arg_tuple(
                                 "'out' must be a tuple of arrays or None");
                 goto fail;
             }
-            Py_INCREF(out_kwd);
             full_args->out = PyTuple_Pack(1, out_kwd);
             if (full_args->out == NULL) {
                 goto fail;
@@ -5684,7 +5685,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
      * None --- array-object passed in don't call PyArray_Return
      * method --- the __array_wrap__ method to call.
      */
-    _find_array_wrap(full_args, kwds, wraparr, ufunc->nin, ufunc->nout);
+    _find_array_wrap(full_args, kwds, wraparr, ufunc->nin, ufunc->nout, subok);
 
     /* wrap outputs */
     for (i = 0; i < ufunc->nout; i++) {
