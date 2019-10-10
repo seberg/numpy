@@ -3157,29 +3157,40 @@ fail:
 
 static int
 call_ufuncimpl_resolver(
-        PyObject *resolver, PyObject *dtype_tuple,
-        PyUFuncImplObject **ufunc_impl) {
-    PyObject *res = PyObject_Call(resolver, dtype_tuple, NULL);
-    Py_DECREF(dtype_tuple);
+        PyObject *resolver, PyUFuncObject *ufunc, PyObject *dtype_tuple,
+        PyUFuncImplObject **ufunc_impl)
+{
+    PyObject *res = PyObject_CallFunctionObjArgs(resolver,
+            (PyObject *)ufunc, dtype_tuple, NULL);
 
     if (res == NULL) {
         return -1;
     }
+    if (res == Py_None) {
+        /* No loop found. */
+        Py_DECREF(res);
+        return 0;
+    }
     // TODO: This should go elsewhere (and should not be necessary
     //       for C-side registered resolvers).
-    //       Also need to at least refactor!
-    int isinstance = !PyObject_IsInstance(res, (PyObject *)&PyUFuncImpl_Type);
+    //       Rather using a capsule here and a Py-Wrapping one for registering
+    //       from python probably makes sense.
+    // TODO: At least for python defined ones, we should check that
+    //       the UFuncImpl is actually compatible with the UFunc.
+    /* For now be very strict about what UFuncImpl to accept (no subclassing) */
+    int isinstance = Py_TYPE(res) == &PyUFuncImpl_Type;
     if (isinstance < 0) {
         return -1;
     }
     if (!isinstance) {
         PyErr_SetString(PyExc_RuntimeError,
-                "resolver function id not return UFuncImpl instance.");
+                "resolver function did not return UFuncImpl instance.");
         return -1;
     }
     *ufunc_impl = (PyUFuncImplObject *)res;
     return 0;
 }
+
 
 /*
  * Function called to resolve the "loop". Returns a new UfuncImpl.
@@ -3217,8 +3228,7 @@ ufunc_resolve_ufunc_impl(
     if (cached != NULL) {
         /* Cache hit, if any dtype was abstract, this is a resolver */
         if (is_any_dtype_abstract) {
-            printf("this is not a possible path right now, correct?\n");
-            return call_ufuncimpl_resolver(cached, dtype_tuple, ufunc_impl);
+            return call_ufuncimpl_resolver(cached, ufunc, dtype_tuple, ufunc_impl);
         }
         *ufunc_impl = (PyUFuncImplObject *)cached;
         Py_INCREF(*ufunc_impl);
@@ -3286,37 +3296,88 @@ ufunc_resolve_ufunc_impl(
             /* The resolver matches, but we have to check if it is better */
             if (best_dtypes != NULL) {
                 int current_best = -1;  /* -1 neither, 0 current best, 1 new */
+                /*
+                 * If both have concrete and None in the same position and
+                 * they are identical, we will continue searching using the
+                 * first best for comparison, in an attempt to find a better
+                 * one.
+                 * In all cases, we give up resolution, since it would be
+                 * necessary to compare to two "best" cases.
+                 */
+                int unambiguous_equivally_good = 1;
                 for (Py_ssize_t i = 0; i < nop; i++) {
                     int best;
-                    PyObject *prev_dtype = PyTuple_GET_ITEM(dtype_tuple, i);
-                    PyObject *new_dtype = PyTuple_GET_ITEM(dtype_tuple, i);
+
+                    /* Whether this (output) dtype was specified at all */
+                    int is_not_specified = (
+                            PyTuple_GET_ITEM(dtype_tuple, i) == Py_None);
+
+                    PyObject *prev_dtype = PyTuple_GET_ITEM(best_dtypes, i);
+                    PyObject *new_dtype = PyTuple_GET_ITEM(curr_dtypes, i);
 
                     if (prev_dtype == new_dtype) {
                         /* equivalent, so this entry does not matter */
                         continue;
                     }
+                    if (is_not_specified) {
+                        /*
+                         * When DType is completely unspecified, prefer abstract
+                         * over concrete, assuming it will resolve.
+                         * Furthermore, we cannot decide which abstract/None
+                         * is "better", only concrete ones which are subclasses
+                         * of Abstract ones are defined as worse.
+                         */
+                        int prev_is_concrete = 0, new_is_concrete = 0;
+                        if ((prev_dtype != Py_None) &&
+                                (!((PyArray_DTypeMeta *)prev_dtype)->abstract)) {
+                            prev_is_concrete = 1;
+                        }
+                        if ((new_dtype != Py_None) &&
+                            (!((PyArray_DTypeMeta *)new_dtype)->abstract)) {
+                            new_is_concrete = 1;
+                        }
+                        if (prev_is_concrete == new_is_concrete) {
+                            best = -1;
+                        }
+                        else if (prev_is_concrete) {
+                            unambiguous_equivally_good = 0;
+                            best = 1;
+                        }
+                        else {
+                            unambiguous_equivally_good = 0;
+                            best = 0;
+                        }
+                    }
                     /* If either is None, the other is strictly more specific */
                     else if (prev_dtype == Py_None) {
+                        unambiguous_equivally_good = 0;
                         best = 1;
                     }
                     else if (new_dtype == Py_None) {
+                        unambiguous_equivally_good = 0;
                         best = 0;
                     }
                     /*
-                     * Test if either is concrete, since the subclass check is
-                     * not necessary in that case.
+                     * If both are concrete and not identical, this is
+                     * ambiguous.
                      */
-                    else if (((PyArray_DTypeMeta *)prev_dtype)->abstract &&
-                                ((PyArray_DTypeMeta *)new_dtype)->abstract) {
-                        /* must be identical, checked above */
-                        assert(0);
+                    else if (!((PyArray_DTypeMeta *)prev_dtype)->abstract &&
+                                !((PyArray_DTypeMeta *)new_dtype)->abstract) {
+                        /*
+                         * Ambiguous unless the are identical (checked above),
+                         * but since they are concrete it does not matter which
+                         * best to compare.
+                         */
+                        best = -1;
                     }
                     else if (!((PyArray_DTypeMeta *)prev_dtype)->abstract) {
                         /* old is not abstract, so better (both not possible) */
+                        unambiguous_equivally_good = 0;
                         best = 0;
                     }
                     else if (!((PyArray_DTypeMeta *)new_dtype)->abstract) {
                         /* new is not abstract, so better (both not possible) */
+                        unambiguous_equivally_good = 0;
                         best = 1;
                     }
                     /*
@@ -3363,17 +3424,22 @@ ufunc_resolve_ufunc_impl(
                             return -1;
                         }
                         if (new_is_subclass) {
+                            unambiguous_equivally_good = 0;
                             best = 1;
                         }
                         else {
+                            unambiguous_equivally_good = 0;
                             best = 2;
                         }
                     }
                     if ((current_best != -1) && (current_best != best)) {
                         /*
-                         * There should always be a clear best. In principle
-                         * there could be one that is more precise then both.
-                         * If someone finds a use-case, this could be supported.
+                         * We need a clear best, this could be tricky, unless
+                         * the signature is identical, we would have to compare
+                         * against both of the found ones until we find a
+                         * better one.
+                         * Instead, only support the case where they are
+                         * identical.
                          */
                         // TODO: Document the above comment (figure out if OK)
                         current_best = -1;
@@ -3387,9 +3453,14 @@ ufunc_resolve_ufunc_impl(
                        current_best);
                 PyObject_Print(best_dtypes, stdout, 0);
                 PyObject_Print(curr_dtypes, stdout, 0);
-                printf("in ufunc %s\n", ufunc->name);
+                printf(" in ufunc %s\n", ufunc->name);
 #endif
                 if (current_best == -1) {
+                    if (unambiguous_equivally_good) {
+                        /* unset the best resolver to indicate this */
+                        best_resolver = NULL;
+                        continue;
+                    }
                     PyErr_SetString(PyExc_TypeError,
                             "Could not resolve UFunc loop, two loops "
                             "matched equally well.");
@@ -3406,10 +3477,33 @@ ufunc_resolve_ufunc_impl(
         }
         if (best_dtypes == NULL) {
             /* The non-legacy lookup failed */
-            // TODO: Should this be supported? I.e. a ufunc that has both
-            //       legacy and non-legacy resolving (Seems right to me)
             *ufunc_impl = NULL;
             return 0;
+        }
+
+        if (best_resolver == NULL) {
+            /*
+             * This happens if two were equal, but we kept searching
+             * for a better one.
+             */
+            printf("Searched for better one?\n");
+            PyErr_SetString(PyExc_TypeError,
+                            "Could not resolve UFunc loop, two loops "
+                            "matched equally well.");
+            return -1;
+        }
+
+        /* Make an exact check to make abuse hard for now */
+        if (Py_TYPE(best_resolver) != &PyUFuncImpl_Type) {
+            int res = call_ufuncimpl_resolver(
+                    best_resolver, ufunc, dtype_tuple, ufunc_impl);
+            if (res < 0) {
+                return -1;
+            }
+            if (!is_any_dtype_abstract) {
+                /* No abstract dtype, so store ufunc_impl and not function */
+                best_resolver = (PyObject *)*ufunc_impl;
+            }
         }
 
         /* We have found a UFuncImpl or a resolver so add it to the cache */
@@ -3418,10 +3512,7 @@ ufunc_resolve_ufunc_impl(
         if (res < 0) {
             return -1;
         }
-        if (is_any_dtype_abstract) {
-            return call_ufuncimpl_resolver(
-                    best_resolver, dtype_tuple, ufunc_impl);
-        }
+
         assert(PyObject_TypeCheck(best_resolver, &PyUFuncImpl_Type));
         *ufunc_impl = (PyUFuncImplObject *)best_resolver;
         Py_INCREF(*ufunc_impl);
@@ -3431,6 +3522,50 @@ ufunc_resolve_ufunc_impl(
     /* Could not resolve using the new-style type resolution (or cache) */
     *ufunc_impl = NULL;
     return 0;
+}
+
+
+static PyObject *
+ufunc_resolve_ufunc_impl_python(
+        PyUFuncObject *ufunc, PyObject *type_tuple)
+{
+    if (!PyTuple_CheckExact(type_tuple)) {
+        PyErr_SetString(PyExc_TypeError,
+                        "input to resolve must be a tuple of DTypes.");
+        return NULL;
+    }
+    if (PyTuple_Size(type_tuple) != ufunc->nargs) {
+        PyErr_SetString(PyExc_TypeError,
+                        "tuple passed to resolve must have as many elements as "
+                        "input and output arguments of the ufunc.");
+        return NULL;
+    }
+    for (Py_ssize_t i = 0; i < PyTuple_Size(type_tuple); i++) {
+        PyObject *tmp = PyTuple_GetItem(type_tuple, i);
+
+        if (tmp == Py_None) {
+            continue;
+        }
+        if (PyObject_TypeCheck(tmp, &PyArrayDTypeMeta_Type)) {
+            continue;
+        }
+        PyErr_SetString(PyExc_TypeError,
+                        "all types must be DType classes or None.");
+        return NULL;
+    }
+
+    PyUFuncImplObject *ufunc_impl;
+    int res = ufunc_resolve_ufunc_impl(ufunc, type_tuple, &ufunc_impl);
+    if (res < 0) {
+        return NULL;
+    }
+    if (ufunc_impl == NULL) {
+        PyErr_SetString(PyExc_TypeError,
+                        "No matching loop found (legacy type resolution is only "
+                        "supported for exact matches)");
+        return NULL;
+    }
+    return (PyObject *)ufunc_impl;
 }
 
 
@@ -6863,50 +6998,33 @@ fail:
 static PyObject *
 ufunc_newstyle_register_resolver(PyUFuncObject *ufunc, PyObject *args)
 {
-    if (ufunc->resolvers == NULL) {
-        /*
-         * Old style ufunc, add a None type resolver to fallback to old
-         * behaviour.
-         */
-        PyObject *key;
-        ufunc->resolvers = PyDict_New();
-        if (ufunc->resolvers == NULL) {
-            return NULL;
-        }
-        key = PyTuple_New(ufunc->nin + ufunc->nout);
-        if (key == NULL){
-            return NULL;
-        }
-        for (Py_ssize_t i = 0; i < ufunc->nin + ufunc->nout; i++) {
-            Py_INCREF(Py_None);
-            PyTuple_SET_ITEM(key, i, Py_None);
-        }
-        if (PyDict_SetItem(ufunc->resolvers, key, Py_None) < 0) {
-            Py_DECREF(key);
-            return NULL;
-        }
-        Py_DECREF(key);
-    }
-
     if (PyTuple_GET_SIZE(args) != 2) {
         PyErr_SetString(PyExc_ValueError,
-            "need to register key value pair.");
+            "Reigstration needs one type tuple and a UFuncImpl or callable.");
         return NULL;
     }
-    if (!PyTuple_CheckExact(PyTuple_GET_ITEM(args, 0))) {
+    PyObject *dtype_tuple = PyTuple_GetItem(args, 0);
+    if (!PyTuple_CheckExact(dtype_tuple)) {
         PyErr_SetString(PyExc_ValueError,
             "first argument must be a tuple.");
         return NULL;
     }
-    if (PyTuple_GET_SIZE(PyTuple_GET_ITEM(args, 0)) != ufunc->nin + ufunc->nout) {
+    if (PyTuple_GET_SIZE(dtype_tuple) != ufunc->nargs) {
         PyErr_SetString(PyExc_ValueError,
             "number of types given must match ufunc signature.");
         return NULL;
     }
-    /* TODO: more checks, such as dtypes (args[1] when we have it)... */
+    // TODO: more checks, such as dtypes (args[1] when we have it)...
+    //       should refactor out, since that is also done in the resolve function.
 
-    if (PyDict_SetItem(ufunc->resolvers,
-                PyTuple_GET_ITEM(args, 0), PyTuple_GET_ITEM(args, 1)) < 0) {
+    PyObject *resolver_obj = PyTuple_GetItem(args, 1);
+
+    PyObject *new_resolver = PyTuple_Pack(2, dtype_tuple, resolver_obj);
+    if (new_resolver == NULL) {
+        return NULL;
+    }
+    int res = PyList_Append(ufunc->resolvers, new_resolver);
+    if (res < 0) {
         return NULL;
     }
 
@@ -6933,12 +7051,12 @@ static struct PyMethodDef ufunc_methods[] = {
     {"at",
         (PyCFunction)ufunc_at,
         METH_VARARGS, NULL},
-    {"register_resolver",
+    {"register",
         (PyCFunction)ufunc_newstyle_register_resolver,
         METH_VARARGS, NULL},
-    //{"resolve_ufunc_impl",
-    //    (PyCFunction)ufunc_resolve_ufunc_impl_python,
-    //   METH_VARARGS | METH_KEYWORDS, NULL},
+    {"resolve",
+        (PyCFunction)ufunc_resolve_ufunc_impl_python,
+       METH_O, NULL},
     {NULL, NULL, 0, NULL}           /* sentinel */
 };
 

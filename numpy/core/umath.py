@@ -33,3 +33,25 @@ __all__ = [
     'reciprocal', 'remainder', 'right_shift', 'rint', 'seterrobj', 'sign',
     'signbit', 'sin', 'sinh', 'spacing', 'sqrt', 'square', 'subtract', 'tan',
     'tanh', 'true_divide', 'trunc']
+
+
+# The comparison ufuncs have an overloaded signature for the object dtype
+# so these need to be resolved explicltely.
+
+def _resolve_as_bool_output(ufunc, dtypes):
+    if dtypes[-1] != None:
+        # More specific loops should have been resolved already.
+        return None
+    bool_dtype = type(_multiarray_umath.dtype("bool"))
+    new_dtypes = *dtypes[:-1], type(_multiarray_umath.dtype("bool"))
+
+    return ufunc.resolve(new_dtypes)
+
+def _register_resolvers():
+    object_dtype = type(_multiarray_umath.dtype("O"))
+    dtypes = (object_dtype, object_dtype, _multiarray_umath.dtype)
+
+    for ufunc in [equal, greater, greater_equal, less, less_equal, not_equal]:
+        ufunc.register(dtypes, _resolve_as_bool_output)
+
+_register_resolvers()
