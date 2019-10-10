@@ -3184,7 +3184,7 @@ fail:
     }
     PyArray_free(remap_axis_memory);
     PyArray_free(remap_axis);
-    return retval;
+    return -1;
 }
 
 
