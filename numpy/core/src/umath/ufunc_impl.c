@@ -138,7 +138,7 @@ default_ufunc_adapt_function(PyUFuncImplObject *self,
                /* If the input is NULL, we can assume casting is fine */
                if (!PyArray_CanCastTypeTo(out_descr[i], descr[i], casting)) {
                    PyErr_SetString(PyExc_TypeError,
-                                   "Cannot cast output (error message needs improvement)");
+                           "Cannot cast output (error message needs improvement)");
                    i = nop;
                    goto fail;
                }

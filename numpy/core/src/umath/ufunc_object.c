@@ -49,6 +49,9 @@
 #include "common.h"
 #include "numpyos.h"
 #include "convert_datatype.h"
+// TODO: Should be refactored so that it is unnecessary
+//       (since this is probably required to be public)
+#include "abstractdtype.h"
 
 #include "ufunc_impl.h"
 
@@ -5351,7 +5354,9 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     PyObject *wraparr[nargs];
 
     PyArray_DTypeMeta *fixed_dtypes[nargs];
-    PyArray_Descr *fixed_descriptors[nargs];  /* only used for legacy */
+    // TODO: Remove this, this is just filled from the operand arrays in
+    //       any case...
+    PyArray_Descr *fixed_descriptors[nargs];
 
     PyArrayObject *wheremask = NULL;
     NPY_ORDER order = NPY_KEEPORDER;
@@ -5424,7 +5429,8 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
      * since in some cases, knowing the loop dtype may be of advantage
      * during coercion). TODO: This may be unnecessary, or even too smart?!
      */
-
+    npy_bool all_scalar = NPY_TRUE;
+    npy_bool any_scalar = NPY_FALSE;
     for (i = 0; i < nin; i++) {
         // TODO: This fast path is not pretty, but probably necessary to avoid
         //       a larger performance regression? However, should be moved?!
@@ -5432,11 +5438,20 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         //       (fast path leads to mps[i] != NULL path below)
         /* fast path for the common case that input is an array */
         if (PyArray_Check(PyTuple_GET_ITEM(full_args.in, i))) {
-            mps[i] = (PyArrayObject *)PyTuple_GET_ITEM(full_args.in, i);
+            mps[i] = (PyArrayObject *) PyTuple_GET_ITEM(full_args.in, i);
+
+            ndim[i] = PyArray_NDIM(mps[i]);
+            if (ndim[i] == 0) {
+                any_scalar = NPY_TRUE;
+            }
+            else {
+                all_scalar = NPY_FALSE;
+            }
+
             Py_INCREF(mps[i]);
-            PyObject *tmp = (PyObject *)Py_TYPE(PyArray_DESCR(mps[i]));
-            PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
-            Py_INCREF(tmp);
+            op_dtypes[i]  = (
+                    (PyArray_DTypeMeta *)Py_TYPE(PyArray_DESCR(mps[i])));
+            Py_INCREF(op_dtypes[i]);
             continue;
         }
 
@@ -5444,7 +5459,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         //       much is unnecessary. A single struct for all the output
         //       information is a start.
         // TODO: We do not actually need context most of the time.
-        PyObject *context = PyTuple_New(3);
+        PyObject * context = PyTuple_New(3);
         if (context == NULL) {
             goto fail;
         }
@@ -5452,10 +5467,10 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         // NOTE: Previously this passed in the args, which could (but usually
         //       would not) contain also the output arguments.
         Py_INCREF(ufunc);
-        PyTuple_SET_ITEM(context, 0, (PyObject *)ufunc);
+        PyTuple_SET_ITEM(context, 0, (PyObject *) ufunc);
         Py_INCREF(full_args.in);
         PyTuple_SET_ITEM(context, 1, full_args.in);
-        PyObject *idx = PyLong_FromLong(i);
+        PyObject * idx = PyLong_FromLong(i);
         PyTuple_SET_ITEM(context, 2, idx);
         if (idx == NULL) {
             Py_DECREF(context);
@@ -5471,30 +5486,109 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         if (ndim[i] < 0) {
             goto fail;
         }
-
-        // TODO: The resolver_dtypes must be abstract if the input is 0D and
-        //       (unless all of them are of course), that should be
-        //       deprecated, but will add seriously annoying logic here.
-
-        /* If passed, fixed_dtypes always have priority. */
-        PyObject *tmp;
-        if (fixed_dtypes[i] != NULL) {
-            tmp = (PyObject *)fixed_dtypes[i];
+        if (ndim[i] == 0) {
+            any_scalar = NPY_TRUE;
         }
         else {
-            if (op_dtypes[i] == NULL) {
-                /* An empty list, etc. can have this */
-                PyObject *def_descr = (
-                        (PyObject *)PyArray_DescrFromType(NPY_DEFAULT_TYPE));
-                op_dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(def_descr);
-                Py_INCREF(op_dtypes[i]);
-                Py_DECREF(def_descr);
-            }
-            tmp = (PyObject *)op_dtypes[i];
+            all_scalar = NPY_FALSE;
         }
+    }
+
+    npy_bool may_have_legacy_value_based_casting = NPY_FALSE;
+    for (i = 0; i < nin; i++) {
+        /*
+         * First fix any abstract dtypes which should not be abstract because
+         * we only do that for scalar objects, and then also not when all
+         * objects are scalars.
+         *
+         * Second, set the correct DTypes for the loop resolution. If there
+         * is a fixed one, it will be the fixed one. Otherwise we
+         */
+        PyObject *tmp;
+
+        if ((op_dtypes[i] != NULL) && op_dtypes[i]->abstract) {
+            /*
+             * We only use value based logic for scalars inputs and
+             * even for scalars not when all inputs are scalars.
+             */
+            if ((ndim[i] != 0) || all_scalar) {
+                PyArray_DTypeMeta *dtype = op_dtypes[i];
+                op_dtypes[i] = dtype->dt_slots->default_dtype(dtype);
+                Py_DECREF(dtype);
+                if (op_dtypes[i] == 0) {
+                    goto fail;
+                }
+            }
+        }
+
+        /*
+         * If a dtype was passed in as fixed, simply use it for resolution.
+         */
+        // TODO: Think about what happens if the fixed one is abstract
+        //       (also with respect to legacy value-based, even if it is
+        //       not an issue if that is inconsistent.)
+        if (fixed_dtypes[i] != NULL) {
+            tmp = (PyObject *)fixed_dtypes[i];
+            PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
+            Py_INCREF(tmp);
+            continue;
+        }
+
+        if ((op_dtypes[i] != NULL) && !op_dtypes[i]->abstract &&
+                    (ndim[i] == 0) && any_scalar && !all_scalar) {
+            /*
+             * NOTE: Legacy compatibility branch, should be
+             *       DEPRECATED. In some cases this could be
+             *       optimized, since mixed "kinds" often do not
+             *       use this behaviour.
+             */
+            // TODO: Currently only integer implemented, need to
+            //       implement for all the basic types!
+            // TODO: This is far too specialized, refactor into a function.
+            if (PyTypeNum_ISINTEGER(op_dtypes[i]->type_num)) {
+                /* All integers are OK with being converted to python ints */
+                PyObject *value = PyNumber_Long(
+                        PyTuple_GET_ITEM(full_args.in, i));
+                if (value == NULL) {
+                    goto fail;
+                }
+
+                PyArray_DTypeMeta *super_dt = &PyArray_PyIntAbstractDType.super;
+                tmp = (PyObject *)super_dt->dt_slots->discover_dtype_from_pytype(
+                        super_dt, value, NPY_TRUE);
+                Py_DECREF(value);
+                if (tmp == NULL) {
+                    goto fail;
+                }
+                PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
+                Py_INCREF(tmp);
+
+                may_have_legacy_value_based_casting = NPY_TRUE;
+                continue;
+            }
+        }
+
+        /* If we are here, there are no fixed dtypes overriding this. */
+        if (op_dtypes[i] == NULL) {
+            /* An empty list, etc. can have this */
+            PyObject *def_descr = (
+                    (PyObject *)PyArray_DescrFromType(NPY_DEFAULT_TYPE));
+            op_dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(def_descr);
+            Py_INCREF(op_dtypes[i]);
+            Py_DECREF(def_descr);
+        }
+        tmp = (PyObject *)op_dtypes[i];
+
         PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
         Py_INCREF(tmp);
     }
+
+    /*
+     * Test for whether or not we have to use legacy fallback logic
+     * for zero dimensional arrays.
+     */
+    // TODO: If all inputs are abstract, we need to ignore the abstract part...
+
     /* output arrays do not take part, but fixed dtypes always have priority */
     for (i = nin; i < nargs; i++) {
         PyObject *tmp;
@@ -5666,6 +5760,67 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         Py_XDECREF(type_tuple);
         if (errval < 0) {
             goto fail;
+        }
+    }
+
+    /*
+     * If we have legacy value based casting, now that the resolution is
+     * done is the right time to check whether it may have made a difference.
+     */
+    if (may_have_legacy_value_based_casting) {
+        for (i = 0; i < nin; i++) {
+            /* Check if this may have been an operand with legacy logic */
+            if (fixed_dtypes[i] != NULL) {
+                continue;
+            }
+            if (op_dtypes[i]->abstract) {
+                continue;
+            }
+            PyArray_DTypeMeta *resolver_dtype = ((PyArray_DTypeMeta *)
+                    PyTuple_GET_ITEM(resolver_dtypes, i));
+            if (!resolver_dtype->abstract) {
+                continue;
+            }
+
+            /* This may have been one, so check if it made a difference */
+            PyArray_DTypeMeta *resolved_dtype = ufunc_impl->dtype_signature[i];
+
+
+            // TODO: This needs to be replaced with a (public) helper
+            //       function to handle casting between DType classes.
+            CastingImpl *cast = get_casting_impl(
+                    op_dtypes[i], resolved_dtype, NPY_SAFE_CASTING);
+            if (cast == NULL) {
+                PyErr_Clear();
+                /* We need to downcast the input array. */
+                PyArrayObject *old_arr = mps[i];
+                mps[i] = (PyArrayObject *)PyArray_Cast(
+                        old_arr, resolved_dtype->type_num);
+                if (mps[i] == NULL) {
+                    goto fail;
+                }
+                fixed_descriptors[i] = PyArray_DESCR(mps[i]);
+                /*
+                 * There is an inconsistency in that the fallback was used
+                 * _and_ actually made a difference!
+                 */
+                // TODO: Disabled in first round, but this should be enabled
+                //       very soon after merging!
+#if 0
+                if (DEPRECATE_FUTUREWARNING(
+                        "A 0-D array or numpy scalars dtype was demoted "
+                        "to lower precision during a UFunc call. In the future "
+                        "this call will return a higher precision. "
+                        "You may convert to a python scalar for legacy "
+                        "behaviour or manually cast to silence the "
+                        "warning.") < 0) {
+                    goto fail;
+                }
+#endif
+            }
+            else {
+                Py_DECREF(cast);
+            }
         }
     }
 
