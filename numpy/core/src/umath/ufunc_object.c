@@ -1136,7 +1136,7 @@ _parse_dtype_signature_obj(PyUFuncObject *ufunc,
                     goto fail;
                 }
                 specified_types[i] = (PyArray_DTypeMeta *)Py_TYPE(descr);
-                Py_INCREF(specified_types[ufunc->nin]);
+                Py_INCREF(specified_types[i]);
                 Py_DECREF(descr);
             }
         }
