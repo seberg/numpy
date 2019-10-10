@@ -150,6 +150,9 @@ fail:
     for (int j = 0; j < i; j++) {
         Py_DECREF(out_descr[j]);
     }
+    for (int j = 0; j < nop; j++) {
+        out_descr[j] = NULL;
+    }
     return -1;
 }
 
@@ -178,7 +181,15 @@ type_resolver_ufunc_adapt_function(PyUFuncImplObject *self,
         }
     }
     PyUFuncObject *ufunc = self->bound_ufunc;
-    return ufunc->type_resolver(ufunc, casting, fake_arrays, NULL, out_descr);
+    int res;
+    res = ufunc->type_resolver(ufunc, casting, fake_arrays, NULL, out_descr);
+    if (res < 0) {
+        for (int j = 0; j < nargs; j++) {
+            out_descr[j] = NULL;
+        }
+        return -1;
+    }
+    return 0;
 }
 
 
