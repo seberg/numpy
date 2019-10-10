@@ -4818,6 +4818,10 @@ PyMODINIT_FUNC init_multiarray_umath(void) {
         goto err;
     }
 
+    if (PyType_Ready(&PyUFuncImpl_Type) < 0) {
+        goto err;
+    }
+
     /* Load the ufunc operators into the array module's namespace */
     if (InitOperators(d) < 0) {
         printf("error here1\n");
