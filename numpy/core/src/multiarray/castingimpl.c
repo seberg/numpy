@@ -13,6 +13,13 @@
 #include "dtypemeta.h"
 #include "convert_datatype.h"
 
+/*
+ * A very short cache, normally we should only have two at once really,
+ * although e.g. for ufuncs more could be necessary.
+ */
+#define CACHINGIMPL_CACHE_SIZE 4
+static PyObject *casting_impl_object_cache[CACHINGIMPL_CACHE_SIZE] = {NULL};
+
 
 /*
  * Trivial dtype adjustment, simply returns new descriptors
@@ -176,10 +183,21 @@ castingimpl_legacynew(
 {
     CastingImpl *casting_impl = NULL;
 
-    casting_impl = (CastingImpl *)PyObject_New(
-            CastingImpl, &PyArrayCastingImpl_Type);
+    for (int i = 0; i < CACHINGIMPL_CACHE_SIZE; i++) {
+        if (casting_impl_object_cache[i] != NULL) {
+            casting_impl = (CastingImpl *)PyObject_Init(
+                    casting_impl_object_cache[i],
+                    &PyArrayCastingImpl_Type);
+            casting_impl_object_cache[i] = NULL;
+            break;
+        }
+    }
     if (casting_impl == NULL) {
-        return NULL;
+        casting_impl = (CastingImpl *) PyObject_New(
+                CastingImpl, &PyArrayCastingImpl_Type);
+        if (casting_impl == NULL) {
+            return NULL;
+        }
     }
 
     // TODO: Borrowed references may actually be fine here? But needs to be defined.
@@ -219,6 +237,13 @@ castingimpl_legacynew(
 static void
 casting_impl_dealloc(CastingImpl *casting_impl)
 {
+    for (int i = 0; i < CACHINGIMPL_CACHE_SIZE; i++) {
+        if (casting_impl_object_cache[i] == NULL) {
+            casting_impl_object_cache[i] = (PyObject *)casting_impl;
+            return;
+        }
+    }
+
     PyObject_FREE(casting_impl);
 }
 
@@ -234,3 +259,5 @@ NPY_NO_EXPORT PyTypeObject PyArrayCastingImpl_Type = {
     .tp_dealloc = (destructor)casting_impl_dealloc,
 };
 
+
+#undef CACHINGIMPL_CACHE_SIZE
