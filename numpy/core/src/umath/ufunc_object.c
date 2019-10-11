@@ -1109,6 +1109,8 @@ _parse_dtype_signature_obj(PyUFuncObject *ufunc,
             goto fail;
         }
         if (length == 1) {
+            // TODO: Should be deprecated! (unless there is one op)
+            // TODO: Best to just fix all dtypes here probably.
             /*
              * The current logic is to force the first output dtype, note
              * that reductions force the inputs.
@@ -1287,14 +1289,21 @@ get_ufunc_arguments(PyUFuncObject *ufunc,
                 goto fail;
             }
             /*
-             * NOTE: This is legacy behaviour, it should make more sense to
-             *       force the output arguments to the specified dtype, since
-             *       that controls the precision of the loop more directly.
-             *       (in almost all cases, that should still do the same)
+             * NOTE: The default legacy behaviour was to match all dtypes,
+             *       however, many resolvers would simply force the first one
+             *       (assuming that all others would have to be equal), that
+             *       is likely correct, at least almost always.
+             *       Instead, we force all output dtypes, which seems more
+             *       sensible to me, but achives largely the same thing.
              */
-            out_dtypes[0] = (PyArray_DTypeMeta *)Py_TYPE(dtype);
-            for (i = 1; i < ufunc->nargs; i++) {
+            // TODO: This should be OK, note that we also fix a few bugs
+            //       here, since before signatures with a single fixed
+            //       dtypes would trigger the "all"
+            for (i = 0; i < ufunc->nin; i++) {
                 out_dtypes[i] = NULL;
+            }
+            for (i = ufunc->nin; i < ufunc->nargs; i++) {
+                out_dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(dtype);
             }
         }
     }
