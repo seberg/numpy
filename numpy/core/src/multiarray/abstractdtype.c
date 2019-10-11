@@ -11,6 +11,7 @@
 #include "abstractdtype.h"
 #include "common.h"
 
+#include "numpy/npy_math.h"
 #include <numpy/npy_3kcompat.h>
 
 
@@ -20,8 +21,15 @@
  */
 #define ABSTRACTDTYPE_CACHE_SIZE 4
 static PyObject *pyint_abstractdtype_cache[ABSTRACTDTYPE_CACHE_SIZE] = {NULL};
-//static PyObject *pyfloat_abstractdtype_cache[ABSTRACTDTYPE_CACHE_SIZE] = {NULL};
-//static PyObject *pycfloat_abstractdtype_cache[ABSTRACTDTYPE_CACHE_SIZE] = {NULL};
+static PyObject *pyfloat_abstractdtype_cache[ABSTRACTDTYPE_CACHE_SIZE] = {NULL};
+static PyObject *pycfloat_abstractdtype_cache[ABSTRACTDTYPE_CACHE_SIZE] = {NULL};
+
+
+
+
+/*
+ * Integer Abstract DType slots:
+ */
 
 
 static PyArray_DTypeMeta *
@@ -170,6 +178,7 @@ fail:
     return NULL;
 }
 
+
 static int test_long(PyObject *obj)
 {
     long res;
@@ -182,6 +191,7 @@ static int test_long(PyObject *obj)
     }
     return overflow;
 }
+
 
 static PyArray_DTypeMeta *
 get_default_int_dtype(PyObject *minimum, PyObject *maximum)
@@ -245,6 +255,7 @@ finish:
     return dtype;
 }
 
+
 static PyArray_DTypeMeta *
 default_dtype_int(PyArray_DTypeMeta *cls) {
     /*
@@ -262,32 +273,180 @@ minimal_dtype_int(PyArray_DTypeMeta *cls) {
     if (((PyArray_PyValueAbstractDType *)cls)->promoted) {
         // TODO: In this case I should return the actual minimal type!
         //       and not fall through to the default dtype.
+        // TODO: This slot should be removed I think, which means the
+        //       promoted logic can also be deleted.
     }
     return default_dtype_int(cls);
 }
 
 
+/*
+ * Floating point Abstract DType slots:
+ */
+
+
 static PyArray_DTypeMeta *
-discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj,
-                          npy_bool use_minimal)
+common_dtype_float(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
+{
+    PyObject *maximum = ((PyArray_PyValueAbstractDType *)cls)->maximum;
+    PyObject *minimum = ((PyArray_PyValueAbstractDType *)cls)->minimum;
+
+    PyObject *max_other = NULL;
+    PyObject *min_other = NULL;
+
+    int res_max, res_min;
+
+    /* Lets just use direct slot lookup for now on the base: */
+    if (((PyTypeObject *)other)->tp_base == (PyTypeObject *)&PyArray_PyIntAbstractDType) {
+        /* We need to find the combined minimum and maximum. */
+        max_other = ((PyArray_PyValueAbstractDType *)other)->maximum;
+        min_other = ((PyArray_PyValueAbstractDType *)other)->minimum;
+
+        Py_INCREF(max_other);
+        Py_INCREF(min_other);
+
+        goto return_other_or_updated_minmax;
+    }
+    if (((PyTypeObject *)other)->tp_base == (PyTypeObject *)&PyArray_PyIntAbstractDType) {
+        Py_INCREF(cls);
+        return cls;
+    }
+    if (((PyTypeObject *)other)->tp_base == (PyTypeObject *)&PyArray_PyComplexAbstractDType) {
+        Py_INCREF(other);
+        return other;
+    }
+
+    /* Quickly return not implemented, if we cannot handle things */
+    if (other->type_num < 0 || other->type_num >= NPY_USERDEF) {
+        Py_INCREF(Py_NotImplemented);
+        return (PyArray_DTypeMeta *)Py_NotImplemented;
+    }
+
+    /* Handle floats, a bit non-elegant, but user types are rejected above */
+    if (other->kind == 'f') {
+        // TODO: We need to store the largest DType that
+        //       was already seen (that means also when combining two of
+        //       these). Because the largest non-abstract is the smallest
+        //       allowed non-abstract!
+        double maximum_val = 0;
+        double minimum_val = 0;
+        switch (other->type_num) {
+            case NPY_HALF:
+                maximum_val = -65000;
+                minimum_val = 65000;
+                break;
+            case NPY_FLOAT:
+                maximum_val = 3.4e38;
+                minimum_val = -3.4e38;
+                break;
+            case NPY_DOUBLE:
+                maximum_val = -1.7e308;
+                minimum_val = 1.7e308;
+                break;
+            case NPY_LONGDOUBLE:
+                maximum_val = NPY_INFINITY;
+                minimum_val = -NPY_INFINITY;
+                break;
+            default:
+                assert(0);  /* Cannot happen */
+        }
+
+        max_other = PyFloat_FromDouble(maximum_val);
+        if (max_other == NULL) {
+            return NULL;
+        }
+        min_other = PyFloat_FromDouble(minimum_val);
+        if (min_other == NULL) {
+            Py_DECREF(max_other);
+            return NULL;
+        }
+
+        // TODO: This modifies cls/self, even if we return other, that should
+        //       be OK, but just to note.
+        ((PyArray_PyValueAbstractDType *)cls)->promoted = 1;
+        goto return_other_or_updated_minmax;
+    }
+
+    /* NOTE: We should not normally get this far. */
+    Py_INCREF(Py_NotImplemented);
+    return (PyArray_DTypeMeta *)Py_NotImplemented;
+
+    // TODO: Maybe should likely make this a function rather than a goto...
+return_other_or_updated_minmax:
+    res_max = PyObject_RichCompareBool(maximum, max_other, Py_GT);
+    if (res_max < 0) {
+        goto fail;
+    }
+    res_min = PyObject_RichCompareBool(minimum, min_other, Py_LT);
+    if (res_min == -1) {
+        goto fail;
+    }
+    if (!res_min && !res_max) {
+        /* The other type is capable of holding both min and max: */
+        Py_DECREF(max_other);
+        Py_DECREF(min_other);
+        Py_INCREF(other);
+        return other;
+    }
+    /* The other type is not capable of holding both, so update self/cls */
+    if (res_max) {
+        Py_INCREF(max_other);
+        ((PyArray_PyValueAbstractDType *)cls)->maximum = max_other;
+        Py_DECREF(maximum);
+    }
+    if (res_min) {
+        Py_INCREF(min_other);
+        ((PyArray_PyValueAbstractDType *)cls)->minimum = min_other;
+        Py_DECREF(minimum);
+    }
+    Py_DECREF(max_other);
+    Py_DECREF(min_other);
+    Py_INCREF(cls);
+    return cls;
+
+fail:
+    Py_XDECREF(max_other);
+    Py_XDECREF(min_other);
+    return NULL;
+}
+
+
+static PyArray_DTypeMeta *
+default_dtype_float(PyArray_DTypeMeta *cls) {
+    PyArray_Descr *descr = PyArray_DescrFromType(NPY_DOUBLE);
+    PyArray_DTypeMeta *dtype = (PyArray_DTypeMeta *)Py_TYPE(descr);
+    Py_INCREF(dtype);
+    Py_DECREF(descr);
+    return dtype;
+}
+
+
+static PyArray_DTypeMeta *
+minimal_dtype_float(PyArray_DTypeMeta *cls) {
+    // TODO: This slot should be removed I think, which means the, it would
+    //       only make sense as a helper for downstream functions.
+    return default_dtype_float(cls);
+}
+
+
+
+/*
+ * DType discovery for all Abstract DTypes.
+ */
+
+static PyArray_DTypeMeta *
+shared_discover_dtype_from_pynumber(PyArray_DTypeMeta *cls,
+        PyObject *obj, PyType_Slot *slots, PyObject *cache[ABSTRACTDTYPE_CACHE_SIZE])
 {
     PyArray_DTypeMeta *dtype;
 
-    if (!use_minimal) {
-        /*
-         * Use the same code as in the default version directly, checking the
-         * size...
-         */
-        return get_default_int_dtype(obj, obj);
-    }
-
     /* Use a cached instance if possible (should be hit practically always) */
     for (int i = 0; i < ABSTRACTDTYPE_CACHE_SIZE; i++) {
-        if (pyint_abstractdtype_cache[i] != NULL) {
+        if (cache[i] != NULL) {
             dtype = (PyArray_DTypeMeta *)PyObject_Init(
-                    pyint_abstractdtype_cache[i],
+                    cache[i],
                     &PyArrayAbstractObjDTypeMeta_Type);
-            pyint_abstractdtype_cache[i] = NULL;
+            cache[i] = NULL;
             goto finish;
         }
     }
@@ -303,7 +462,7 @@ discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj,
     memcpy((char *)dtype + sizeof(PyObject),
            (char *)(&PyArray_PyIntAbstractDType) + sizeof(PyObject),
            sizeof(PyArray_PyValueAbstractDType) -  sizeof(PyObject));
-    ((PyTypeObject*)dtype)->tp_base = (PyTypeObject *)&PyArray_PyIntAbstractDType;
+    ((PyTypeObject*)dtype)->tp_base = (PyTypeObject *)cls;
     ((PyTypeObject*)dtype)->tp_name = "numpy.PyIntAbstractDType";
     Py_INCREF(&PyArrayAbstractObjDTypeMeta_Type);
 
@@ -311,13 +470,6 @@ discover_dtype_from_pyint(PyArray_DTypeMeta *NPY_UNUSED(cls), PyObject *obj,
         Py_DECREF(dtype);
         return NULL;
     }
-
-    PyType_Slot slots[] = {
-        {NPY_dt_common_dtype, common_dtype_int},
-        {NPY_dt_default_dtype, default_dtype_int},
-        {NPY_dt_minimal_dtype, minimal_dtype_int},
-        {0, NULL},
-    };
 
     PyArrayDTypeMeta_Spec spec = {
         .flexible = 0,
@@ -343,16 +495,90 @@ finish:
     return dtype;
 }
 
+
+static PyArray_DTypeMeta *
+discover_dtype_from_pyint(PyArray_DTypeMeta *cls,
+        PyObject *obj, npy_bool use_minimal)
+{
+    if (!use_minimal) {
+        /*
+         * Use the same code as in the default version directly, checking the
+         * size...
+         */
+        return get_default_int_dtype(obj, obj);
+    }
+
+    PyType_Slot slots[] = {
+            {NPY_dt_common_dtype, common_dtype_int},
+            {NPY_dt_default_dtype, default_dtype_int},
+            {NPY_dt_minimal_dtype, minimal_dtype_int},
+            {0, NULL},
+    };
+
+    return shared_discover_dtype_from_pynumber(cls, obj, slots, pyint_abstractdtype_cache);
+}
+
+
+static PyArray_DTypeMeta *
+discover_dtype_from_pyfloat(PyArray_DTypeMeta *cls,
+        PyObject *obj, npy_bool use_minimal)
+{
+    if (!use_minimal) {
+        /* The default is to always use double precision */
+        PyArray_Descr *descr = PyArray_DescrFromType(NPY_DOUBLE);
+        PyArray_DTypeMeta *dtype = (PyArray_DTypeMeta *)Py_TYPE(descr);
+        Py_INCREF(dtype);
+        Py_DECREF(descr);
+        return dtype;
+    }
+
+    PyType_Slot slots[] = {
+            {NPY_dt_common_dtype, common_dtype_float},
+            {NPY_dt_default_dtype, default_dtype_float},
+            {NPY_dt_minimal_dtype, minimal_dtype_float},
+            {0, NULL},
+    };
+
+    assert(PyFloat_CheckExact(obj));
+    static PyObject *float_zero = NULL;
+    /*
+     * Note that `obj` should be 0 if the input is not finite, since
+     * NaN, Inf, and -Inf are representable by any floating point type.
+     */
+    if (!npy_isfinite(PyFloat_AsDouble(obj))) {
+        if (float_zero == NULL) {
+            float_zero = PyFloat_FromDouble(0);
+            if (float_zero == NULL) {
+                return NULL;
+            }
+        }
+        obj = float_zero;
+    }
+    return shared_discover_dtype_from_pynumber(cls, obj, slots, pyfloat_abstractdtype_cache);
+}
+
+
 static void
 abstractobjdtypemeta_dealloc(PyArray_PyValueAbstractDType *self) {
     Py_XDECREF(self->minimum);
     Py_XDECREF(self->maximum);
     self->minimum = NULL;
     self->maximum = NULL;
-    if (((PyTypeObject *)self)->tp_base == (PyTypeObject *)&PyArray_PyIntAbstractDType) {
+    // TODO: Users should not be able to create these objects, how to
+    //       achieve that? Public API only through functions enough?
+    PyObject **cache = NULL;
+    if (((PyTypeObject *)self)->tp_base ==
+                (PyTypeObject *)&PyArray_PyIntAbstractDType) {
+        cache = pyint_abstractdtype_cache;
+    }
+    else if (((PyTypeObject *)self)->tp_base ==
+             (PyTypeObject *)&PyArray_PyFloatAbstractDType) {
+        cache = pyfloat_abstractdtype_cache;
+    }
+    if (cache != NULL) {
         for (int i = 0; i < ABSTRACTDTYPE_CACHE_SIZE; i++) {
-            if (pyint_abstractdtype_cache[i] == NULL) {
-                pyint_abstractdtype_cache[i] = (PyObject *)self;
+            if (cache[i] == NULL) {
+                cache[i] = (PyObject *) self;
                 return;
             }
         }
@@ -400,15 +626,13 @@ init_pyvalue_abstractdtypes()
     /* Prepare the abstract dtype used for float (value based) promotion */
     PyType_Ready((PyTypeObject *)&PyArray_PyFloatAbstractDType);
     Py_INCREF(&PyArray_PyFloatAbstractDType);
-    pytypes_float = PyTuple_Pack(5,
-        &PyFloat_Type, &PyHalfArrType_Type, &PyFloatArrType_Type,
-        &PyDoubleArrType_Type, &PyLongDoubleArrType_Type);
+    pytypes_float = PyTuple_Pack(1, &PyFloat_Type);
     if (pytypes_float == NULL) {
         goto fail;
     }
     PyType_Slot float_slots[] = {
-        //{NPY_dt_associated_python_types, pytypes_float},
-        //{NPY_dt_discover_dtype_from_pytype, discover_float},
+        {NPY_dt_associated_python_types, pytypes_float},
+        {NPY_dt_discover_dtype_from_pytype, discover_dtype_from_pyfloat},
         {0, NULL},
     };
     PyArrayDTypeMeta_Spec float_spec = {
@@ -526,6 +750,7 @@ NPY_NO_EXPORT PyTypeObject PyArrayAbstractObjDTypeMeta_Type = {
         .tp_name = "numpy._AbstractObjDTypeMeta",
         .tp_basicsize = sizeof(PyArray_PyValueAbstractDType),
         /* methods */
+        // TODO: Add alloc/init which always error.
         .tp_dealloc = (destructor)abstractobjdtypemeta_dealloc,
         .tp_flags = Py_TPFLAGS_DEFAULT,
         .tp_doc = "Helper MetaClass for value based casting AbstractDTypes.",

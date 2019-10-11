@@ -403,16 +403,6 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
             return -1;
         }
     }
-    // TODO: Also register the (super common) double, but will need to be abstract.
-    if (dtype_class->type_num == NPY_DOUBLE) {
-        success = PyDict_SetItem(
-                PyArrayDTypeMeta_associated_types,
-                (PyObject *)&PyFloat_Type, (PyObject *)dtype_class);
-        if (success < 0) {
-            // TODO: Need to clean up in this unlikely event.
-            return -1;
-        }
-    }
     if (dtype_class->type_num == NPY_STRING) {
         success = PyDict_SetItem(
                 PyArrayDTypeMeta_associated_types,
