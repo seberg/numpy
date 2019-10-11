@@ -5766,54 +5766,56 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     /*
      * If we have legacy value based casting, now that the resolution is
      * done is the right time to check whether it may have made a difference.
+     *
+     * Additionally, if there was a legacy resolver involved, the arrays
+     * may already be converted, but to the incorrect dtype.
      */
-    if (may_have_legacy_value_based_casting) {
-        for (i = 0; i < nin; i++) {
-            /* Check if this may have been an operand with legacy logic */
-            if (fixed_dtypes[i] != NULL) {
-                continue;
-            }
-            if (op_dtypes[i]->abstract) {
-                continue;
-            }
-            PyArray_DTypeMeta *resolver_dtype = ((PyArray_DTypeMeta *)
-                    PyTuple_GET_ITEM(resolver_dtypes, i));
-            if (!resolver_dtype->abstract) {
-                continue;
-            }
+    for (i = 0; i < nin; i++) {
+        /* Check if this may have been an operand with legacy logic */
+        if (ndim[i] != 0) {
+            continue;
+        }
+        if (fixed_dtypes[i] != NULL) {
+            continue;
+        }
 
-            /* This may have been one, so check if it made a difference */
-            PyArray_DTypeMeta *resolved_dtype = ufunc_impl->dtype_signature[i];
+        /* This may have been one, so check if it made a difference */
+        PyArray_DTypeMeta *resolved_dtype = ufunc_impl->dtype_signature[i];
+        if (resolved_dtype == op_dtypes[i]) {
+            continue;
+        }
 
+        // NOTE: Even in this case we may have to convert the
+        //       `mps[i]` if the legacy resolver was used.
+        PyArray_DTypeMeta *resolver_dtype = ((PyArray_DTypeMeta *)
+                PyTuple_GET_ITEM(resolver_dtypes, i));
+        if (!resolver_dtype->abstract) {
+            continue;
+        }
 
+        if (!op_dtypes[i]->abstract) {
             // TODO: This needs to be replaced with a (public) helper
             //       function to handle casting between DType classes.
+            assert(may_have_legacy_value_based_casting);
+
             CastingImpl *cast = get_casting_impl(
                     op_dtypes[i], resolved_dtype, NPY_SAFE_CASTING);
             if (cast == NULL) {
                 PyErr_Clear();
-                /* We need to downcast the input array. */
-                PyArrayObject *old_arr = mps[i];
-                mps[i] = (PyArrayObject *)PyArray_Cast(
-                        old_arr, resolved_dtype->type_num);
-                if (mps[i] == NULL) {
-                    goto fail;
-                }
-                fixed_descriptors[i] = PyArray_DESCR(mps[i]);
                 /*
                  * There is an inconsistency in that the fallback was used
                  * _and_ actually made a difference!
                  */
                 // TODO: Disabled in first round, but this should be enabled
                 //       very soon after merging!
-#if 0
+#if 1
                 if (DEPRECATE_FUTUREWARNING(
-                        "A 0-D array or numpy scalars dtype was demoted "
-                        "to lower precision during a UFunc call. In the future "
-                        "this call will return a higher precision. "
-                        "You may convert to a python scalar for legacy "
-                        "behaviour or manually cast to silence the "
-                        "warning.") < 0) {
+                            "A 0-D array or numpy scalars dtype was demoted "
+                            "to lower precision during a UFunc call. In the future "
+                            "this call will return a higher precision. "
+                            "You may convert to a python scalar for legacy "
+                            "behaviour or manually cast to silence the "
+                            "warning.") < 0) {
                     goto fail;
                 }
 #endif
@@ -5822,6 +5824,17 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 Py_DECREF(cast);
             }
         }
+        /*
+         * We still need to downcast the input array, so that no error is
+         * raised during dtype adaption/checking in the loop itself.
+         */
+        PyArrayObject *old_arr = mps[i];
+        mps[i] = (PyArrayObject *)PyArray_Cast(
+                old_arr, resolved_dtype->type_num);
+        if (mps[i] == NULL) {
+            goto fail;
+        }
+        fixed_descriptors[i] = PyArray_DESCR(mps[i]);
     }
 
     // TODO: At this point, we already should have array objects!
