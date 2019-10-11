@@ -1406,6 +1406,9 @@ PyArray_DiscoverDTypeAndShapeFromObject(
         if (((PyArray_DTypeMeta *)*out_dtype)->abstract) {
             PyArray_DTypeMeta *abstract_dtype = ((PyArray_DTypeMeta *)*out_dtype);
             PyArray_DTypeMeta *concrete_dtype;
+            // TODO: use_minimal is required above, but here, it should just
+            //       be the default and the slot removed. Instead, we need need
+            //       to be able to ask `can_cast(AbstractPyInt[0, 10], Int8)`
             if (use_minimal) {
                 concrete_dtype = abstract_dtype->dt_slots->minimal_dtype(
                         abstract_dtype);
