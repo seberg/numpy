@@ -5808,7 +5808,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                  */
                 // TODO: Disabled in first round, but this should be enabled
                 //       very soon after merging!
-#if 1
+#if 0
                 if (DEPRECATE_FUTUREWARNING(
                             "A 0-D array or numpy scalars dtype was demoted "
                             "to lower precision during a UFunc call. In the future "
