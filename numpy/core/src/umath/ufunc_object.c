@@ -3242,7 +3242,6 @@ ufunc_resolve_ufunc_impl(
 
     /* Try to load from cache */
     // TODO: This assumes that the complex resolver only uses dtype info!
-    PyObject *cached;
 
     npy_bool is_any_dtype_abstract = NPY_FALSE;
     for (Py_ssize_t i = 0; i < nop; i++) {
@@ -3256,16 +3255,19 @@ ufunc_resolve_ufunc_impl(
     // TODO: When there are no type resolvers and there is an abstract dtype
     //       there is simply no point in looking up in the cache. It will
     //       just be super slow.
+    if (!is_any_dtype_abstract) {
+        PyObject *cached;
+        cached = PyDict_GetItem(ufunc->ufunc_impl_cache, dtype_tuple);
 
-    cached = PyDict_GetItem(ufunc->ufunc_impl_cache, dtype_tuple);
-    if (cached != NULL) {
-        /* Cache hit, if any dtype was abstract, this is a resolver */
-        if (is_any_dtype_abstract) {
-            return call_ufuncimpl_resolver(cached, ufunc, dtype_tuple, ufunc_impl);
+        if (cached != NULL) {
+            /* Cache hit, if any dtype was abstract, this is a resolver */
+            if (is_any_dtype_abstract) {
+                return call_ufuncimpl_resolver(cached, ufunc, dtype_tuple, ufunc_impl);
+            }
+            *ufunc_impl = (PyUFuncImplObject *) cached;
+            Py_INCREF(*ufunc_impl);
+            return 0;
         }
-        *ufunc_impl = (PyUFuncImplObject *)cached;
-        Py_INCREF(*ufunc_impl);
-        return 0;
     }
 
     /* We were unable load from cache... */
@@ -3281,6 +3283,9 @@ ufunc_resolve_ufunc_impl(
             PyObject *resolver_info = PySequence_Fast_GET_ITEM(
                     ufunc->resolvers, res_idx);
             PyObject *curr_dtypes = PyTuple_GET_ITEM(resolver_info, 0);
+
+            // TODO: If we have abstract, there is no point in checking
+            //       a UFuncImpl (which is always concrete)
             /*
              * Test if the current resolver matches, it could make sense to
              * reorder these checks to avoid the IsSubclass check as much as
@@ -3722,7 +3727,7 @@ ufunc_legacy_resolve_ufunc_impl(
     }
     if (!is_any_dtype_abstract) {
         res = PyDict_SetItem(ufunc->ufunc_impl_cache,
-                             dtype_tuple, (PyObject *) *ufunc_impl);
+                dtype_tuple, (PyObject *) *ufunc_impl);
     }
     return res;
 }
@@ -5561,7 +5566,6 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                     goto fail;
                 }
                 PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
-                Py_INCREF(tmp);
 
                 may_have_legacy_value_based_casting = NPY_TRUE;
                 continue;
@@ -5772,16 +5776,16 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
      */
     for (i = 0; i < nin; i++) {
         /* Check if this may have been an operand with legacy logic */
-        if (ndim[i] != 0) {
+        if (ndim[i] != 0) {  /* must be "scalar" */
             continue;
         }
-        if (fixed_dtypes[i] != NULL) {
+        if (fixed_dtypes[i] != NULL) {  /* its dtype is not ignored */
             continue;
         }
 
         /* This may have been one, so check if it made a difference */
         PyArray_DTypeMeta *resolved_dtype = ufunc_impl->dtype_signature[i];
-        if (resolved_dtype == op_dtypes[i]) {
+        if (resolved_dtype == op_dtypes[i]) {  /* No special treatment */
             continue;
         }
 
@@ -5825,12 +5829,18 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             }
         }
         /*
-         * We still need to downcast the input array, so that no error is
+         * We may need to (down)cast the input array, so that no error is
          * raised during dtype adaption/checking in the loop itself.
          */
+        if ((PyArray_DTypeMeta *)Py_TYPE(PyArray_DESCR(mps[i])) ==
+                    resolved_dtype) {
+            /* No need to cast (it is a large overhead) */
+            continue;
+        }
         PyArrayObject *old_arr = mps[i];
         mps[i] = (PyArrayObject *)PyArray_Cast(
                 old_arr, resolved_dtype->type_num);
+        Py_DECREF(old_arr);
         if (mps[i] == NULL) {
             goto fail;
         }

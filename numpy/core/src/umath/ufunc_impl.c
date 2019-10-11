@@ -92,7 +92,8 @@ default_ufunc_adapt_function(PyUFuncImplObject *self,
             if (given_dt == ((PyArray_DTypeMeta *) Py_TYPE(out_descr[0]))) {
                 out_descr[i] = out_descr[0];
                 Py_INCREF(out_descr[i]);
-            } else {
+            }
+            else {
                 out_descr[i] = given_dt->dt_slots->default_descr(given_dt);
             }
             if (out_descr[i] == NULL) {
@@ -106,6 +107,7 @@ default_ufunc_adapt_function(PyUFuncImplObject *self,
                 /* Casting is necessary, so use the default descriptor. */
                 out_descr[i] = given_dt->dt_slots->default_descr(given_dt);
             }
+            // TODO: Should rename macro to ISNATIVE (same for ISNBO)
             else if (PyDataType_ISNOTSWAPPED(descr[i])) {
                 /* No casting necessary, fast path reusing input. */
                 out_descr[i] = descr[i];
