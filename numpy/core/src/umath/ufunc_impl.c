@@ -220,6 +220,9 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
     Py_XINCREF(ufunc->identity_value);
     ufunc_impl->identity_value = ufunc->identity_value;
     if (ufunc->op_flags != NULL) {
+        /* Note: this is updated on every ufunc call unfortunetely... */
+        // TODO: If I force binding of legacy-ufuncimpls, I can just point
+        //       the pointer of op_flags to the ufunc directly.
         ufunc_impl->op_flags = PyArray_malloc(sizeof(npy_uint32)*ufunc->nargs);
         memcpy(ufunc_impl->op_flags, ufunc->op_flags,
                sizeof(npy_uint32)*ufunc->nargs);
@@ -249,6 +252,8 @@ ufuncimpl_legacy_new(PyUFuncObject *ufunc, PyArray_DTypeMeta **dtypes)
         }
     }
 
+    // TODO: could always bind legacy, that way op_flags, etc. are simpler
+    //       to handle... Or do I need to bind any loop?!
     if (!any_flexible) {
         ufunc_impl->adapt_dtype_func = default_ufunc_adapt_function;
         ufunc_impl->adapt_dtype_pyfunc = NULL;

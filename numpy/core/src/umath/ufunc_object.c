@@ -2959,6 +2959,9 @@ PyUFunc_CallGeneralizedUFuncLoop(
         if (retval < 0) {
             goto fail;
         }
+        /* We cannot know when everything was finalized, so also fetch this: */
+        ufunc_impl->iter_flags = ufunc->iter_flags;
+        memcpy(ufunc_impl->op_flags, ufunc->op_flags, sizeof(npy_uint32) * nop);
     }
 
     innerloop = ufunc_impl->innerloop;
@@ -2974,7 +2977,7 @@ PyUFunc_CallGeneralizedUFuncLoop(
      * can't do buffering, so must COPY or UPDATEIFCOPY.
      */
 
-    iter_flags = ufunc->iter_flags |
+    iter_flags = ufunc_impl->iter_flags |
                  NPY_ITER_MULTI_INDEX |
                  NPY_ITER_REFS_OK |
                  NPY_ITER_REDUCE_OK |
@@ -3852,6 +3855,9 @@ PyUFunc_CallUFuncLoop(PyUFuncObject *ufunc,
         if (retval < 0) {
             goto fail;
         }
+        /* We cannot know when everything was finalized, so also fetch this: */
+        ufunc_impl->iter_flags = ufunc->iter_flags;
+        memcpy(ufunc_impl->op_flags, ufunc->op_flags, sizeof(npy_uint32) * nop);
     }
 
     if (wheremask != NULL) {
@@ -5397,15 +5403,6 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         fixed_descriptors[i] = NULL;
         mps[i] = NULL;
     }
-    /* DTypes for the resolution: */
-    PyObject *resolver_dtypes = PyTuple_New(nargs);
-    if (resolver_dtypes < 0) {
-        return NULL;
-    }
-
-    if (make_full_arg_tuple(&full_args, nin, nout, args, kwds) < 0) {
-        goto fail;
-    }
 
     // NOTE: the full arg tuple already has much of the parsing work required
     //       by the override function. It should only do extra work after
@@ -5417,6 +5414,16 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
     else if (override) {
         return override;
     }
+
+    /* DTypes for the resolution: */
+    PyObject *resolver_dtypes = PyTuple_New(nargs);
+    if (resolver_dtypes < 0) {
+        return NULL;
+    }
+    if (make_full_arg_tuple(&full_args, nin, nout, args, kwds) < 0) {
+        goto fail;
+    }
+
     /*
      * We have to fetch at least the passed in type tuple (sig/signature/dtypes)
      * so it is necessary to do the parsing before finding the DType class
