@@ -6144,6 +6144,71 @@ PyUFunc_FromFuncAndDataAndSignature(PyUFuncGenericFunction *func, void **data,
         unused, signature, NULL);
 }
 
+
+static int
+register_legacy_wrapping_ufunc_impl(PyUFuncObject *ufunc,
+        char *types, int *itypes)
+{
+    assert((types == NULL) || (itypes == NULL));
+
+    PyObject *dtype_tup = PyTuple_New(ufunc->nargs);
+    /* Create tuple of types */
+    for (int i = 0; i < ufunc->nargs; i++) {
+        int type;
+        /* DescrFromType is overloaded to handle both, but keep it separate */
+        if (types != NULL) {
+            type = types[i];
+        }
+        else {
+            type = itypes[i];
+        }
+        PyObject *descr = (PyObject *)PyArray_DescrFromType(type);
+        if (descr == NULL) {
+            return -1;
+        }
+        PyObject *dtype = (PyObject *)Py_TYPE(descr);
+        Py_INCREF(dtype);
+        Py_DECREF(descr);
+        PyTuple_SET_ITEM(dtype_tup, i, dtype);
+    }
+
+    // TODO: We sometimes currently register two ufunc loops, of which
+    //       only ever the first one is used (for simd support), check
+    //       this, and simply ignore the second one.
+    npy_bool skip_duplicate_ufunc_impl = NPY_FALSE;
+    for (Py_ssize_t i = 0; i < PySequence_Length(ufunc->resolvers); i++) {
+        PyObject *tmp = PySequence_Fast_GET_ITEM(
+                ufunc->resolvers, i);
+        tmp = PySequence_Fast_GET_ITEM(tmp, 0);
+        if (PyObject_RichCompareBool(tmp, dtype_tup, Py_EQ)) {
+            /* Do not append to resolvers, because this is identical */
+            skip_duplicate_ufunc_impl = NPY_TRUE;
+            break;
+        }
+    }
+    if (skip_duplicate_ufunc_impl) {
+        Py_DECREF(dtype_tup);
+        return 0;
+    }
+
+    PyObject *ufunc_impl = ufuncimpl_legacy_new(
+            ufunc, (PyArray_DTypeMeta **)PySequence_Fast_ITEMS(dtype_tup));
+
+    if (ufunc_impl == NULL) {
+        Py_DECREF(dtype_tup);
+        return -1;
+    }
+    int errval = PyList_Append(ufunc->resolvers,
+                               PyTuple_Pack(2, dtype_tup, ufunc_impl));
+    if (errval < 0) {
+        Py_DECREF(dtype_tup);
+        Py_DECREF(ufunc_impl);
+        return -1;
+    }
+    return 0;
+}
+
+
 /*UFUNC_API*/
 NPY_NO_EXPORT PyObject *
 PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, void **data,
@@ -6245,54 +6310,11 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
         return NULL;
     }
     for (int loop = 0; loop < ufunc->ntypes; loop++) {
-        PyObject *dtype_tup = PyTuple_New(ufunc->nargs);
-        /* Create tuple of types */
-        for (int i = 0; i < ufunc->nargs; i++) {
-            PyObject *descr = (PyObject *)PyArray_DescrFromType(
-                    ufunc->types[loop * ufunc->nargs + i]);
-            if (descr == NULL) {
-                Py_DECREF(ufunc);
-                return NULL;
-            }
-            PyObject *dtype = (PyObject *)Py_TYPE(descr);
-            Py_INCREF(dtype);
-            Py_DECREF(descr);
-            PyTuple_SET_ITEM(dtype_tup, i, dtype);
-        }
-
-        // TODO: We sometimes currently register two ufunc loops, of which
-        //       only ever the first one is used (for simd support), check
-        //       this, and simply ignore the second one.
-        npy_bool skip_duplicate_ufunc_impl = NPY_FALSE;
-        for (Py_ssize_t i = 0; i < PySequence_Length(ufunc->resolvers); i++) {
-            PyObject *tmp = PySequence_Fast_GET_ITEM(
-                    ufunc->resolvers, i);
-            tmp = PySequence_Fast_GET_ITEM(tmp, 0);
-            if (PyObject_RichCompareBool(tmp, dtype_tup, Py_EQ)) {
-                /* Do not append to resolvers, because this is identical */
-                skip_duplicate_ufunc_impl = NPY_TRUE;
-                break;
-            }
-        }
-        if (skip_duplicate_ufunc_impl) {
-            Py_DECREF(dtype_tup);
-            continue;
-        }
-
-        PyObject *ufunc_impl = ufuncimpl_legacy_new(
-                ufunc, (PyArray_DTypeMeta **)PySequence_Fast_ITEMS(dtype_tup));
-
-        if (ufunc_impl == NULL) {
-            Py_DECREF(dtype_tup);
+        int errval = register_legacy_wrapping_ufunc_impl(ufunc,
+                &ufunc->types[loop * ufunc->nargs], NULL);
+        if (errval < 0) {
             Py_DECREF(ufunc);
             return NULL;
-        }
-        int errval = PyList_Append(ufunc->resolvers,
-                PyTuple_Pack(2, dtype_tup, ufunc_impl));
-        if (errval < 0) {
-            Py_DECREF(dtype_tup);
-            Py_DECREF(ufunc_impl);
-            Py_DECREF(ufunc);
         }
     }
 
@@ -6652,6 +6674,9 @@ PyUFunc_RegisterLoopForType(PyUFuncObject *ufunc,
         for (i = 0; i < ufunc->nargs; i++) {
             newtypes[i] = usertype;
         }
+    }
+    if (register_legacy_wrapping_ufunc_impl(ufunc, NULL, newtypes) < 0) {
+        goto fail;
     }
 
     funcdata->func = function;
