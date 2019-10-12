@@ -336,6 +336,7 @@ common_dtype_float(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
         double maximum_val = 0;
         double minimum_val = 0;
         switch (other->type_num) {
+            /* Note these values are legacy values and not necessarily exact */
             case NPY_HALF:
                 maximum_val = -65000;
                 minimum_val = 65000;
