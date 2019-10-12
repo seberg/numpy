@@ -322,6 +322,11 @@ common_dtype_float(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
         return (PyArray_DTypeMeta *)Py_NotImplemented;
     }
 
+    if (PyTypeNum_ISINTEGER(other->type_num)) {
+        Py_INCREF(cls);
+        return cls;
+    }
+
     /* Handle floats, a bit non-elegant, but user types are rejected above */
     if (other->kind == 'f') {
         // TODO: We need to store the largest DType that
