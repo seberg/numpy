@@ -5559,7 +5559,10 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             // TODO: Currently only integer implemented, need to
             //       implement for all the basic types!
             // TODO: This is far too specialized, refactor into a function.
-            if (PyTypeNum_ISINTEGER(op_dtypes[i]->type_num)) {
+            if (!op_dtypes[i]->is_legacy_wrapper) {
+                /* It cannot be a builtin numerical dtype. */
+            }
+            else if (PyTypeNum_ISINTEGER(op_dtypes[i]->type_num)) {
                 /* All integers are OK with being converted to python ints */
                 PyObject *value = PyNumber_Long(
                         PyTuple_GET_ITEM(full_args.in, i));
@@ -5574,6 +5577,70 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 if (tmp == NULL) {
                     goto fail;
                 }
+                PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
+
+                may_have_legacy_value_based_casting = NPY_TRUE;
+                continue;
+            }
+            else if (PyTypeNum_ISFLOAT(op_dtypes[i]->type_num)) {
+                PyObject *value = PyNumber_Float(
+                        PyTuple_GET_ITEM(full_args.in, i));
+                if (value == NULL) {
+                    goto fail;
+                }
+
+                PyArray_DTypeMeta *super_dt = &PyArray_PyFloatAbstractDType.super;
+                tmp = (PyObject *)super_dt->dt_slots->discover_dtype_from_pytype(
+                        super_dt, value, NPY_TRUE);
+                if (tmp == NULL) {
+                    Py_DECREF(value);
+                    goto fail;
+                }
+                /* Check that the value was not finite before cast to double */
+                if (!npy_isfinite(PyFloat_AsDouble(value)) &&
+                        op_dtypes[i]->type_num == NPY_LONGDOUBLE) {
+                    /*
+                     * The input must pretty much be an array/longdouble.
+                     * This should pretty much never happened and is slow...
+                     */
+                    PyArrayObject *arr = mps[i];
+                    // TODO: this branch needs testing, this is for
+                    //       np.longdouble(inf) and np.longdouble(super_large_val), etc...
+
+                    if (arr == NULL) {
+                        if (op_coercion_cache[i] != NULL) {
+                            assert(!op_coercion_cache[i]->sequence);
+                            arr = (PyArrayObject *)op_coercion_cache[i]->arr_or_sequence;
+                        }
+                        else {
+                            /* This is really a hack to safe a few lines... */
+                            arr = (PyArrayObject *)PyArray_FromAny(
+                                    PyTuple_GET_ITEM(full_args.in, i),
+                                    PyArray_DescrFromType(NPY_LONGDOUBLE),
+                                    0, 0, 0, NULL);
+                        }
+                        if (arr == NULL) {
+                            Py_DECREF(value);
+                            goto fail;
+                        }
+                    }
+                    else {
+                        Py_INCREF(arr);
+                    }
+
+                    const npy_longdouble actual_val = *(npy_longdouble *)PyArray_DATA(arr);
+                    if (!npy_isfinite(actual_val)) {
+                        PyArray_PyValueAbstractDType *dt_obj;
+                        dt_obj = (PyArray_PyValueAbstractDType *)tmp;
+                        /* The value was replaced with maximum, but that is incorrect */
+                        Py_SETREF(dt_obj->maximum, value);
+                        Py_INCREF(value);
+                        Py_SETREF(dt_obj->minimum, value);
+                        Py_INCREF(value);
+                    }
+                }
+
+                Py_DECREF(value);
                 PyTuple_SET_ITEM(resolver_dtypes, i, tmp);
 
                 may_have_legacy_value_based_casting = NPY_TRUE;
