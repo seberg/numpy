@@ -297,7 +297,7 @@ common_dtype_float(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
     int res_max, res_min;
 
     /* Lets just use direct slot lookup for now on the base: */
-    if (((PyTypeObject *)other)->tp_base == (PyTypeObject *)&PyArray_PyIntAbstractDType) {
+    if (((PyTypeObject *)other)->tp_base == (PyTypeObject *)&PyArray_PyFloatAbstractDType) {
         /* We need to find the combined minimum and maximum. */
         max_other = ((PyArray_PyValueAbstractDType *)other)->maximum;
         min_other = ((PyArray_PyValueAbstractDType *)other)->minimum;
@@ -418,7 +418,7 @@ fail:
 
 
 static PyArray_DTypeMeta *
-default_dtype_float(PyArray_DTypeMeta *cls) {
+default_dtype_float(PyArray_DTypeMeta *NPY_UNUSED(cls)) {
     PyArray_Descr *descr = PyArray_DescrFromType(NPY_DOUBLE);
     PyArray_DTypeMeta *dtype = (PyArray_DTypeMeta *)Py_TYPE(descr);
     Py_INCREF(dtype);
@@ -469,7 +469,7 @@ shared_discover_dtype_from_pynumber(PyArray_DTypeMeta *cls,
            (char *)(&PyArray_PyIntAbstractDType) + sizeof(PyObject),
            sizeof(PyArray_PyValueAbstractDType) -  sizeof(PyObject));
     ((PyTypeObject*)dtype)->tp_base = (PyTypeObject *)cls;
-    ((PyTypeObject*)dtype)->tp_name = "numpy.PyIntAbstractDType";
+    ((PyTypeObject*)dtype)->tp_name = cls->super.ht_type.tp_name;
     Py_INCREF(&PyArrayAbstractObjDTypeMeta_Type);
 
     if (PyType_Ready((PyTypeObject*)dtype) < 0) {
@@ -560,7 +560,8 @@ discover_dtype_from_pyfloat(PyArray_DTypeMeta *cls,
         }
         obj = float_zero;
     }
-    return shared_discover_dtype_from_pynumber(cls, obj, slots, pyfloat_abstractdtype_cache);
+    return shared_discover_dtype_from_pynumber(cls,
+            obj, slots, pyfloat_abstractdtype_cache);
 }
 
 
