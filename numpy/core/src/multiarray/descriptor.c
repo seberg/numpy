@@ -3195,6 +3195,40 @@ is_dtype_struct_simple_unaligned_layout(PyArray_Descr *dtype)
     return 1;
 }
 
+
+/*
+ * Returns 1 if the dtype/descriptor is a flexible legacy DType instance.
+ * Meaning that it is a string, unicode, void with itemsize 0 (but
+ * not structured void), or datetime without a unit.
+ */
+NPY_NO_EXPORT int
+is_descr_flexible_dtype_instance(PyArray_Descr *descriptor)
+{
+    if (PyDataType_ISFLEXIBLE(descriptor) &&
+        PyDataType_ISUNSIZED(descriptor)) {
+        /* It may still be a void dtype with empty field/subarray */
+        if (descriptor->type_num == NPY_VOID) {
+            if ((descriptor->names == NULL) &&
+                (descriptor->subarray == NULL)) {
+            return 1;
+            }
+        }
+        else {
+            /* String and Unicode */
+            return 1;
+        }
+    }
+    else if (PyDataType_ISDATETIME(descriptor)) {
+        PyArray_DatetimeMetaData *meta;
+        /* Below can error, but only if input is not already datetime */
+        meta = get_datetime_metadata_from_dtype(descriptor);
+        if (meta->base == NPY_FR_GENERIC) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /*
  * The general dtype repr function.
  */

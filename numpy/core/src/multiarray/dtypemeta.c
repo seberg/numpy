@@ -299,6 +299,29 @@ string_discover_descr_from_pyobject(
     return descr;
 }
 
+
+static PyArray_Descr *
+void_discover_descr_from_pyobject(
+        PyArray_DTypeMeta *cls, PyObject *obj)
+{
+    /*
+     * NOTE: This causes an unnecessary two pass algorithm, since we only
+     * check promotion of the actual discriptor. It would be nicer to
+     * separate out the structured-void type, since it has different behaviour
+     * in many places, and thus should be its own DType (and scalar)
+     */
+    if (PyObject_TypeCheck(obj, &PyVoidArrType_Type)) {
+        /*
+         * The function actuall just gets the `.dtype` attribute and puts it
+         * into a new object (for void only though).
+         */
+        return PyArray_DescrFromScalar(obj);
+    }
+
+    return string_discover_descr_from_pyobject(cls, obj);
+}
+
+
 static PyArray_Descr *
 discover_datetime_and_timedelta_from_pyobject(
         PyArray_DTypeMeta *cls, PyObject *obj) {
@@ -441,7 +464,7 @@ descr_dtypesubclass_init(PyArray_Descr *dtype) {
     }
     else if (dtype_class->type_num == NPY_VOID) {
         dtype_class->dt_slots->discover_descr_from_pyobject =
-                string_discover_descr_from_pyobject;
+                void_discover_descr_from_pyobject;
     }
     
     dtype_class->dt_slots->within_dtype_castingimpl = (

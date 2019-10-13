@@ -30,6 +30,7 @@
 #include <assert.h>
 
 #include "get_attr_string.h"
+#include "descriptor.h"
 
 /*
  * Reading from a file or a string.
@@ -1211,6 +1212,25 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
         return -1;
     }
 
+    /*
+     * Fast paths for arrays and scalars, but also because they are handled
+     * in a special way later on (and this is public API in
+     * TODO: Can/may readd
+    if (PyArray_Check(op)) {
+        Py_INCREF(op);
+        *out_arr = (PyArrayObject *) op;
+        return 0;
+    }
+    else if (PyArray_IsScalar(op, Generic)) {
+        *out_dtype = PyArray_DescrFromScalar(op);
+        if (*out_dtype == NULL) {
+            return -1;
+        }
+        *out_ndim = 0;
+        return 0;
+    }
+    */
+
     PyObject *out_dtypemeta;
     coercion_cache_obj *coercion_cache = NULL;
     int res = PyArray_DiscoverDTypeAndShapeFromObject(
@@ -1228,7 +1248,7 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
         *out_arr = (PyArrayObject *)coercion_cache->arr_or_sequence;
         Py_INCREF(*out_arr);
         Py_XSETREF(*out_dtype, NULL);
-        // TODO: Probably not expected to return the out dtype here :).
+        /* Not expected to return a dtype here. */
         npy_free_coercion_cache(coercion_cache);
         Py_DECREF(out_dtypemeta);
         return 0;
@@ -1239,8 +1259,9 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
      * Support legacy scalar behaviour, should possibly added to the
      * coercion cache path above.
      */
-    if ((*out_ndim == 0) && (requested_dtype != NULL) &&
-            (requested_dtype != *out_dtype) &&
+    // TODO: Assigning int_arr[...] = np.float64(1.1) failed due to bug here,
+    //       but only a single test was hit.
+    if ((*out_ndim == 0) &&
             PyArray_IsScalar(op, Generic)) {
         Py_DECREF(*out_dtype);
         *out_dtype = PyArray_DescrFromScalar(op);
@@ -1292,53 +1313,10 @@ PyArray_DiscoverDTypeAndShapeFromObject(
          * need to convert the fixed descriptor to the correct dtype,
          * if and only if that descriptor is a "flexible" one.
          */
-        // TODO: Refactor this into an incredulous function....
-        if (PyDataType_ISFLEXIBLE(fixed_descriptor) &&
-                    PyDataType_ISUNSIZED(fixed_descriptor)) {
-            /* It may still be a void datetime with empty field/subarray */
-            if (fixed_descriptor->type_num == NPY_VOID) {
-                if ((fixed_descriptor->names == NULL) &&
-                        (fixed_descriptor->subarray == NULL)) {
-                    fixed_dtype = (PyArray_DTypeMeta *) Py_TYPE(fixed_descriptor);
-                    Py_INCREF(fixed_dtype);
-                    fixed_descriptor = NULL;
-                }
-            }
-            else {
-                /* String and Unicode */
-                fixed_dtype = (PyArray_DTypeMeta *) Py_TYPE(fixed_descriptor);
-                Py_INCREF(fixed_dtype);
-                fixed_descriptor = NULL;
-            }
-        }
-        else if (PyDataType_ISDATETIME(fixed_descriptor)) {
-            PyArray_DatetimeMetaData *meta;
-            meta = get_datetime_metadata_from_dtype(fixed_descriptor);
-            if (meta == NULL) {
-                return -1;
-            }
-            if (meta->base == NPY_FR_GENERIC) {
-                fixed_dtype = (PyArray_DTypeMeta *)Py_TYPE(fixed_descriptor);
-                Py_INCREF(fixed_dtype);
-                fixed_descriptor = NULL;
-            }
-        }
 
-        // TODO: This whole fixed descriptor business is annoying, can we remove?
-        //       For now this is just a copy from the old code...
-        //       Note that ArrayScalars ignore this...
-        //       Maybe the solution would be to add scalars to the cache?!
-        if (fixed_descriptor != NULL && (
-                fixed_descriptor->type_num == NPY_STRING ||
-                fixed_descriptor->type_num == NPY_UNICODE ||
-                (fixed_descriptor->type_num == NPY_VOID &&
-                    (fixed_descriptor->names || fixed_descriptor->subarray)) ||
-                 fixed_descriptor->type == NPY_CHARLTR ||
-                 fixed_descriptor->type_num == NPY_OBJECT)) {
-            /* We have to use the fixed descriptor */
-        }
-        else {
-            /* Ignore it */
+        if (is_descr_flexible_dtype_instance(fixed_descriptor)) {
+            fixed_dtype = (PyArray_DTypeMeta *) Py_TYPE(fixed_descriptor);
+            Py_INCREF(fixed_dtype);
             fixed_descriptor = NULL;
         }
     }
@@ -1355,10 +1333,6 @@ PyArray_DiscoverDTypeAndShapeFromObject(
         npy_free_coercion_cache(*coercion_cache);
         Py_XDECREF(fixed_dtype);
         return -1;
-    }
-    if (*out_dims == 0) {
-        // TODO: What the heck, lucky us can ignore the the fixed descriptor!
-        fixed_descriptor = NULL;
     }
 
     if (fixed_descriptor != NULL) {
@@ -1430,9 +1404,16 @@ PyArray_DiscoverDTypeAndShapeFromObject(
                 coercion_cache,
                 single_or_no_element, (PyArray_DTypeMeta *)*out_dtype);
         if (success < 0) {
-            npy_free_coercion_cache(*coercion_cache);
-            Py_DECREF(*out_dtype);
-            return -1;
+            /* TODO: This should really be Deprecated/converted to an error */
+            /*
+             * npy_free_coercion_cache(*coercion_cache);
+             * Py_DECREF(*out_dtype);
+             * return -1;
+             */
+            PyErr_Clear();
+            *out_descriptor = (PyObject *)PyArray_DescrFromType(NPY_OBJECT);
+            Py_INCREF(Py_TYPE(*out_descriptor));
+            Py_SETREF(*out_dtype, (PyObject *)Py_TYPE(*out_descriptor));
         }
     }
     assert(*out_descriptor != NULL);
@@ -1465,13 +1446,34 @@ PyArray_FromAny(PyObject *op, PyArray_Descr *newtype, int min_depth,
         return NULL;
     }
 
-    /* If the requested dtype is flexible, adapt it */
-    if (newtype != NULL) {
-        newtype = PyArray_AdaptFlexibleDType(op,
-                    (dtype == NULL) ? PyArray_DESCR(arr) : dtype,
-                    newtype);
-        if (newtype == NULL) {
-            return NULL;
+    if (newtype != NULL && is_descr_flexible_dtype_instance(newtype)) {
+        if (arr != NULL) {
+            /* No dtype returned by GetArrayParamsFromObject */
+            Py_DECREF(newtype);
+            newtype = PyArray_DESCR(arr);
+            Py_INCREF(newtype);
+        }
+        else {
+            if (newtype->type_num == NPY_VOID) {
+                /*
+                 * This is a huge hack, basically if we put in an unstructured
+                 * void as dtype and we get here, an error may have occured
+                 * at which point we get object (or structured void).
+                 * In either case, legacy behaviour is not to error but to take
+                 * its itemsize.
+                 */
+                Py_SETREF(newtype, PyArray_DescrNew(newtype));
+                if (newtype == NULL) {
+                    Py_DECREF(dtype);
+                    return NULL;
+                }
+                newtype->elsize = dtype->elsize;
+            }
+            else {
+                Py_DECREF(newtype);
+                newtype = dtype;
+                Py_INCREF(newtype);
+            }
         }
     }
 

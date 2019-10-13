@@ -15,6 +15,10 @@ int _arraydescr_from_dtype_attr(PyObject *obj, PyArray_Descr **newdescr);
 NPY_NO_EXPORT int
 is_dtype_struct_simple_unaligned_layout(PyArray_Descr *dtype);
 
+NPY_NO_EXPORT int
+is_descr_flexible_dtype_instance(PyArray_Descr *descriptor);
+
+
 /*
  * Filter the fields of a dtype to only those in the list of strings, ind.
  *
