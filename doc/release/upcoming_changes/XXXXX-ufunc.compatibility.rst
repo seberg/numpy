@@ -11,3 +11,6 @@ Compatibility breaking changes in UFuncs:
     which is well defined, assuming metadata is not used).
   * Customizing ``masked_inner_loop_selector`` will not be supported anymore!
     (Optimized masked loops may follow later.)
+  * In some cases user type loops may be picked up when they were not before;
+    this happens when a loop matches exactly, even if the user dtype is not
+    one of the parameters. This should have no negative effects.
