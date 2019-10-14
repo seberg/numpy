@@ -5590,6 +5590,8 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
                 continue;
             }
             else if (PyTypeNum_ISFLOAT(op_dtypes[i]->type_num)) {
+                // TODO: This branch is problematic, because of the masked
+                //       scalar np.ma.masked....
                 PyObject *value = PyNumber_Float(
                         PyTuple_GET_ITEM(full_args.in, i));
                 if (value == NULL) {
