@@ -2082,7 +2082,8 @@ make_full_arg_tuple(
                     "and keyword argument");
             goto fail;
         }
-        if (out_kwd == Py_None) {
+        if ((nout == 1) && (out_kwd == Py_None)) {
+            // TODO: The nout == 1 part seems to be untested currently.
             return 0;
         }
         else if (PyTuple_CheckExact(out_kwd)) {
@@ -2111,6 +2112,13 @@ make_full_arg_tuple(
             }
             return 0;
         }
+        // TODO: There was only a single test for this path in
+        //       numpy.core.tests.test_umath.TestOut.test_out_subok
+        PyErr_SetString(PyExc_TypeError,
+                nout > 1 ? "'out' must be a tuple of arrays or None" :
+                           "'out' must be an array or a tuple with a single "
+                           "array or None");
+        goto fail;
     }
 
     /* No outputs in kwargs; if also none in args, we're done */
