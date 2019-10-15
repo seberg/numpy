@@ -2330,29 +2330,24 @@ PyArray_One(PyArrayObject *arr)
 NPY_NO_EXPORT int
 PyArray_ObjectType(PyObject *op, int minimum_type)
 {
-    PyArray_Descr *dtype = NULL;
+    PyArray_Descr *minimum_descr = NULL, *descr;
     int ret;
 
     if (minimum_type != NPY_NOTYPE && minimum_type >= 0) {
-        dtype = PyArray_DescrFromType(minimum_type);
-        if (dtype == NULL) {
+        minimum_descr = PyArray_DescrFromType(minimum_type);
+        if (minimum_descr == NULL) {
             return NPY_NOTYPE;
         }
     }
 
-    if (PyArray_DTypeFromObject(op, NPY_MAXDIMS, &dtype) < 0) {
+    descr = PyArray_DescrFromObject(op, minimum_descr);
+    Py_XDECREF(minimum_descr);
+    if (descr == NULL) {
         return NPY_NOTYPE;
     }
 
-    if (dtype == NULL) {
-        ret = NPY_DEFAULT_TYPE;
-    }
-    else {
-        ret = dtype->type_num;
-    }
-
-    Py_XDECREF(dtype);
-
+    ret = descr->type_num;
+    Py_DECREF(descr);
     return ret;
 }
 

@@ -108,6 +108,7 @@ NPY_NO_EXPORT int
 PyArray_DiscoverDTypeAndShapeFromObject(
         PyObject *obj,
         npy_bool use_minimal,
+        npy_bool empty_returns_null,
         // TODO: Add fixed DType (we do not currently support it)
         PyArray_Descr *fixed_descriptor,
         PyObject *context,

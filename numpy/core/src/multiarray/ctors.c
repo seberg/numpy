@@ -1234,7 +1234,7 @@ PyArray_GetArrayParamsFromObject(PyObject *op,
     PyObject *out_dtypemeta;
     coercion_cache_obj *coercion_cache = NULL;
     int res = PyArray_DiscoverDTypeAndShapeFromObject(
-            op, NPY_FALSE, requested_dtype, context, &out_dtypemeta,
+            op, NPY_FALSE, NPY_FALSE, requested_dtype, context, &out_dtypemeta,
             (PyObject **)out_dtype, out_ndim, out_dims,
             &coercion_cache);
     if (res < 0) {
@@ -1277,6 +1277,7 @@ NPY_NO_EXPORT int
 PyArray_DiscoverDTypeAndShapeFromObject(
         PyObject *obj,
         npy_bool use_minimal,
+        npy_bool empty_returns_null,
         // TODO: Add fixed DType (we do not currently support it)
         PyArray_Descr *fixed_descriptor,
         PyObject *context,
@@ -1359,6 +1360,9 @@ PyArray_DiscoverDTypeAndShapeFromObject(
         if (fixed_descriptor != NULL) {
             Py_INCREF(fixed_descriptor);
             *out_descriptor = (PyObject *)fixed_descriptor;
+        }
+        else if (empty_returns_null) {
+            return 0;
         }
         else {
             *out_descriptor = (PyObject *) PyArray_DescrFromType(NPY_DEFAULT_TYPE);
@@ -2279,21 +2283,28 @@ PyArray_FromArrayAttr(PyObject *op, PyArray_Descr *typecode, PyObject *context)
 NPY_NO_EXPORT PyArray_Descr *
 PyArray_DescrFromObject(PyObject *op, PyArray_Descr *mintype)
 {
-    PyArray_Descr *dtype;
+    PyArray_Descr *descr;
 
-    dtype = mintype;
-    Py_XINCREF(dtype);
+    int ndim;
+    npy_intp shape[NPY_MAXDIMS];
+    PyObject *out_dtypemeta;
+    coercion_cache_obj *coercion_cache = NULL;
 
-    if (PyArray_DTypeFromObject(op, NPY_MAXDIMS, &dtype) < 0) {
+    // TODO: In principle there is a tiny chance of behaviour change, due to
+    //       a different order of promotion mainly. This should be fine, but
+    //       possibly mentioned somewhere.
+    int res = PyArray_DiscoverDTypeAndShapeFromObject(
+            op, NPY_FALSE, NPY_FALSE, NULL, NULL, &out_dtypemeta,
+            (PyObject **)&descr, &ndim, shape, &coercion_cache);
+    npy_free_coercion_cache(coercion_cache);
+    if (res < 0) {
         return NULL;
     }
-
-    if (dtype == NULL) {
-        return PyArray_DescrFromType(NPY_DEFAULT_TYPE);
+    Py_DECREF(out_dtypemeta);
+    if (mintype != NULL) {
+        Py_SETREF(descr, PyArray_PromoteTypes(mintype, descr));
     }
-    else {
-        return dtype;
-    }
+    return descr;
 }
 
 /* These are also old calls (should use PyArray_NewFromDescr) */

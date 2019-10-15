@@ -4112,7 +4112,7 @@ _discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs) {
 
     coercion_cache_obj *coercion_cache = NULL;
     int res = PyArray_DiscoverDTypeAndShapeFromObject(
-            obj, use_minimal,
+            obj, use_minimal, NPY_FALSE,
             fixed_descriptor,
             NULL,
             &out_dtype,
