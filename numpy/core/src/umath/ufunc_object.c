@@ -5508,7 +5508,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
 
         ndim[i] = PyArray_DiscoverDTypeFromObject(
                 PyTuple_GET_ITEM(full_args.in, i),
-                NPY_MAXDIMS, 0, &op_dtypes[i], shapes[i], NPY_TRUE,
+                NPY_MAXDIMS, &op_dtypes[i], shapes[i], NPY_TRUE,
                 &op_coercion_cache[i], &single_or_no_element[i], NULL,
                 context, NPY_FALSE, NPY_FALSE);
         Py_DECREF(context);
