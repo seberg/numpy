@@ -1326,7 +1326,7 @@ PyArray_DiscoverDTypeAndShapeFromObject(
     // TODO: Should probably signal this, skip promotion or even give dtype
     //       better hooks! (this means that dtype is already fixed)
     *out_dims = PyArray_DiscoverDTypeFromObject(
-            obj, NPY_MAXDIMS, 0, (PyArray_DTypeMeta **)out_dtype,
+            obj, NPY_MAXDIMS, (PyArray_DTypeMeta **)out_dtype,
             shape, use_minimal,
             coercion_cache, &single_or_no_element, NULL, context,
             stop_at_tuple, string_is_sequence);

@@ -769,9 +769,10 @@ update_shape(int curr_ndim, int *max_ndim,
 #define COERCION_CACHE_SIZE 5
 static coercion_cache_obj *global_coercion_cache[COERCION_CACHE_SIZE] = {NULL};
 
-NPY_NO_EXPORT int npy_new_coercion_cache(
+NPY_NO_EXPORT int
+npy_new_coercion_cache(
         PyObject *converted_obj, PyObject *arr_or_sequence, npy_bool sequence,
-        coercion_cache_obj **prev, coercion_cache_obj **initial)
+        coercion_cache_obj ***next_ptr)
 {
     coercion_cache_obj *cache = NULL;
     for (int i = 0; i < COERCION_CACHE_SIZE; i++) {
@@ -793,16 +794,11 @@ NPY_NO_EXPORT int npy_new_coercion_cache(
     cache->arr_or_sequence = arr_or_sequence;
     cache->sequence = sequence;
     cache->next = NULL;
-    if (*prev != NULL) {
-        (*prev)->next = cache;
-        *prev = cache;
-    }
-    else {
-        *prev = cache;
-        *initial = cache;
-    }
+    **next_ptr = cache;
+    *next_ptr = &(cache->next);
     return 0;
 }
+
 
 NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *next) {
     /* We only need to check from the last used cache pos */
@@ -827,54 +823,23 @@ NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *next) {
 #undef COERCION_CACHE_SIZE
 
 /*
- * Internal helper to find the correct DType (class). Must be called with
- * `curr_dim = 0`. Returns the maximum reached depth and a negative number
- * on failure. `out_dtype` is NULL on error, otherwise a reference to a DType
- * class.
- * The function fills in the resulting shape in `out_shape`.
- * The caller may get an abstract dtype returned, at which point it is may
- * be necessary to convert it.
- * If `use_minimal` is set, certain abstract dtypes may return a different
- * dtype. (e.g. a python int is always long, unsigned long or object and not
- * and abstract dtype describing the minimal possible dtype to hold the data).
+ * Recursive helper of the `PyArray_DiscoverDTypeFromObject` function.
  */
 NPY_NO_EXPORT int
-PyArray_DiscoverDTypeFromObject(
+PyArray_DiscoverDTypeFromObjectRecursive(
         PyObject *obj, int max_dims, int curr_dims,
         PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS],
-        npy_bool use_minimal, coercion_cache_obj **coercion_cache,
-        npy_bool *single_or_no_element,
+        npy_bool use_minimal, npy_bool *single_or_no_element,
         /* These two are solely for the __array__ attribute */
         PyArray_Descr *requested_dtype,
         PyObject *context,
         // TODO: Hacks to support legay behaviour (at least second one)
-        npy_bool stop_at_tuple, npy_bool string_is_sequence)
+        npy_bool stop_at_tuple, npy_bool string_is_sequence,
+        PyTypeObject *prev_type, PyArray_DTypeMeta *prev_dtype,
+        coercion_cache_obj ***coercion_cache_tail_ptr)
 {
     PyArray_DTypeMeta *dtype = NULL;
     PyArray_Descr *descriptor = NULL;
-
-    static PyTypeObject *prev_type;
-    static PyArray_DTypeMeta *prev_dtype;
-    static coercion_cache_obj *coercion_cache_end;
-
-
-    // TODO: This whole recursion needs to be cleaned up a lot...
-    // Have to split it off, and clean up to not use statics, etc!
-    /* Do housekeeping for the initial call in the recursion: */
-    if (curr_dims == 0) {
-        /* Clear the static cache of which types we have already seen */
-        prev_type = NULL;
-        prev_dtype = NULL;
-        *coercion_cache = NULL;
-        coercion_cache_end = NULL;
-
-        *single_or_no_element = 1;
-
-        /* initialize shape for shape discovery */
-        for (int i = 0; i < max_dims; i++) {
-            out_shape[i] = -1;
-        }
-    }
 
     /* obj is a string and we have a "c" dtype, so make the string a sequence */
     // TODO: slow, but do this check first (it should never be used)
@@ -958,7 +923,7 @@ PyArray_DiscoverDTypeFromObject(
         dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
         Py_INCREF(dtype);
         /* We must cache it for dtype discovery currently (it hardly hurts) */
-        if (npy_new_coercion_cache(obj, obj, 0, &coercion_cache_end, coercion_cache) < 0) {
+        if (npy_new_coercion_cache(obj, obj, 0, coercion_cache_tail_ptr) < 0) {
             goto fail;
         }
         goto promote_types;
@@ -1032,7 +997,7 @@ PyArray_DiscoverDTypeFromObject(
                 goto ragged_array;
             }
             descriptor = PyArray_DESCR(tmp);
-            if (npy_new_coercion_cache(obj, tmp, 0, &coercion_cache_end, coercion_cache) < 0) {
+            if (npy_new_coercion_cache(obj, tmp, 0, coercion_cache_tail_ptr) < 0) {
                 Py_DECREF(tmp);
                 goto fail;
             }
@@ -1078,8 +1043,7 @@ force_sequence:
         }
         goto fail;
     }
-    if (npy_new_coercion_cache(obj, seq, 1,
-                    &coercion_cache_end, coercion_cache) < 0) {
+    if (npy_new_coercion_cache(obj, seq, 1, coercion_cache_tail_ptr) < 0) {
         Py_DECREF(seq);
         goto fail;
     }
@@ -1101,11 +1065,12 @@ force_sequence:
 
     /* Recursive call for each sequence item */
     for (Py_ssize_t i = 0; i < size; ++i) {
-        max_dims = PyArray_DiscoverDTypeFromObject(
+        max_dims = PyArray_DiscoverDTypeFromObjectRecursive(
                 objects[i], max_dims, curr_dims + 1,
-                out_dtype, out_shape, use_minimal, coercion_cache,
+                out_dtype, out_shape, use_minimal,
                 single_or_no_element, requested_dtype, context,
-                stop_at_tuple, string_is_sequence);
+                stop_at_tuple, string_is_sequence,
+                prev_type, prev_dtype, coercion_cache_tail_ptr);
         // NOTE: If there is a ragged array found (NPY_OBJECT) could break
         if (max_dims < 0) {
             Py_DECREF(seq);
@@ -1157,6 +1122,57 @@ fail:
     Py_XDECREF(*out_dtype);
     *out_dtype = NULL;
     return -1;
+}
+
+
+/*
+ * Internal helper to find the correct DType (class). Must be called with
+ * `curr_dim = 0`. Returns the maximum reached depth and a negative number
+ * on failure. `out_dtype` is NULL on error, otherwise a reference to a DType
+ * class.
+ * The function fills in the resulting shape in `out_shape`.
+ * The caller may get an abstract dtype returned, at which point it is may
+ * be necessary to convert it.
+ * If `use_minimal` is set, certain abstract dtypes may return a different
+ * dtype. (e.g. a python int is always long, unsigned long or object and not
+ * and abstract dtype describing the minimal possible dtype to hold the data).
+ */
+NPY_NO_EXPORT int
+PyArray_DiscoverDTypeFromObject(
+        PyObject *obj, int max_dims,
+        PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS],
+        npy_bool use_minimal, coercion_cache_obj **coercion_cache,
+        npy_bool *single_or_no_element,
+        /* These two are solely for the __array__ attribute */
+        PyArray_Descr *requested_dtype,
+        PyObject *context,
+        // TODO: Hacks to support legay behaviour (at least second one)
+        npy_bool stop_at_tuple, npy_bool string_is_sequence)
+{
+
+    PyTypeObject *prev_type = NULL;
+    PyArray_DTypeMeta *prev_dtype = NULL;
+
+    // TODO: May want to put a lot of this into a single struct
+    //       stack allocated by the caller instead of many parameters?
+    /* Do housekeeping for the initial call in the recursion: */
+    *coercion_cache = NULL;
+    *single_or_no_element = 1;
+
+    /* initialize shape for shape discovery */
+    for (int i = 0; i < max_dims; i++) {
+        out_shape[i] = -1;
+    }
+
+    return PyArray_DiscoverDTypeFromObjectRecursive(
+            obj, max_dims, 0, out_dtype, out_shape,
+            use_minimal, single_or_no_element,
+            /* These two are solely for the __array__ attribute */
+            requested_dtype, context,
+            /* Special support for legay behaviour (especially second) */
+            stop_at_tuple, string_is_sequence,
+            /* Recursive helpers */
+            prev_type, prev_dtype, &coercion_cache);
 }
 
 
