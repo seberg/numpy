@@ -54,14 +54,19 @@ static int adjust_two_descriptors_within_dtype(
         PyArray_Descr *out_descrs[2],
         NPY_CASTING casting)
 {
-    if (in_descrs[1] != NULL) {
-        return adjust_two_descriptors_trivial(self, in_descrs, out_descrs, casting);
+    assert(self->to_dtype == self->from_dtype);
+    if (self->to_dtype->flexible) {
+        int res = PyArray_LegacyCanCastTypeTo(in_descrs[0], in_descrs[1], casting);
+        if (!res) {
+            PyErr_SetString(PyExc_TypeError,
+                            "invalid cast...");
+            return -1;
+        }
     }
     Py_INCREF(in_descrs[0]);
     out_descrs[0] = in_descrs[0];
-    Py_INCREF(in_descrs[0]);
-    out_descrs[1] = in_descrs[0];
-    
+    Py_INCREF(in_descrs[1]);
+    out_descrs[1] = in_descrs[1];
     return 0;
 }
 
@@ -209,12 +214,7 @@ castingimpl_legacynew(
          * We have to cast within a dtype, which needs to handle full alignment
          * and byte swapping.
          */
-         if (from_dtype->flexible) {
-            casting_impl->adjust_descriptors = adjust_two_descriptors_flexible;
-         }
-         else {
-            casting_impl->adjust_descriptors = adjust_two_descriptors_within_dtype;
-         }
+         casting_impl->adjust_descriptors = adjust_two_descriptors_within_dtype;
     }
     else {
         /*

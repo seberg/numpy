@@ -825,7 +825,7 @@ NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *next) {
 /*
  * Recursive helper of the `PyArray_DiscoverDTypeFromObject` function.
  */
-NPY_NO_EXPORT int
+static int
 PyArray_DiscoverDTypeFromObjectRecursive(
         PyObject *obj, int max_dims, int curr_dims,
         PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS],

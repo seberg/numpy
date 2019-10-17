@@ -3485,6 +3485,11 @@ PyArray_GetDTypeTransferFunction(int aligned,
     }
 
     if ((out_descrs[0] != src_dtype) || (out_descrs[1] != dst_dtype)) {
+        // TODO: This is a major hole right now, we potentially have to do
+        //       multi-step casting. We do not for builtin (since the logic
+        //       is here that already does it basically when necessary), but
+        //       have to implement it in either case before we optimize it
+        //       away in most cases.
         Py_DECREF(casting_impl);
         Py_DECREF(out_descrs[0]);
         Py_DECREF(out_descrs[1]);
