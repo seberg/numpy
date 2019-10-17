@@ -1149,6 +1149,10 @@ PyArray_DiscoverDTypeFromObject(
         // TODO: Hacks to support legay behaviour (at least second one)
         npy_bool stop_at_tuple, npy_bool string_is_sequence)
 {
+    // TODO: Should likely add an exact array match fast path here and
+    //       possibly even a scalar fast path.
+    //       Similarly the "writeable" path of GetArrayParamsFromObj may be
+    //       interesting outside of the recursive path.
 
     PyTypeObject *prev_type = NULL;
     PyArray_DTypeMeta *prev_dtype = NULL;
@@ -1167,11 +1171,8 @@ PyArray_DiscoverDTypeFromObject(
     return PyArray_DiscoverDTypeFromObjectRecursive(
             obj, max_dims, 0, out_dtype, out_shape,
             use_minimal, single_or_no_element,
-            /* These two are solely for the __array__ attribute */
             requested_dtype, context,
-            /* Special support for legay behaviour (especially second) */
             stop_at_tuple, string_is_sequence,
-            /* Recursive helpers */
             prev_type, prev_dtype, &coercion_cache);
 }
 
