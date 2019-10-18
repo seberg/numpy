@@ -621,17 +621,16 @@ setArrayFromSequence(PyArrayObject *a, PyObject *s,
 NPY_NO_EXPORT int
 PyArray_AssignFromSequence(PyArrayObject *self, PyObject *v)
 {
-    // Fuck the below checks...
-    //if (!PySequence_Check(v)) {
-    //    PyErr_SetString(PyExc_ValueError,
-    //                    "assignment from non-sequence");
-    //    return -1;
-    //}
-    //if (PyArray_NDIM(self) == 0) {
-    //    PyErr_SetString(PyExc_ValueError,
-    //                    "assignment to 0-d array");
-    //    return -1;
-    //}
+    if (!PySequence_Check(v)) {
+        PyErr_SetString(PyExc_ValueError,
+                        "assignment from non-sequence");
+        return -1;
+    }
+    if (PyArray_NDIM(self) == 0) {
+        PyErr_SetString(PyExc_ValueError,
+                        "assignment to 0-d array");
+        return -1;
+    }
     return setArrayFromSequence(self, v, 0, NULL);
 }
 
