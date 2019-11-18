@@ -3544,7 +3544,6 @@ ufunc_resolve_ufunc_impl(
              * This happens if two were equal, but we kept searching
              * for a better one.
              */
-            printf("Searched for better one?\n");
             PyErr_SetString(PyExc_TypeError,
                             "Could not resolve UFunc loop, two loops "
                             "matched equally well.");
