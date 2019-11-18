@@ -43,7 +43,18 @@ def _resolve_as_bool_output(ufunc, dtypes):
         # More specific loops should have been resolved already.
         return None
     bool_dtype = type(_multiarray_umath.dtype("bool"))
-    new_dtypes = *dtypes[:-1], type(_multiarray_umath.dtype("bool"))
+    new_dtypes = *dtypes[:-1], bool_dtype
+
+    return ufunc.resolve(new_dtypes)
+
+def _prefer_object_loop(ufunc, dtypes):
+    # TODO: This loop is needed because of OO->? loops, these may be
+    #       removed again, removing the need for this resolver.
+    if dtypes[-1] != None:
+        # More specific loops should have been resolved already.
+        return None
+    object_dtype = type(_multiarray_umath.dtype("O"))
+    new_dtypes = *dtypes[:-1], object_dtype
 
     return ufunc.resolve(new_dtypes)
 
@@ -53,5 +64,11 @@ def _register_resolvers():
 
     for ufunc in [equal, greater, greater_equal, less, less_equal, not_equal]:
         ufunc.register(dtypes, _resolve_as_bool_output)
+
+    for ufunc in [logical_or, logical_and]:
+        ufunc.register(dtypes, _prefer_object_loop)
+
+    logical_not.register((object_dtype, _multiarray_umath.dtype),
+                         _prefer_object_loop)
 
 _register_resolvers()
