@@ -66,7 +66,7 @@ default_ufunc_adapt_function(PyUFuncImplObject *self,
 
     for (i = 0; i < self->nin; i++) {
         PyArray_DTypeMeta *given_dt = self->dtype_signature[i];
-        PyArray_DTypeMeta *dt = (PyArray_DTypeMeta *)Py_TYPE(descr[i]);
+        PyArray_DTypeMeta *dt = NPY_DTMeta(descr[i]);
 
         if (given_dt != dt) {
             /* Casting is necessary, so use the default descriptor. */
@@ -101,7 +101,7 @@ default_ufunc_adapt_function(PyUFuncImplObject *self,
             }
         }
         else {
-            PyArray_DTypeMeta *dt = (PyArray_DTypeMeta *)Py_TYPE(descr[i]);
+            PyArray_DTypeMeta *dt = NPY_DTMeta(descr[i]);
 
             if (given_dt != dt) {
                 /* Casting is necessary, so use the default descriptor. */

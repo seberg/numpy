@@ -1065,7 +1065,7 @@ _parse_dtype_signature_obj(PyUFuncObject *ufunc,
             else if (!PyArray_DescrConverter(item, &descr)) {
                 goto fail;
             }
-            specified_types[i] = (PyArray_DTypeMeta *)Py_TYPE(descr);
+            specified_types[i] = NPY_DTMeta(descr);
             Py_INCREF(specified_types[i]);
             Py_DECREF(descr);
         }
@@ -1124,7 +1124,7 @@ _parse_dtype_signature_obj(PyUFuncObject *ufunc,
             if (descr == NULL) {
                 goto fail;
             }
-            specified_types[ufunc->nin] = (PyArray_DTypeMeta *)Py_TYPE(descr);
+            specified_types[ufunc->nin] = NPY_DTMeta(descr);
             Py_INCREF(specified_types[ufunc->nin]);
             Py_DECREF(descr);
         }
@@ -1140,7 +1140,7 @@ _parse_dtype_signature_obj(PyUFuncObject *ufunc,
                 if (descr == NULL) {
                     goto fail;
                 }
-                specified_types[i] = (PyArray_DTypeMeta *)Py_TYPE(descr);
+                specified_types[i] = NPY_DTMeta(descr);
                 Py_INCREF(specified_types[i]);
                 Py_DECREF(descr);
             }
@@ -1303,7 +1303,7 @@ get_ufunc_arguments(PyUFuncObject *ufunc,
                 out_dtypes[i] = NULL;
             }
             for (i = ufunc->nin; i < ufunc->nargs; i++) {
-                out_dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(dtype);
+                out_dtypes[i] = NPY_DTMeta(dtype);
             }
         }
     }
@@ -5477,8 +5477,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             }
 
             Py_INCREF(mps[i]);
-            op_dtypes[i]  = (
-                    (PyArray_DTypeMeta *)Py_TYPE(PyArray_DESCR(mps[i])));
+            op_dtypes[i]  = NPY_DTMeta(PyArray_DESCR(mps[i]));
             Py_INCREF(op_dtypes[i]);
             continue;
         }
@@ -5669,7 +5668,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
             /* An empty list, etc. can have this */
             PyObject *def_descr = (
                     (PyObject *)PyArray_DescrFromType(NPY_DEFAULT_TYPE));
-            op_dtypes[i] = (PyArray_DTypeMeta *)Py_TYPE(def_descr);
+            op_dtypes[i] = NPY_DTMeta(def_descr);
             Py_INCREF(op_dtypes[i]);
             Py_DECREF(def_descr);
         }
@@ -5815,8 +5814,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
         /* New style resolution did not find a loop, but no error occurred */
         for (i = 0; i < nargs; i++) {
             if (mps[i] != NULL) {
-                PyArray_DTypeMeta *dtype = (
-                        (PyArray_DTypeMeta *)Py_TYPE(PyArray_DESCR(mps[i])));
+                PyArray_DTypeMeta *dtype = NPY_DTMeta(PyArray_DESCR(mps[i]));
                 if (!dtype->is_legacy_wrapper) {
                     // TODO: Fix error, do not try legacy for non-legacy dtypes
                     // TODO: Build in ones will need to stay "legacy" here...
@@ -5924,8 +5922,7 @@ ufunc_generic_call(PyUFuncObject *ufunc, PyObject *args, PyObject *kwds)
          * We may need to (down)cast the input array, so that no error is
          * raised during dtype adaption/checking in the loop itself.
          */
-        if ((PyArray_DTypeMeta *)Py_TYPE(PyArray_DESCR(mps[i])) ==
-                    resolved_dtype) {
+        if (NPY_DTMeta(PyArray_DESCR(mps[i])) == resolved_dtype) {
             /* No need to cast (it is a large overhead) */
             continue;
         }
