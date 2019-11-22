@@ -6,6 +6,7 @@
 #include "npy_cpu.h"
 #include "utils.h"
 
+
 #define NPY_NO_EXPORT NPY_VISIBILITY_HIDDEN
 
 /* Only use thread if configured in config and python supports it */
@@ -1844,5 +1845,174 @@ typedef void (PyDataMem_EventHookFunc)(void *inp, void *outp, size_t size,
  * #endif
  */
 #undef NPY_DEPRECATED_INCLUDES
+
+
+/*
+ * PyArray_DTypeMeta related definitions.
+ */
+#if defined(NPY_INTERNAL_BUILD) && NPY_INTERNAL_BUILD
+
+struct _CastingImpl;
+struct _PyArray_DTypeMeta;
+
+typedef PyArray_Descr *(default_descr_func)(struct _PyArray_DTypeMeta *cls);
+
+typedef struct _PyArray_DTypeMeta *(common_dtype_function)(
+            struct _PyArray_DTypeMeta *cls,
+            struct _PyArray_DTypeMeta *other);
+
+typedef PyArray_Descr *(common_instance_function)(
+            struct _PyArray_DTypeMeta *cls,
+            PyArray_Descr *descr1, PyArray_Descr *descr2);
+
+typedef struct _CastingImpl *(can_cast_function)(
+            struct _PyArray_DTypeMeta *cls,
+            struct _PyArray_DTypeMeta *other,
+            NPY_CASTING casting);
+
+typedef struct _PyArray_DTypeMeta *(dtype_from_dtype_function)(
+            struct _PyArray_DTypeMeta *cls);
+
+typedef struct _PyArray_DTypeMeta *(dtype_from_discovery_function)(
+            struct _PyArray_DTypeMeta *cls, PyObject *obj,
+            npy_bool use_minimal);
+
+typedef PyArray_Descr *(descr_from_discovery_function)(
+        struct _PyArray_DTypeMeta *cls, PyObject *obj);
+
+typedef PyArray_Descr *(ensure_native_function)(
+        PyArray_Descr *self);
+
+/*
+ * This struct must remain fully opaque to the user, direct access is
+ * solely allowed from within NumPy!
+ * (Others have to use a PyArrayDType_GetSlot(), which may return an error
+ * or a similar name).
+ * Not all slots will be exposed.
+ */
+typedef struct {
+    /* PyObject handling: */
+    void *getitem;
+    void *setitem;
+    int requires_pyobject_for_discovery;  /* truly private for now */
+    dtype_from_discovery_function *discover_dtype_from_pytype;
+    descr_from_discovery_function *discover_descr_from_pyobject;
+
+    /* Casting: */
+    can_cast_function *can_cast_from_other;
+    can_cast_function *can_cast_to_other;
+    common_dtype_function *common_dtype;
+    common_instance_function *common_instance;
+    default_descr_func *default_descr;
+
+    /* Slots only interesting for abstract dtypes */
+    dtype_from_dtype_function *default_dtype;
+    dtype_from_dtype_function *minimal_dtype;  /* can default to the default_dtype */
+    ensure_native_function *ensure_native;
+
+    /* Slots for legacy wrapper (needed?) */
+    //PyObject *legacy_castingimpls_from;
+    //PyObject *legacy_castingimpls_to;
+    //int *legacy_casting_from_info;
+    //int *legacy_casting_to_info;
+
+    /* Special slots */
+    struct _CastingImpl *within_dtype_castingimpl;
+} dtypemeta_slots;
+
+/* Warning, this order is fixed! Numbers can be added at the end! */
+#define NPY_dt_getitem 1
+#define NPY_dt_setitem 2
+#define NPY_dt_can_cast_from_other 3
+#define NPY_dt_can_cast_to_other 4
+#define NPY_dt_common_dtype 5
+#define NPY_dt_common_instance 6
+#define NPY_dt_within_dtype_castingimpl 7
+#define NPY_dt_legacy_arrfuncs 8
+
+#define NPY_dt_default_dtype 9
+#define NPY_dt_minimal_dtype 10
+#define NPY_dt_discover_dtype_from_pytype 11
+#define NPY_discover_descr_from_pyobject 12
+#define NPY_dt_ensure_native 13
+
+#define NPY_dt_associated_python_types 14
+
+typedef struct{
+  int flexible;
+  int abstract;
+  npy_intp itemsize;
+  int flags;
+  PyTypeObject *typeobj;
+  PyType_Slot *slots; /* terminated by slot==0. */
+} PyArrayDTypeMeta_Spec;
+
+
+/*
+ * Slots of DTypeMeta, Probably can use the same structure for AbstractDTypeMeta.
+ * This must remain be fully opaque!
+ */
+typedef struct _PyArray_DTypeMeta {
+        // NOTE: This is allocated as PyHeapTypeObject, but most dtypes do not
+        //       actually require that. Value based casting should though, and
+        //       downstream should have the ability. (I hope this does not get difficult :/)
+        PyHeapTypeObject super;
+        // TODO: I want these slots to be just 2-3 pointers, i.e.
+        // int abstract
+        // dtypemeta_slots *dt_slots  /* Private growable struct */
+        // This means that downstream can rely on the size of the supertype
+        // in an ABI compatible manner while we can extend our API freely.
+
+        /*
+         * the type object representing an
+         * instance of this type -- should not
+         * be two type_numbers with the same type
+         * object.
+         */
+        PyTypeObject *typeobj;
+        /* kind for this type */
+        char kind;
+        /* unique-character representing this type */
+        char type;
+        /* flags describing data type */
+        char flags;
+        int flexible;
+        int abstract;
+        /* number representing this type */
+        int type_num;
+        /* element size (itemsize) for this type, can be -1 if flexible. */
+        int elsize;  // TODO: Think about making it intp? How much API would actually be broken by this?
+        /* alignment needed for this type */
+        // int alignment;   Maybe add again?
+        /*
+         * Link to the original f, should be removed at some point probably.
+         * Maybe this could become a copy, just to know if something happened
+         * in the meantime.
+         */
+        PyArray_ArrFuncs *f;
+        npy_bool is_legacy_wrapper;
+        // Most things should go into this single pointer, so that things
+        // are nice and clean and hidden away:
+        dtypemeta_slots *dt_slots;
+} PyArray_DTypeMeta;
+
+NPY_NO_EXPORT PyTypeObject PyArrayAbstractObjDTypeMeta_Type;
+NPY_NO_EXPORT PyArray_DTypeMeta PyArrayDescr_TypeFull;
+
+/* Iternal shorthand to get the DTypeMeta object (type of the dtype) */
+#define NPY_DTMeta(descr) ((PyArray_DTypeMeta *)Py_TYPE(descr))
+
+#define PyArrayDescr_Type (*(PyTypeObject *)(&PyArrayDescr_TypeFull))
+
+#else  /* not NPY_INTERNAL_BUILD: */
+
+// TODO: This should possibly be exposed but with all fields renamed to
+//       private, so that people do not mess with it.
+//       Alternatively, exposing the sizeof() may be good enough.
+typedef struct _PyArray_DTypeMeta {
+        PyHeapTypeObject super;
+} PyArray_DTypeMeta;
+
+#endif  /* NPY_INTERNAL_BUILD */
 
 #endif /* NPY_ARRAYTYPES_H */

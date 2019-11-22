@@ -4091,6 +4091,62 @@ normalize_axis_index(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwds)
     return PyInt_FromLong(axis);
 }
 
+static PyObject *
+_discover_dtype(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwargs) {
+    PyObject * obj;
+    PyArray_Descr * fixed_descriptor = NULL;
+    PyObject *out_dtype = NULL, *out_descriptor = NULL;
+    int out_dims;
+    int max_dims = NPY_MAXDIMS;
+    npy_bool use_minimal;
+    npy_intp shape[NPY_MAXDIMS];
+
+    static char *kwlist[] = {"obj", "minimal", "dtype", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "O|$O&O&:_discover_dtype", kwlist,
+            &obj, PyArray_BoolConverter, &use_minimal,
+            PyArray_DescrConverter, &fixed_descriptor)) {
+        return NULL;
+    }
+
+    coercion_cache_obj *coercion_cache = NULL;
+    int res = PyArray_DiscoverDTypeAndShapeFromObject(
+            obj, use_minimal, NPY_FALSE,
+            fixed_descriptor,
+            NULL,
+            &out_dtype,
+            &out_descriptor,
+            &out_dims, shape,
+            &coercion_cache);
+
+    if (res < 0) {
+        return NULL;
+    }
+
+    npy_free_coercion_cache(coercion_cache);
+    // TODO: May want to get rid of remaining AbstractDTypes (depending on use)
+    //       specifically, if use_minimal is not True.
+    PyObject *shape_tup = PyTuple_New(out_dims);
+    if (shape_tup == NULL) {
+        Py_DECREF(out_descriptor);
+        Py_DECREF(out_dtype);
+        return NULL;
+    }
+    for (int i = 0; i < out_dims; i++) {
+        PyTuple_SET_ITEM(shape_tup, i, PyLong_FromLongLong(shape[i]));
+        if (PyTuple_GET_ITEM(shape_tup, i) == NULL) {
+            Py_DECREF(shape_tup);  // TODO: Is this OK to not clean more?
+            Py_DECREF(out_descriptor);
+            Py_DECREF(out_dtype);
+            return NULL;
+        }
+    }
+
+    return Py_BuildValue("NNN", shape_tup, out_dtype, out_descriptor);
+}
+
+
 static struct PyMethodDef array_module_methods[] = {
     {"_get_implementing_args",
         (PyCFunction)array__get_implementing_args,
@@ -4290,10 +4346,13 @@ static struct PyMethodDef array_module_methods[] = {
         METH_VARARGS, NULL},
     {"_add_newdoc_ufunc", (PyCFunction)add_newdoc_ufunc,
         METH_VARARGS, NULL},
+    {"_discover_dtype", (PyCFunction)_discover_dtype,
+        METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL, NULL, 0, NULL}                /* sentinel */
 };
 
 #include "__multiarray_api.c"
+#include "abstractdtype.h"
 
 /* Establish scalar-type hierarchy
  *
@@ -4606,23 +4665,8 @@ PyMODINIT_FUNC init_multiarray_umath(void) {
      */
     PyArray_Type.tp_hash = PyObject_HashNotImplemented;
 
-    if (PyType_Ready(&PyUFunc_Type) < 0) {
-        goto err;
-    }
-
-    /* Load the ufunc operators into the array module's namespace */
-    if (InitOperators(d) < 0) {
-        goto err;
-    }
-
-    if (set_matmul_flags(d) < 0) {
-        goto err;
-    }
     initialize_casting_tables();
     initialize_numeric_types();
-    if (initscalarmath(m) < 0) {
-        goto err;
-    }
 
     if (PyType_Ready(&PyArray_Type) < 0) {
         goto err;
@@ -4651,10 +4695,21 @@ PyMODINIT_FUNC init_multiarray_umath(void) {
         goto err;
     }
 
+    PyArrayDTypeMeta_associated_types = PyDict_New();
+    if (PyArrayDTypeMeta_associated_types == NULL) {
+        goto err;
+    }
+    if (PyType_Ready(&PyArrayDTypeMeta_Type) < 0) {
+        goto err;
+    }
+    if (PyType_Ready(&PyArrayAbstractObjDTypeMeta_Type) < 0) {
+        goto err;
+    }
     PyArrayDescr_Type.tp_hash = PyArray_DescrHash;
     if (PyType_Ready(&PyArrayDescr_Type) < 0) {
         goto err;
     }
+
     if (PyType_Ready(&PyArrayFlags_Type) < 0) {
         goto err;
     }
@@ -4754,6 +4809,36 @@ PyMODINIT_FUNC init_multiarray_umath(void) {
     if (set_typeinfo(d) != 0) {
         goto err;
     }
+
+    if (init_pyvalue_abstractdtypes() < 0) {
+        goto err;
+    }
+
+    if (PyType_Ready(&PyUFunc_Type) < 0) {
+        goto err;
+    }
+
+    if (PyType_Ready(&PyUFuncImpl_Type) < 0) {
+        goto err;
+    }
+
+    if (PyType_Ready(&PyArrayCastingImpl_Type) < 0) {
+        goto err;
+    }
+
+    /* Load the ufunc operators into the array module's namespace */
+    if (InitOperators(d) < 0) {
+        printf("error here1\n");
+        goto err;
+    }
+    if (initscalarmath(m) < 0) {
+        goto err;
+    }
+    if (set_matmul_flags(d) < 0) {
+        printf("and this one!\n");
+        goto err;
+    }
+
     if (initumath(m) != 0) {
         goto err;
     }

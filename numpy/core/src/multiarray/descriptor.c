@@ -672,6 +672,9 @@ _convert_from_list(PyObject *obj, int align)
         totalsize += conv->elsize;
     }
     new = PyArray_DescrNewFromType(NPY_VOID);
+    if (new == NULL) {
+        goto fail;
+    }
     new->fields = fields;
     new->names = nameslist;
     new->flags = dtypeflags;
@@ -1346,6 +1349,9 @@ PyArray_DescrNewFromType(int type_num)
     PyArray_Descr *new;
 
     old = PyArray_DescrFromType(type_num);
+    if (old == NULL) {
+        return NULL;
+    }
     new = PyArray_DescrNew(old);
     Py_DECREF(old);
     return new;
@@ -1767,8 +1773,7 @@ error:
 NPY_NO_EXPORT PyArray_Descr *
 PyArray_DescrNew(PyArray_Descr *base)
 {
-    PyArray_Descr *newdescr = PyObject_New(PyArray_Descr, &PyArrayDescr_Type);
-
+    PyArray_Descr *newdescr = PyObject_New(PyArray_Descr, Py_TYPE(base));
     if (newdescr == NULL) {
         return NULL;
     }
@@ -1823,6 +1828,7 @@ PyArray_DescrNew(PyArray_Descr *base)
 static void
 arraydescr_dealloc(PyArray_Descr *self)
 {
+    //printf("enter dealloc\n");
     if (self->fields == Py_None) {
         fprintf(stderr, "*** Reference count error detected: \n" \
                 "an attempt was made to deallocate %d (%c) ***\n",
@@ -1844,6 +1850,7 @@ arraydescr_dealloc(PyArray_Descr *self)
     NPY_AUXDATA_FREE(self->c_metadata);
     self->c_metadata = NULL;
     Py_TYPE(self)->tp_free((PyObject *)self);
+    //printf("    finished dealloc\n");
 }
 
 /*
@@ -2262,7 +2269,7 @@ static PyGetSetDef arraydescr_getsets[] = {
 };
 
 static PyObject *
-arraydescr_new(PyTypeObject *NPY_UNUSED(subtype),
+arraydescr_new(PyTypeObject *subtype,
                 PyObject *args, PyObject *kwds)
 {
     PyObject *odescr, *metadata=NULL;
@@ -2278,6 +2285,13 @@ arraydescr_new(PyTypeObject *NPY_UNUSED(subtype),
                 PyArray_BoolConverter, &align,
                 PyArray_BoolConverter, &copy,
                 &PyDict_Type, &metadata)) {
+        return NULL;
+    }
+
+    if ((subtype != &PyArrayDescr_Type) && (align || copy || metadata != NULL)) {
+        printf("Rejecting here, it got some actual arguments, buuhh!\n");
+        PyErr_SetString(PyExc_TypeError,
+                "initialization is not implemented for this dtype class.");
         return NULL;
     }
 
@@ -3024,6 +3038,9 @@ PyArray_DescrNewByteorder(PyArray_Descr *self, char newendian)
     char endian;
 
     new = PyArray_DescrNew(self);
+    if (new == NULL) {
+        return NULL;
+    }
     endian = new->byteorder;
     if (endian != NPY_IGNORE) {
         if (newendian == NPY_SWAP) {
@@ -3176,6 +3193,40 @@ is_dtype_struct_simple_unaligned_layout(PyArray_Descr *dtype)
 
     /* It's a simple layout, since all the above tests passed */
     return 1;
+}
+
+
+/*
+ * Returns 1 if the dtype/descriptor is a flexible legacy DType instance.
+ * Meaning that it is a string, unicode, void with itemsize 0 (but
+ * not structured void), or datetime without a unit.
+ */
+NPY_NO_EXPORT int
+is_descr_flexible_dtype_instance(PyArray_Descr *descriptor)
+{
+    if (PyDataType_ISFLEXIBLE(descriptor) &&
+        PyDataType_ISUNSIZED(descriptor)) {
+        /* It may still be a void dtype with empty field/subarray */
+        if (descriptor->type_num == NPY_VOID) {
+            if ((descriptor->names == NULL) &&
+                (descriptor->subarray == NULL)) {
+            return 1;
+            }
+        }
+        else {
+            /* String and Unicode */
+            return 1;
+        }
+    }
+    else if (PyDataType_ISDATETIME(descriptor)) {
+        PyArray_DatetimeMetaData *meta;
+        /* Below can error, but only if input is not already datetime */
+        meta = get_datetime_metadata_from_dtype(descriptor);
+        if (meta->base == NPY_FR_GENERIC) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /*
@@ -3569,13 +3620,13 @@ static PyMappingMethods descr_as_mapping = {
 
 /****************** End of Mapping Protocol ******************************/
 
-NPY_NO_EXPORT PyTypeObject PyArrayDescr_Type = {
-#if defined(NPY_PY3K)
-    PyVarObject_HEAD_INIT(NULL, 0)
-#else
-    PyObject_HEAD_INIT(NULL)
-    0,                                          /* ob_size */
-#endif
+
+// TODO: Needs to be actually initialized correctly to define
+//       some of the slots (pretty much just returning NotImplemented or error)
+static dtypemeta_slots _dt_slots_nulled = {0};
+
+NPY_NO_EXPORT PyArray_DTypeMeta PyArrayDescr_TypeFull = {{{
+    PyVarObject_HEAD_INIT(&PyArrayDTypeMeta_Type, 0)
     "numpy.dtype",                              /* tp_name */
     sizeof(PyArray_Descr),                      /* tp_basicsize */
     0,                                          /* tp_itemsize */
@@ -3584,11 +3635,7 @@ NPY_NO_EXPORT PyTypeObject PyArrayDescr_Type = {
     0,                                          /* tp_print */
     0,                                          /* tp_getattr */
     0,                                          /* tp_setattr */
-#if defined(NPY_PY3K)
     (void *)0,                                  /* tp_reserved */
-#else
-    0,                                          /* tp_compare */
-#endif
     (reprfunc)arraydescr_repr,                  /* tp_repr */
     &descr_as_number,                           /* tp_as_number */
     &descr_as_sequence,                         /* tp_as_sequence */
@@ -3599,7 +3646,7 @@ NPY_NO_EXPORT PyTypeObject PyArrayDescr_Type = {
     0,                                          /* tp_getattro */
     0,                                          /* tp_setattro */
     0,                                          /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT,                         /* tp_flags */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   /* tp_flags */
     0,                                          /* tp_doc */
     0,                                          /* tp_traverse */
     0,                                          /* tp_clear */
@@ -3627,4 +3674,31 @@ NPY_NO_EXPORT PyTypeObject PyArrayDescr_Type = {
     0,                                          /* tp_weaklist */
     0,                                          /* tp_del */
     0,                                          /* tp_version_tag */
+    },},
+    .type_num = -1,
+    .kind = '\0',
+    .abstract = 1,
+    .flexible = 0,
+    .dt_slots = &_dt_slots_nulled,
 };
+
+// TODO: This should be included above, but maybe does not need to be?
+//       However, as is, it is not really "PyArray_DTypeMeta", which seems
+//       problematic. It should be possible to make it one, but export it as
+//       PyTypeObject in any case.
+//NPY_NO_EXPORT PyArray_DTypeMeta PyArrayDescr_TypePrivate = {{
+//    PyArrayDescr_Type;
+//    /* HeapType slots are unused. */
+//    },
+//    NULL,
+//    0,
+//    0,
+//    0,
+//    0,
+//    0,
+//    0,
+//    0,
+//    0,
+//};
+//
+

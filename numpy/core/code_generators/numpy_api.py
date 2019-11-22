@@ -74,6 +74,8 @@ multiarray_types_api = {
     'PyHalfArrType_Type':               (217,),
     'NpyIter_Type':                     (218,),
     # End 1.6 API
+    'PyArrayDTypeMeta_Type':            (304,),
+    'PyArrayCastingImpl_Type':          (305,),
 }
 
 #define NPY_NUMUSERTYPES (*(int *)PyArray_API[6])
@@ -350,10 +352,12 @@ multiarray_funcs_api = {
     'PyArray_ResolveWritebackIfCopy':       (302,),
     'PyArray_SetWritebackIfCopyBase':       (303,),
     # End 1.14 API
+    'PyArray_InitDTypeMetaFromSpec':        (306,),
 }
 
 ufunc_types_api = {
-    'PyUFunc_Type':                             (0,)
+    'PyUFunc_Type':                             (0,),
+    'PyUFuncImpl_Type':                         (44,),
 }
 
 ufunc_funcs_api = {
@@ -404,6 +408,7 @@ ufunc_funcs_api = {
     # End 1.8 API
     'PyUFunc_FromFuncAndDataAndSignatureAndIdentity': (42,),
     # End 1.16 API
+    'PyUFunc_NewStyle_New': (43,),
 }
 
 # List of all the dicts which define the C API

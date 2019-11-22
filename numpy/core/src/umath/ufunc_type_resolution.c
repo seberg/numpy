@@ -1487,12 +1487,29 @@ PyUFunc_DefaultLegacyInnerLoopSelector(PyUFuncObject *ufunc,
     return raise_no_loop_found_error(ufunc, dtypes);
 }
 
+
+NPY_NO_EXPORT int
+object_ufunc_loop_selector(PyUFuncObject *ufunc,
+                           PyArray_Descr **NPY_UNUSED(dtypes),
+                           PyUFuncGenericFunction *out_innerloop,
+                           void **out_innerloopdata,
+                           int *out_needs_api)
+{
+    *out_innerloop = ufunc->functions[0];
+    *out_innerloopdata = ufunc->data[0];
+    *out_needs_api = 1;
+
+    return 0;
+}
+
+
 typedef struct {
     NpyAuxData base;
     PyUFuncGenericFunction unmasked_innerloop;
     void *unmasked_innerloopdata;
     int nargs;
 } _ufunc_masker_data;
+
 
 static NpyAuxData *
 ufunc_masker_data_clone(NpyAuxData *data)
@@ -1564,6 +1581,36 @@ unmasked_ufunc_loop_as_masked(
  * Returns 0 on success, -1 on error.
  */
 NPY_NO_EXPORT int
+PyUFunc_WrapInnerloopIntoMasked(
+        int nargs,
+        PyUFuncGenericFunction unmasked_innerloop,
+        void *unmasked_innerloopdata,
+        PyUFunc_MaskedStridedInnerLoopFunc **out_innerloop,
+        NpyAuxData **out_innerloopdata)
+{
+    _ufunc_masker_data *data;
+
+    /* Create a new NpyAuxData object for the masker data */
+    data = (_ufunc_masker_data *)PyArray_malloc(sizeof(_ufunc_masker_data));
+    if (data == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    memset(data, 0, sizeof(_ufunc_masker_data));
+    data->unmasked_innerloop = unmasked_innerloop;
+    data->unmasked_innerloopdata = unmasked_innerloopdata;
+    data->base.free = (NpyAuxData_FreeFunc *)&PyArray_free;
+    data->base.clone = &ufunc_masker_data_clone;
+    data->nargs = nargs;
+
+    /* Return the loop function + aux data */
+    *out_innerloop = &unmasked_ufunc_loop_as_masked;
+    *out_innerloopdata = (NpyAuxData *)data;
+    return 0;
+}
+
+
+int
 PyUFunc_DefaultMaskedInnerLoopSelector(PyUFuncObject *ufunc,
                             PyArray_Descr **dtypes,
                             PyArray_Descr *mask_dtype,
@@ -1574,7 +1621,6 @@ PyUFunc_DefaultMaskedInnerLoopSelector(PyUFuncObject *ufunc,
                             int *out_needs_api)
 {
     int retcode;
-    _ufunc_masker_data *data;
 
     if (ufunc->legacy_inner_loop_selector == NULL) {
         PyErr_SetString(PyExc_RuntimeError,
@@ -1590,31 +1636,20 @@ PyUFunc_DefaultMaskedInnerLoopSelector(PyUFuncObject *ufunc,
                 "presently");
         return -1;
     }
-
-    /* Create a new NpyAuxData object for the masker data */
-    data = (_ufunc_masker_data *)PyArray_malloc(sizeof(_ufunc_masker_data));
-    if (data == NULL) {
-        PyErr_NoMemory();
-        return -1;
-    }
-    memset(data, 0, sizeof(_ufunc_masker_data));
-    data->base.free = (NpyAuxData_FreeFunc *)&PyArray_free;
-    data->base.clone = &ufunc_masker_data_clone;
-    data->nargs = ufunc->nin + ufunc->nout;
-
     /* Get the unmasked ufunc inner loop */
+    PyUFuncGenericFunction unmasked_innerloop;
+    void *unmasked_innerloopdata;
     retcode = ufunc->legacy_inner_loop_selector(ufunc, dtypes,
-                    &data->unmasked_innerloop, &data->unmasked_innerloopdata,
+                    &unmasked_innerloop, &unmasked_innerloopdata,
                     out_needs_api);
     if (retcode < 0) {
-        PyArray_free(data);
         return retcode;
     }
+    return PyUFunc_WrapInnerloopIntoMasked(
+            ufunc->nargs,
+            unmasked_innerloop, unmasked_innerloopdata,
+            out_innerloop, out_innerloopdata);
 
-    /* Return the loop function + aux data */
-    *out_innerloop = &unmasked_ufunc_loop_as_masked;
-    *out_innerloopdata = (NpyAuxData *)data;
-    return 0;
 }
 
 static int

@@ -1,6 +1,8 @@
 #ifndef _NPY_ARRAY_CONVERT_DATATYPE_H_
 #define _NPY_ARRAY_CONVERT_DATATYPE_H_
 
+#include "castingimpl.h"
+
 NPY_NO_EXPORT PyArray_VectorUnaryFunc *
 PyArray_GetCastFunc(PyArray_Descr *descr, int type_num);
 
@@ -10,8 +12,23 @@ PyArray_ObjectType(PyObject *op, int minimum_type);
 NPY_NO_EXPORT PyArrayObject **
 PyArray_ConvertToCommonType(PyObject *op, int *retn);
 
+NPY_NO_EXPORT npy_bool
+PyArray_LegacyCanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
+                                                    NPY_CASTING casting);
+
+NPY_NO_EXPORT npy_bool
+PyArray_LegacyCanCastTo(PyArray_Descr *from, PyArray_Descr *to);
+
+NPY_NO_EXPORT PyArray_Descr *
+PyArray_LegacyPromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2);
+
 NPY_NO_EXPORT int
 PyArray_ValidType(int type);
+
+NPY_NO_EXPORT CastingImpl *get_casting_impl(
+            PyArray_DTypeMeta *from_dtype,
+            PyArray_DTypeMeta *to_dtype,
+            NPY_CASTING casting);
 
 /* Like PyArray_CanCastArrayTo */
 NPY_NO_EXPORT npy_bool
@@ -21,6 +38,9 @@ can_cast_scalar_to(PyArray_Descr *scal_type, char *scal_data,
 NPY_NO_EXPORT int
 should_use_min_scalar(npy_intp narrs, PyArrayObject **arr,
                       npy_intp ndtypes, PyArray_Descr **dtypes);
+
+NPY_NO_EXPORT PyArray_DTypeMeta *
+PyArray_PromoteDTypes(PyArray_DTypeMeta *type1, PyArray_DTypeMeta *type2);
 
 /*
  * This function calls Py_DECREF on flex_dtype, and replaces it with

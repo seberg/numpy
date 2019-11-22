@@ -351,7 +351,6 @@ def build_project(args):
             # add flags used as werrors
             warnings_as_errors = ' '.join([
                 # from tools/travis-test.sh
-                '-Werror=vla',
                 '-Werror=nonnull',
                 '-Werror=pointer-arith',
                 '-Wlogical-op',

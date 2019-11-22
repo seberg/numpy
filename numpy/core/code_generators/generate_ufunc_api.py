@@ -12,6 +12,7 @@ h_template = r"""
 #ifdef _UMATHMODULE
 
 extern NPY_NO_EXPORT PyTypeObject PyUFunc_Type;
+extern NPY_NO_EXPORT PyTypeObject PyUFuncImpl_Type;
 
 %s
 

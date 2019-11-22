@@ -853,18 +853,29 @@ astype_anyint(PyObject *obj) {
     PyArrayObject *ret;
 
     if (!PyArray_Check(obj)) {
-        /* prefer int dtype */
-        PyArray_Descr *dtype_guess = NULL;
-        if (PyArray_DTypeFromObject(obj, NPY_MAXDIMS, &dtype_guess) < 0) {
+        PyArray_Descr *descr_guess;
+
+        int ndim;
+        npy_intp shape[NPY_MAXDIMS];
+        PyObject *out_dtypemeta;
+        coercion_cache_obj *coercion_cache = NULL;
+
+        int res = PyArray_DiscoverDTypeAndShapeFromObject(
+                obj, NPY_FALSE, NPY_TRUE, NULL, NULL, &out_dtypemeta,
+                (PyObject **)&descr_guess, &ndim, shape, &coercion_cache);
+        npy_free_coercion_cache(coercion_cache);
+        if (res < 0) {
             return NULL;
         }
-        if (dtype_guess == NULL) {
+        Py_XDECREF(out_dtypemeta);
+
+        if (descr_guess == NULL) {
             if (PySequence_Check(obj) && PySequence_Size(obj) == 0) {
                 PyErr_SetString(PyExc_TypeError, EMPTY_SEQUENCE_ERR_MSG);
             }
             return NULL;
         }
-        ret = (PyArrayObject*)PyArray_FromAny(obj, dtype_guess, 0, 0, 0, NULL);
+        ret = (PyArrayObject*)PyArray_FromAny(obj, descr_guess, 0, 0, 0, NULL);
         if (ret == NULL) {
             return NULL;
         }

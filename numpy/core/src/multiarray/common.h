@@ -20,28 +20,6 @@
 #endif
 
 /*
- * Recursively examines the object to determine an appropriate dtype
- * to use for converting to an ndarray.
- *
- * 'obj' is the object to be converted to an ndarray.
- *
- * 'maxdims' is the maximum recursion depth.
- *
- * 'out_dtype' should be either NULL or a minimal starting dtype when
- * the function is called. It is updated with the results of type
- * promotion. This dtype does not get updated when processing NA objects.
- *
- * Returns 0 on success, -1 on failure.
- */
-NPY_NO_EXPORT int
-PyArray_DTypeFromObject(PyObject *obj, int maxdims,
-                        PyArray_Descr **out_dtype);
-
-NPY_NO_EXPORT int
-PyArray_DTypeFromObjectHelper(PyObject *obj, int maxdims,
-                              PyArray_Descr **out_dtype, int string_status);
-
-/*
  * Returns NULL without setting an exception if no scalar is matched, a
  * new dtype reference otherwise.
  */
@@ -50,6 +28,11 @@ _array_find_python_scalar_type(PyObject *op);
 
 NPY_NO_EXPORT PyArray_Descr *
 _array_typedescr_fromstr(char *str);
+
+
+NPY_NO_EXPORT PyObject *
+_array_from_array_like(PyObject *op, PyArray_Descr *requested_dtype,
+                       npy_bool writeable, PyObject *context);
 
 NPY_NO_EXPORT char *
 index2ptr(PyArrayObject *mp, npy_intp i);
@@ -333,5 +316,46 @@ blas_stride(npy_intp stride, unsigned itemsize)
 NPY_NO_EXPORT PyArrayObject *
 new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
                   int nd, npy_intp dimensions[], int typenum, PyArrayObject **result);
+
+/*
+ * We do not want to coerce arrays many times unless absolutely necessary.
+ * The same goes for sequences, so everything we have seen, we will have
+ * to store somehow. This is a linked list of these objects.
+ */
+typedef struct coercion_cache_obj {
+    PyObject *converted_obj;
+    PyObject *arr_or_sequence;
+    struct coercion_cache_obj *next;
+    npy_bool sequence;
+} coercion_cache_obj;
+
+
+/* Create a new cache object */
+NPY_NO_EXPORT int npy_new_coercion_cache(
+        PyObject *converted_obj, PyObject *arr_or_sequence, npy_bool sequence,
+        coercion_cache_obj ***next_ptr);
+/* Frees the coercion cache object. */
+NPY_NO_EXPORT void npy_free_coercion_cache(coercion_cache_obj *first);
+
+
+NPY_NO_EXPORT int
+PyArray_DiscoverDTypeFromObject(
+        PyObject *obj, int max_dims,
+        PyArray_DTypeMeta **out_dtype, npy_intp out_shape[NPY_MAXDIMS],
+        npy_bool use_minimal, coercion_cache_obj **coercion_cache,
+        npy_bool *single_or_no_element,
+        /* These two are solely for the __array__ attribute */
+        PyArray_Descr *requested_dtype,
+        PyObject *context,
+        // TODO: Hacks to support legay behaviour (at least second one)
+        npy_bool stop_at_tuple, npy_bool string_is_sequence);
+
+
+NPY_NO_EXPORT int
+PyArray_DiscoverDescriptorFromObject(
+        PyObject *obj,
+        PyArray_Descr **out_descr, coercion_cache_obj **coercion_cache,
+        npy_bool single_or_no_element, PyArray_DTypeMeta *dtype);
+
 
 #endif

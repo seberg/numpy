@@ -37,6 +37,8 @@ maintainer email:  oliphant.travis@ieee.org
 #include "npy_pycompat.h"
 
 #include "usertypes.h"
+#include "dtypemeta.h"
+
 
 NPY_NO_EXPORT PyArray_Descr **userdescrs=NULL;
 
@@ -183,6 +185,9 @@ PyArray_RegisterDataType(PyArray_Descr *descr)
         return -1;
     }
     userdescrs[NPY_NUMUSERTYPES++] = descr;
+    
+    descr_dtypesubclass_init(descr);
+    
     return typenum;
 }
 

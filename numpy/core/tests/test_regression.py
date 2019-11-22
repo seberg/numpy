@@ -2482,7 +2482,9 @@ class TestRegression(object):
         class T(object):
             __array_interface__ = {}
 
-        np.array([T()])
+        with assert_raises(ValueError):
+            # Used to create an object array on older NumPy versions.
+            np.array([T()])
 
     def test_2d__array__shape(self):
         class T(object):

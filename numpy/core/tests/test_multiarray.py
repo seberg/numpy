@@ -6342,7 +6342,9 @@ if sys.version_info[:2] >= (3, 5):
         def test_matmul_raises(self):
             assert_raises(TypeError, self.matmul, np.int8(5), np.int8(5))
             assert_raises(TypeError, self.matmul, np.void(b'abc'), np.void(b'abc'))
-            assert_raises(ValueError, self.matmul, np.arange(10), np.void(b'abc'))
+            # both incorrect types as well as shape which is a ValueError:
+            assert_raises(TypeError, self.matmul, np.arange(10), np.void(b'abc'))
+            assert_raises(ValueError, self.matmul, np.arange(10), 1)
 
     def test_matmul_inplace():
         # It would be nice to support in-place matmul eventually, but for now

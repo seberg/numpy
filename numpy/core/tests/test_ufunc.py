@@ -1499,9 +1499,9 @@ class TestUfunc(object):
         target = np.array([0, 2, 4], dtype=_rational_tests.rational)
         assert_equal(result, target)
 
-        # no output type should raise TypeError
-        with assert_raises(TypeError):
-            _rational_tests.test_add(a, b)
+        # Note that no output used to raise a TypeError here
+        # It is now partially supported (only exact matches)
+        _rational_tests.test_add(a, b)
 
     def test_operand_flags(self):
         a = np.arange(16, dtype='l').reshape(4, 4)

@@ -292,7 +292,6 @@ PyArray_CopyObject(PyArrayObject *dest, PyObject *src_object)
             if (PyArray_IsScalar(src_object, Generic)) {
                 char *value;
                 int retcode;
-
                 value = scalar_value(src_object, dtype);
                 if (value == NULL) {
                     Py_DECREF(dtype);

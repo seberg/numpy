@@ -31,4 +31,5 @@ NPY_VISIBILITY_HIDDEN extern PyObject *npy_um_str_array_finalize;
 NPY_VISIBILITY_HIDDEN extern PyObject *npy_um_str_ufunc;
 NPY_VISIBILITY_HIDDEN extern PyObject *npy_um_str_pyvals_name;
 
+
 #endif
