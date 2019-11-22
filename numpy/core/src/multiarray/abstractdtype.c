@@ -249,7 +249,7 @@ get_default_int_dtype(PyObject *minimum, PyObject *maximum)
     }
 
 finish:
-    dtype = (PyArray_DTypeMeta *)Py_TYPE((PyObject *)descriptor);
+    dtype = NPY_DTMeta((PyObject *)descriptor);
     Py_INCREF(dtype);
     Py_DECREF(descriptor);
     return dtype;
@@ -420,7 +420,7 @@ fail:
 static PyArray_DTypeMeta *
 default_dtype_float(PyArray_DTypeMeta *NPY_UNUSED(cls)) {
     PyArray_Descr *descr = PyArray_DescrFromType(NPY_DOUBLE);
-    PyArray_DTypeMeta *dtype = (PyArray_DTypeMeta *)Py_TYPE(descr);
+    PyArray_DTypeMeta *dtype = NPY_DTMeta(descr);
     Py_INCREF(dtype);
     Py_DECREF(descr);
     return dtype;
@@ -532,7 +532,7 @@ discover_dtype_from_pyfloat(PyArray_DTypeMeta *cls,
     if (!use_minimal) {
         /* The default is to always use double precision */
         PyArray_Descr *descr = PyArray_DescrFromType(NPY_DOUBLE);
-        PyArray_DTypeMeta *dtype = (PyArray_DTypeMeta *)Py_TYPE(descr);
+        PyArray_DTypeMeta *dtype = NPY_DTMeta(descr);
         Py_INCREF(dtype);
         Py_DECREF(descr);
         return dtype;

@@ -906,7 +906,7 @@ PyArray_DiscoverDTypeFromObjectRecursive(
         // TODO: Should be able to just do nothing with dtype, but for now to
         //       avoid bugs down here, set to OBJECT.
         descriptor = PyArray_DescrFromType(NPY_OBJECT);
-        dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+        dtype = NPY_DTMeta(descriptor);
         Py_INCREF(dtype);
         Py_DECREF(descriptor);
         goto promote_types;
@@ -920,7 +920,7 @@ PyArray_DiscoverDTypeFromObjectRecursive(
             goto ragged_array;
         }
         descriptor = PyArray_DESCR((PyArrayObject *)obj);
-        dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+        dtype = NPY_DTMeta(descriptor);
         Py_INCREF(dtype);
         /* We must cache it for dtype discovery currently (it hardly hurts) */
         if (npy_new_coercion_cache(obj, obj, 0, coercion_cache_tail_ptr) < 0) {
@@ -939,7 +939,7 @@ PyArray_DiscoverDTypeFromObjectRecursive(
         if (descriptor == NULL) {
             goto fail;
         }
-        dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+        dtype = NPY_DTMeta(descriptor);
         Py_INCREF(dtype);
         Py_DECREF(descriptor);
         prev_type = Py_TYPE(obj);
@@ -959,7 +959,7 @@ PyArray_DiscoverDTypeFromObjectRecursive(
         if (update_shape(curr_dims, &max_dims, out_shape, 0, NULL, NPY_FALSE) < 0) {
             goto ragged_array;
         }
-        dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+        dtype = NPY_DTMeta(descriptor);
         Py_INCREF(dtype);
         Py_DECREF(descriptor);
         goto promote_types;
@@ -1002,7 +1002,7 @@ PyArray_DiscoverDTypeFromObjectRecursive(
                 goto fail;
             }
             Py_DECREF(tmp);
-            dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+            dtype = NPY_DTMeta(descriptor);
             Py_INCREF(dtype);
             goto promote_types;
         }
@@ -1091,7 +1091,7 @@ ragged_array:
     if (*out_dtype == NULL || (*out_dtype)->type_num != NPY_OBJECT) {
         Py_XDECREF(*out_dtype);
         descriptor = PyArray_DescrFromType(NPY_OBJECT);
-        *out_dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+        *out_dtype = NPY_DTMeta(descriptor);
         Py_INCREF(*out_dtype);
         Py_DECREF(descriptor);
     }
@@ -1112,7 +1112,7 @@ promote_types:
          * should likely be raised if the user did not provide a DType.
          */
         descriptor = PyArray_DescrFromType(NPY_OBJECT);
-        *out_dtype = (PyArray_DTypeMeta *)Py_TYPE(descriptor);
+        *out_dtype = NPY_DTMeta(descriptor);
         Py_INCREF(*out_dtype);
         Py_DECREF(descriptor);
     }

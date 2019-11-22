@@ -188,7 +188,7 @@ legacy_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
     if (common_descr == NULL) {
         return NULL;
     }
-    PyArray_DTypeMeta *common = (PyArray_DTypeMeta *)Py_TYPE(common_descr);
+    PyArray_DTypeMeta *common = NPY_DTMeta(common_descr);
     Py_INCREF(common);
     Py_DECREF(common_descr);
     return common;

@@ -1999,6 +1999,9 @@ typedef struct _PyArray_DTypeMeta {
 NPY_NO_EXPORT PyTypeObject PyArrayAbstractObjDTypeMeta_Type;
 NPY_NO_EXPORT PyArray_DTypeMeta PyArrayDescr_TypeFull;
 
+/* Iternal shorthand to get the DTypeMeta object (type of the dtype) */
+#define NPY_DTMeta(descr) ((PyArray_DTypeMeta *)Py_TYPE(descr))
+
 #define PyArrayDescr_Type (*(PyTypeObject *)(&PyArrayDescr_TypeFull))
 
 #else  /* not NPY_INTERNAL_BUILD: */

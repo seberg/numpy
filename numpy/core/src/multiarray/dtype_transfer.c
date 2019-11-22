@@ -3469,8 +3469,8 @@ PyArray_GetDTypeTransferFunction(int aligned,
         goto fallback;
     }
 
-    PyArray_DTypeMeta *src_dtypemeta = (PyArray_DTypeMeta *)Py_TYPE(src_dtype);
-    PyArray_DTypeMeta *dst_dtypemeta = (PyArray_DTypeMeta *)Py_TYPE(dst_dtype);
+    PyArray_DTypeMeta *src_dtypemeta = NPY_DTMeta(src_dtype);
+    PyArray_DTypeMeta *dst_dtypemeta = NPY_DTMeta(dst_dtype);
     CastingImpl *casting_impl = get_casting_impl(
             src_dtypemeta, dst_dtypemeta, NPY_UNSAFE_CASTING);
     if (casting_impl == NULL) {

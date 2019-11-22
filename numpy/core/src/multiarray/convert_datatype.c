@@ -741,8 +741,8 @@ PyArray_CanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
     PyArray_Descr *in_descrs[2] = {from, to};
     PyArray_Descr *out_descrs[2];
 
-    PyArray_DTypeMeta *from_dtype = (PyArray_DTypeMeta *)Py_TYPE(from);
-    PyArray_DTypeMeta *to_dtype = (PyArray_DTypeMeta *)Py_TYPE(to);
+    PyArray_DTypeMeta *from_dtype = NPY_DTMeta(from);
+    PyArray_DTypeMeta *to_dtype = NPY_DTMeta(to);
 
     // TODO: Maybe remove fast paths, they are stupid?
     if (from == to) {
@@ -1222,7 +1222,7 @@ discover_descriptor_with_correct_dtype(
         PyArray_DTypeMeta *dtype_meta,
         PyArray_DTypeMeta *common)
 {
-    if ((PyArray_DTypeMeta *)Py_TYPE(descr) == common) {
+    if (NPY_DTMeta(descr) == common) {
         Py_INCREF(descr);
         return descr;
     }
@@ -1240,7 +1240,7 @@ discover_descriptor_with_correct_dtype(
     }
     Py_DECREF(casting_impl);
     Py_DECREF(out_descrs[0]);
-    assert((PyArray_DTypeMeta *)Py_TYPE(out_descrs[1]) == common);
+    assert(NPY_DTMeta(out_descrs[1]) == common);
     return out_descrs[1];
 }
 
@@ -1251,8 +1251,8 @@ discover_descriptor_with_correct_dtype(
 NPY_NO_EXPORT PyArray_Descr *
 PyArray_PromoteTypes(PyArray_Descr *descr1, PyArray_Descr *descr2)
 {
-    PyArray_DTypeMeta *type1_meta = (PyArray_DTypeMeta *)Py_TYPE(descr1);
-    PyArray_DTypeMeta *type2_meta = (PyArray_DTypeMeta *)Py_TYPE(descr2);
+    PyArray_DTypeMeta *type1_meta = NPY_DTMeta(descr1);
+    PyArray_DTypeMeta *type2_meta = NPY_DTMeta(descr2);
 
     // TODO: Could add fast path for the common case where things are identical
     // NOTE: Even in that case, old behaviour is to ensure output is native!
@@ -1297,8 +1297,8 @@ PyArray_PromoteTypes(PyArray_Descr *descr1, PyArray_Descr *descr2)
      * We still need to find out the actual common dtype, since the two inputs
      * appear to be different:
      */
-    assert((PyArray_DTypeMeta *)Py_TYPE(cast_descr1) == common);
-    assert((PyArray_DTypeMeta *)Py_TYPE(cast_descr2) == common);
+    assert(NPY_DTMeta(cast_descr1) == common);
+    assert(NPY_DTMeta(cast_descr2) == common);
     PyArray_Descr *result = (
         common->dt_slots->common_instance(common, cast_descr1, cast_descr2));
 
