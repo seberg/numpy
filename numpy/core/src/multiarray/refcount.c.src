@@ -70,8 +70,8 @@
         do {                                                        \
             PyObject *_err_string = PyUString_FromString(@context@);\
             if (_err_string) {                                      \
-                PyErr_WriteUnraisable(_err_string);                           \
-                Py_DECREF(_err_string);                                       \
+                PyErr_WriteUnraisable(_err_string);                 \
+                Py_DECREF(_err_string);                             \
             }                                                       \
             else {                                                  \
                 PyErr_WriteUnraisable(Py_None);                     \
@@ -167,6 +167,7 @@ NPY_NO_EXPORT int
     if (!PyDataType_REFCHK(PyArray_DESCR(mp))) {
         return 0;
     }
+    printf("%d, %d\n", PyArray_DESCR(mp)->type_num, NPY_OBJECT);
     if (PyArray_DESCR(mp)->type_num != NPY_OBJECT) {
         PyArray_RawIterBaseInit(&it, mp);
         while (it.index < it.size) {

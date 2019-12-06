@@ -1795,8 +1795,6 @@ array_traverse(PyArrayObject *self, visitproc visit, void *arg)
 {
     PyArray_Descr *descr = PyArray_DESCR(self);
 
-    printf("traversing array\n");
-
     /*
      * make sure we don't traverse the array before it is fully initialized,
      * or if it doesn't have any objects

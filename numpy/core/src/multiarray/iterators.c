@@ -1279,6 +1279,7 @@ static PyObject*
 multiiter_new_impl(int n_args, PyObject **args)
 {
     PyArrayMultiIterObject *multi;
+    npy_bool needs_gc_tracking = NPY_FALSE;
     int i;
 
     multi = ((PyArrayMultiIterObject *)PyArrayMultiIter_Type.
@@ -1286,7 +1287,6 @@ multiiter_new_impl(int n_args, PyObject **args)
     if (multi == NULL) {
         return PyErr_NoMemory();
     }
-    PyObject_Init((PyObject *)multi, &PyArrayMultiIter_Type);
     multi->numiter = 0;
 
     for (i = 0; i < n_args; ++i) {
@@ -1304,6 +1304,9 @@ multiiter_new_impl(int n_args, PyObject **args)
             }
             for (j = 0; j < mit->numiter; ++j) {
                 arr = (PyObject *)mit->iters[j]->ao;
+                if (PyDataType_REFCHK(PyArray_DESCR((PyArrayObject *)arr))) {
+                    needs_gc_tracking = NPY_TRUE;
+                }
                 it = (PyArrayIterObject *)PyArray_IterNew(arr);
                 if (it == NULL) {
                     goto fail;
@@ -1316,6 +1319,9 @@ multiiter_new_impl(int n_args, PyObject **args)
             if (arr == NULL) {
                 goto fail;
             }
+            if (PyDataType_REFCHK(PyArray_DESCR((PyArrayObject *)arr))) {
+                needs_gc_tracking = NPY_TRUE;
+            }
             it = (PyArrayIterObject *)PyArray_IterNew(arr);
             Py_DECREF(arr);
             if (it == NULL) {
@@ -1327,6 +1333,9 @@ multiiter_new_impl(int n_args, PyObject **args)
             multiiter_wrong_number_of_args();
             goto fail;
         }
+    }
+    if (!needs_gc_tracking) {
+        PyObject_GC_UnTrack(multi);
     }
 
     if (multi->numiter < 0) {
