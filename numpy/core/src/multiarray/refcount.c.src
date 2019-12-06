@@ -157,21 +157,22 @@ NPY_NO_EXPORT int
 {
     npy_intp i, n;
     PyObject **data;
-    PyArrayIterObject *it;
+    /*
+     * statically allocating it allows this function to not modify the
+     * reference count of the array for use during dealloc.
+     * (statically is not necessary as such)
+     */
+    PyArrayIterObject it;
 
     if (!PyDataType_REFCHK(PyArray_DESCR(mp))) {
         return 0;
     }
     if (PyArray_DESCR(mp)->type_num != NPY_OBJECT) {
-        it = (PyArrayIterObject *)PyArray_IterNew((PyObject *)mp);
-        if (it == NULL) {
-            ERROR_RETURN;
+        PyArray_RawIterBaseInit(&it, mp);
+        while (it.index < it.size) {
+            CALL_INNER_FUNCTION(it.dataptr, PyArray_DESCR(mp));
+            PyArray_ITER_NEXT(&it);
         }
-        while(it->index < it->size) {
-            CALL_INNER_FUNCTION(it->dataptr, PyArray_DESCR(mp));
-            PyArray_ITER_NEXT(it);
-        }
-        Py_DECREF(it);
         return 0;
     }
 
@@ -190,16 +191,12 @@ NPY_NO_EXPORT int
         }
     }
     else { /* handles misaligned data too */
-        it = (PyArrayIterObject *)PyArray_IterNew((PyObject *)mp);
-        if (it == NULL) {
-            ERROR_RETURN;
-        }
-        while(it->index < it->size) {
-            data = (PyObject **)it->dataptr;
+        PyArray_RawIterBaseInit(&it, mp);
+        while (it.index < it.size) {
+            data = (PyObject **)it.dataptr;
             HANDLE_ITEM_AT_UNALIGNED(data);
-            PyArray_ITER_NEXT(it);
+            PyArray_ITER_NEXT(&it);
         }
-        Py_DECREF(it);
     }
     return 0;
 }
