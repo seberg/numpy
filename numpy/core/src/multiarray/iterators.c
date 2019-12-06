@@ -125,9 +125,6 @@ PyArray_RawIterBaseInit(PyArrayIterObject *it, PyArrayObject *ao)
 {
     int nd, i;
 
-    if (!PyDataType_REFCHK(PyArray_DESCR(ao))) {
-        PyObject_GC_UnTrack(it);
-    }
     nd = PyArray_NDIM(ao);
     PyArray_UpdateFlags(ao, NPY_ARRAY_C_CONTIGUOUS);
     if (PyArray_ISCONTIGUOUS(ao)) {
@@ -1831,6 +1828,11 @@ PyArray_NeighborhoodIterNew(PyArrayIterObject *x, const npy_intp *bounds,
     Py_INCREF(x->ao);  /* PyArray_RawIterBaseInit steals a reference */
     PyArray_RawIterBaseInit((PyArrayIterObject*)ret, x->ao);
     Py_INCREF(x);
+
+    if (!PyDataType_REFCHK(PyArray_DESCR(x->ao))) {
+            PyObject_GC_UnTrack(ret);
+    }
+
     ret->_internal_iter = x;
 
     ret->nd = PyArray_NDIM(x->ao);

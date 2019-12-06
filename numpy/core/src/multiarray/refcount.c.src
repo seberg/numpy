@@ -39,19 +39,19 @@
 
 /* Use macros to achieve the different behaviour and function signatures */
 #if !@set_to_none@
-   #define HANDLE_ITEM_AT(data) @item_func@(*data)
+   #define HANDLE_ITEM_AT(data) @item_func@(*(data))
 #else
-    #define HANDLE_ITEM_AT(data) Py_XSETREF(*data, Py_None)
+    #define HANDLE_ITEM_AT(data) Py_XSETREF(*(data), Py_None)
 #endif
 
 
 #define HANDLE_ITEM_AT_UNALIGNED(data)          \
     do {                                        \
-        PyObject **_tmp;                        \
-        NPY_COPY_PYOBJECT_PTR(_tmp, data);      \
-        HANDLE_ITEM_AT(_tmp);                   \
+        PyObject *_tmp;                         \
+        NPY_COPY_PYOBJECT_PTR(&_tmp, data);     \
+        HANDLE_ITEM_AT(&_tmp);                  \
         if (@set_to_none@) {                    \
-            NPY_COPY_PYOBJECT_PTR(data, _tmp);  \
+            NPY_COPY_PYOBJECT_PTR(data, &_tmp); \
         }                                       \
     } while (0)
 
@@ -167,7 +167,6 @@ NPY_NO_EXPORT int
     if (!PyDataType_REFCHK(PyArray_DESCR(mp))) {
         return 0;
     }
-    printf("%d, %d\n", PyArray_DESCR(mp)->type_num, NPY_OBJECT);
     if (PyArray_DESCR(mp)->type_num != NPY_OBJECT) {
         PyArray_RawIterBaseInit(&it, mp);
         while (it.index < it.size) {
