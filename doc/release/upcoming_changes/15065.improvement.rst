@@ -1,0 +1,12 @@
+Cyclic garbage collection support
+---------------------------------
+NumPy now supports cyclic garbage collection in most of
+its datatypes. Most importantly this means that situations
+such as::
+
+    arr = np.array([None], dtype=object)
+    arr[0] = arr
+    del arr
+
+can be cleaned up by the garbage collector. While support has
+been added, it is generally advisable to avoid such constructs.
