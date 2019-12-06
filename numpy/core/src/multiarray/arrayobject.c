@@ -1795,6 +1795,8 @@ array_traverse(PyArrayObject *self, visitproc visit, void *arg)
 {
     PyArray_Descr *descr = PyArray_DESCR(self);
 
+    printf("traversing array\n");
+
     /*
      * make sure we don't traverse the array before it is fully initialized,
      * or if it doesn't have any objects
@@ -1821,18 +1823,16 @@ array_traverse(PyArrayObject *self, visitproc visit, void *arg)
     if ((descr->type_num == NPY_OBJECT) &&
             PyArray_ISONESEGMENT(self) && PyArray_ISALIGNED(self)) {
         npy_intp i, size;
-        PyObject ** data = PyArray_DATA(self);
+        PyObject **data = PyArray_DATA(self);
 
         assert(PyArray_ISNBO(self));  /* objects are always NBO */
-        size = PyArray_SIZE(self) / sizeof(PyObject *);
-
-        for (i=0; i < size; i++) {
+        size = PyArray_SIZE(self);
+        for (i = 0; i < size; i++) {
             Py_VISIT(*data);  /* Should be able to handle NULL */
             data++;
         }
         return 0;
     }
-
     _PyArray_VISIT(self, visit, arg);
     return 0;
 }
