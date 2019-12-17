@@ -1478,10 +1478,8 @@ static int
 arraymultiter_traverse(PyArrayMultiIterObject *multi, visitproc visit,
         void *arg)
 {
-    int i;
-
     if (multi->iters) {
-        for (i = 0; i < multi->numiter; i++) {
+        for (int i = 0; i < multi->numiter; i++) {
             Py_VISIT(multi->iters[i]);
         }
     }

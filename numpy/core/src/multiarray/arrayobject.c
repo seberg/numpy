@@ -1793,16 +1793,15 @@ array_iter(PyArrayObject *arr)
 static int
 array_traverse(PyArrayObject *self, visitproc visit, void *arg)
 {
-    PyArray_Descr *descr = PyArray_DESCR(self);
-    /*
-     * make sure we don't traverse the array before it is fully initialized,
-     * or if it doesn't have any objects
-     */
-    if (!descr) {
+    /* Make sure we don't traverse the array before it is fully initialized */
+    if (PyArray_DATA(self) == NULL) {
         return 0;
     }
+
+    PyArray_Descr *descr = PyArray_DESCR(self);
     Py_VISIT(((PyArrayObject_fields *)self)->base);
 
+    /* There is no need to traverse an array not containing objects. */
     if (!PyDataType_REFCHK(descr)) {
         return 0;
     }

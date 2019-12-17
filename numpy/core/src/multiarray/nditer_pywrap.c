@@ -1214,12 +1214,10 @@ npyiter_dealloc(NewNpyArrayIterObject *self)
 static int
 npyiter_traverse(NewNpyArrayIterObject *self, visitproc visit, void *arg)
 {
-    npy_intp iop, nop;
-
     Py_VISIT(self->nested_child);
     if (self->iter && self->operands) {
-        nop = NpyIter_GetNOp(self->iter);
-        for (iop = 0; iop < nop; ++iop) {
+        npy_intp nop = NpyIter_GetNOp(self->iter);
+        for (npy_intp iop = 0; iop < nop; ++iop) {
             Py_VISIT(self->operands[iop]);
         }
     }

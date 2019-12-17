@@ -8522,15 +8522,26 @@ class TestGarbageCollection:
         assert gc.is_tracked(a)
 
     def test_structured_cycle(self):
-        a = np.empty(1, dtype=[('a', 'O'), ('b', [('c', 'O'), ('d', 'i')])])
-        a[0]['b']['c'] = a
+        # note that the object fields are not generally aligned due to the 'i1'.
+        a = np.empty(2, dtype=[('a', 'O'), ('b', [('c', 'O'), ('d', 'i1')])])
+        a['b']['c'][0] = a
+        a['b']['c'][1] = a
+        ra = weakref.ref(a)
+        del a
+        gc.collect()
+        assert_(ra() is None)
+
+    def test_unaligned_subarray(self):
+        a = np.empty(2, dtype=[('a', 'i1'), ('b', 'O', (2, 3))])
+        a['b'][0, 0, 0] = a
+        a['b'][1, 0, 1] = a
         ra = weakref.ref(a)
         del a
         gc.collect()
         assert_(ra() is None)
 
     def test_updateifcopy_cycle(self):
-        # an UPDATEIFCOPY array caught in a reference cycle is not guaranteed
+        # a WRITEBACKIFCOPY array caught in a reference cycle is not guaranteed
         # to update its base array, but we should at least check that it gets
         # deallocated
         a = np.zeros(1, dtype=([('a', 'f8'), ('b', 'O')]))

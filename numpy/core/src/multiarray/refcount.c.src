@@ -17,55 +17,48 @@
 #include "npy_pycompat.h"
 
 
-/* Fill the data item with None before XDECREF, used to clear the array */
-#define FILL_WITH_NONE(temp) do {        \
-    PyObject *none = Py_None;            \
-    NPY_COPY_PYOBJECT_PTR(data, &none);  \
-    Py_INCREF(none);                     \
-    Py_XDECREF(temp);                    \
-    } while (0)
-
 
 /**begin repeat
- * #name = INCREF, XDECREF, CLEAR, VISIT#
- * #inner_function = _PyArray_Item_INCREF, _PyArray_Item_XDECREF,
- *                   _PyArray_Item_CLEAR, _PyArray_Item_VISIT#
- * #is_visit_func = 0, 0, 0, 1#
- * #item_func = Py_XINCREF, Py_XDECREF,, Py_VISIT#
- * #set_to_none = 0, 0, 1, 0#
- * #silence_errors = 0, 0, 1, 1#
+ * #function = INCREF, XDECREF, CLEAR, VISIT#
  * #context = "", "", "<ndarray.tp_clear>", "<ndarray.tp_traverse>"#
  */
 
-/* Use macros to achieve the different behaviour and function signatures */
-#if !@set_to_none@
-   #define HANDLE_ITEM_AT(data) @item_func@(*(data))
-#else
+#define INCREF 1
+#define XDECREF 2
+#define CLEAR 3
+#define VISIT 4
+
+/*
+ * Use macros to achieve the different behaviour and function signatures.
+ * HANDLE_ITEM_AT is the function applied to a single element.
+ * These macros handle a single Object, the _PyArray_Item_ function itself
+ * may be used on structured dtypes which can contain multiple objects.
+ */
+#if @function@ == INCREF
+    #define HANDLE_ITEM_AT(data) Py_XINCREF(*(data))
+#elif @function@ == XDECREF
+    #define HANDLE_ITEM_AT(data) Py_XDECREF(*(data))
+#elif @function@ == CLEAR
     #define HANDLE_ITEM_AT(data) Py_XSETREF(*(data), Py_None)
+#elif @function@ == VISIT
+    #define HANDLE_ITEM_AT(data) Py_VISIT(*(data))
 #endif
 
-
+/* In case of an unaligned element, copy may be necessary. */
 #define HANDLE_ITEM_AT_UNALIGNED(data)          \
     do {                                        \
         PyObject *_tmp;                         \
         NPY_COPY_PYOBJECT_PTR(&_tmp, data);     \
         HANDLE_ITEM_AT(&_tmp);                  \
-        if (@set_to_none@) {                    \
+        if (@function@ == CLEAR) {              \
+            /* copy the None into the array */  \
             NPY_COPY_PYOBJECT_PTR(data, &_tmp); \
         }                                       \
     } while (0)
 
 
-#if @is_visit_func@
-    #define CALL_INNER_FUNCTION(data, descr) \
-        @inner_function@(data, descr, visit, arg)
-    // #define ERR_RETURN PyErr_WriteUnraisable(Py_None); return 0
-#else
-    #define CALL_INNER_FUNCTION(data, descr) @inner_function@(data, descr)
-    // #define ERR_RETURN return -1;
-#endif
-
-#if @silence_errors@
+/* The VISIT and CLEAR functions cannot return errors, so print them */
+#if (@function@ == VISIT) || (@function@ == CLEAR)
     #define ERROR_RETURN                                            \
         do {                                                        \
             PyObject *_err_string = PyUString_FromString(@context@);\
@@ -76,7 +69,7 @@
             else {                                                  \
                 PyErr_WriteUnraisable(Py_None);                     \
             }                                                       \
-            /* Only Py_VISIT returns not 0 for the VISIT func */    \
+            /* Only Py_VISIT macro returns anything except 0 */     \
             return 0;                                               \
         } while (0)
 #else
@@ -89,13 +82,13 @@
  * recursively to visit all sub structures.
  * If this is the VISIT function, it needs special arguments for Python
  */
-NPY_NO_EXPORT int 
- #if @is_visit_func@
-    @inner_function@(char *data, PyArray_Descr *descr,
-                     visitproc visit, void *arg)
-#else
-    @inner_function@(char *data, PyArray_Descr *descr)
-#endif
+NPY_NO_EXPORT int
+_PyArray_Item_@function@(
+    #if @function@ == VISIT
+        char *data, PyArray_Descr *descr, visitproc visit, void *arg)
+    #else
+        char *data, PyArray_Descr *descr)
+    #endif
 {
     int retval = 0;
 
@@ -116,11 +109,16 @@ NPY_NO_EXPORT int
             if NPY_TITLE_KEY(key, value) {
                 continue;
             }
-            if (!PyArg_ParseTuple(value, "Oi|O", &new, &offset,
-                                  &title)) {
+            if (!PyArg_ParseTuple(value, "Oi|O", &new, &offset, &title)) {
                 ERROR_RETURN;
             }
-            retval = CALL_INNER_FUNCTION(data + offset, new);
+            /* Recursively call the item function on fields */
+            retval = _PyArray_Item_@function@(
+                #if @function@ == VISIT
+                    data + offset, new, visit, arg);
+                #else
+                    data + offset, new);
+                #endif
         }
     }
     else if (PyDataType_HASSUBARRAY(descr)) {
@@ -135,13 +133,19 @@ NPY_NO_EXPORT int
         size = descr->elsize / inner_elsize;
 
         for (i = 0; i < size; i++){
-            /* Recursively increment the reference count of subarray elements */
-            retval = CALL_INNER_FUNCTION(data + i * inner_elsize,
-                                         descr->subarray->base);
+            /* Recursively call the item function on subarray elements */
+            retval = _PyArray_Item_@function@(
+                #if @function@ == VISIT
+                    data + i * inner_elsize, descr->subarray->base, visit, arg);
+                #else
+                    data + i * inner_elsize, descr->subarray->base);
+                #endif
         }
     }
     else {
-        /* This path should not be reachable. */
+        /* This path should not be reachable (user dtypes claiming to be
+         * Objects may reach it, but they are unsupported as of now).
+         */
         assert(0);
     }
     return retval;
@@ -149,11 +153,12 @@ NPY_NO_EXPORT int
 
 
 NPY_NO_EXPORT int
-#if @is_visit_func@
-    _PyArray_@name@(PyArrayObject *mp, visitproc visit, void *arg)
-#else
-    _PyArray_@name@(PyArrayObject *mp)
-#endif
+_PyArray_@function@(
+    #if @function@ == VISIT
+        PyArrayObject *mp, visitproc visit, void *arg)
+    #else
+        PyArrayObject *mp)
+    #endif
 {
     npy_intp i, n;
     PyObject **data;
@@ -170,7 +175,12 @@ NPY_NO_EXPORT int
     if (PyArray_DESCR(mp)->type_num != NPY_OBJECT) {
         PyArray_RawIterBaseInit(&it, mp);
         while (it.index < it.size) {
-            CALL_INNER_FUNCTION(it.dataptr, PyArray_DESCR(mp));
+            _PyArray_Item_@function@(
+                #if @function@ == VISIT
+                    it.dataptr, PyArray_DESCR(mp), visit, arg);
+                #else
+                    it.dataptr, PyArray_DESCR(mp));
+                #endif
             PyArray_ITER_NEXT(&it);
         }
         return 0;
@@ -185,12 +195,12 @@ NPY_NO_EXPORT int
             }
         }
         else {
-            for( i = 0; i < n; i++, data++) {
+            for (i = 0; i < n; i++, data++) {
                 HANDLE_ITEM_AT_UNALIGNED(data);
             }
         }
     }
-    else { /* handles misaligned data too */
+    else {  /* handles misaligned data too */
         PyArray_RawIterBaseInit(&it, mp);
         while (it.index < it.size) {
             data = (PyObject **)it.dataptr;
@@ -203,8 +213,11 @@ NPY_NO_EXPORT int
 
 #undef HANDLE_ITEM_AT
 #undef HANDLE_ITEM_AT_UNALIGNED
-#undef CALL_INNER_FUNCTION
 #undef ERROR_RETURN
+#undef INCREF
+#undef XDECREF
+#undef CLEAR
+#undef VISIT
 
 /**end repeat**/
 
