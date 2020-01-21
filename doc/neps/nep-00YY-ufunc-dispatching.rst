@@ -12,7 +12,7 @@ NEP XX — Improved UFunc Dispatching
 Abstract
 --------
 
-In NEP 34 the need for new user defined datatypes was motivated.
+In NEP 33 the need for new user defined datatypes was motivated.
 Allowing users to create more powerful datatypes is however only one
 side of the coin.
 Any dtype can only be useful if it can most functions can be executed on it.

@@ -12,25 +12,31 @@ NEP 33 — Extensible Datatypes for NumPy
 Abstract
 --------
 
-Datatypes in NumPy describe how to interpret each element in the array.
-For the most part NumPy provides the usual numerical types, as well as additionally string and some datetime capabilities. 
+Datatypes in NumPy describe how to interpret each element in arrays.
+For the most part, NumPy provides the usual numerical types, as well as additional string and some datetime capabilities. 
 The growing Python community, however, has need for more more diverse datatypes.
-Example are datatypes with unit information attached (such as meters) or categorical datatypes.
+Examples are datatypes with unit information attached (such as meters) or categorical datatypes.
+>WHAT ARE CATEGORICAL DATATYPES?
 However, the current NumPy datatype API is too limited to allow the creation
 of these.
 This NEP is the first step to enable such growth, and simplify their development
 by allowing new datatypes to be defined in Python instead of C.
-By refactoring our datatype API and improving its maintainability future development will become possible not only for external user datatypes, but also within NumPy.
+>WHAT DOES "SUCH" AND "THEIR" IN THE ABOVE SENTENCE REFER TO?
+By refactoring our datatype API and improving its maintainability, future development will become possible, not only for external user datatypes, but also within NumPy.
 
 
-The need for a large refactor arise for multiple reasons.
-One of the main issue is the definition of typical functions (such as addition, multiplication, …) for "flexible" datatypes.
+The need for a large refactor arises for multiple reasons.
+One of the main issues is the definition of typical functions (such as addition, multiplication, …) for "flexible" datatypes.
+>After the above sentence, I was expecting something more on why the definition of the typical functions is an issue. Instead, the next next sentence feels like a whole new topic. 
 Such datatypes – for example the current fixed width strings – require additional steps to define that adding two strings of length four gives a string of length 8.
+>After reading this sentence many times, i think you are actually talking aout the issue mentioned earlier. But I would suggest to re-write it. It doesn't flow smoothly while reading.
 Similarly, a datatype such as a physical unit, must calculate the new unit information.
-A second major issue is that the current casting,
+>what new unit? write a bit more.
+A second major issue is that the current casting,and
 the conversion between different datatypes,
 is limited and behaves differently for user defined datatypes compared to NumPy
 datatypes.
+>Is it possible to give an example here? Or say why this is bad?
 
 Internally, datetimes, which have a unit, require monolithic code paths in many places hardcoding their correct support.
 While this works well enough for the limited usecase of datetimes within NumPy,
@@ -38,19 +44,21 @@ it is not accessible for external users and adds a maintenance burden.
 This burden is exacerbated by the exposure of internal structures,
 limiting even the development within NumPy,
 such as the addition of new sorting methods. 
-
-There are many aspects which limitat the creation of new user defined
+> Why are you suddenly talking about datetimes? Is this part of an example form before? If yes, then you have make it flow better. If not, then motivate why you're talking about datetimes now.
+There are many factors which limit the creation of new user defined
 datatypes:
 
-* The definition of casting for flexible user types is either impossible or so complex that it has never been attempted.
-* Type promotion, the operation deciding that adding float and integer values should return a float value, is very valuable for datatypes defined within NumPy but is limited in scope for user defined datatypes.
-* There is a general issue that most operation where multiple datatypes may interact, are written in a monolithic manner. This works well for the simple numerical types, but does not extend well even for the current strings and datetimes.
-* The current design means that a unit datatype is not able to define a ``.to_si()`` method to easily find the datatype which would represent the same values in SI units.
-* Datatypes wrapping existing python types would enable better and simple support for example for variable length strings, or arrays containing arbitrary precision numbers.
+* Creating casting rules for flexible user types is either impossible or so complex that it has never been attempted.
+* Type promotion, e.g. the operation deciding that adding float and integer values should return a float value, is very valuable for datatypes defined within NumPy, but is limited in scope for user defined datatypes.
+* There is a general issue that most operations where multiple datatypes may interact, are written in a monolithic manner. This works well for the simple numerical types, but does not extend well, even for current strings and datetimes.
+* In the current design, a unit datatype cannot have a ``.to_si()`` method to easily find the datatype which would represent the same values in SI units.
+
+
+>>>Datatypes wrapping existing python types would enable better and simple support for example for variable length strings, or arrays containing arbitrary precision numbers.
 
 The need to solve these issues is apparent in that there are multiple projects implementing physical units as an array-like class instead of a datatype, which would be the more natural solution.
 
-To address these issues in NumPy multiple development stages are required:
+To address these issues in NumPy, multiple development stages are required:
 
 * Phase I: Restructure and extend the datatype infrastructure 
 
