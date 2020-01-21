@@ -15,37 +15,40 @@ Abstract
 Datatypes in NumPy describe how to interpret each element in arrays.
 For the most part, NumPy provides the usual numerical types, as well as additional string and some datetime capabilities. 
 The growing Python community, however, has need for more more diverse datatypes.
-Examples are datatypes with unit information attached (such as meters) or categorical datatypes.
->WHAT ARE CATEGORICAL DATATYPES?
+Examples are datatypes with unit information attached (such as meters) or categorical datatypes (fixed set of possible values).
 However, the current NumPy datatype API is too limited to allow the creation
 of these.
-This NEP is the first step to enable such growth, and simplify their development
-by allowing new datatypes to be defined in Python instead of C.
->WHAT DOES "SUCH" AND "THEIR" IN THE ABOVE SENTENCE REFER TO?
-By refactoring our datatype API and improving its maintainability, future development will become possible, not only for external user datatypes, but also within NumPy.
+This NEP is the first step to enable such growth, it will lead to 
+a simpler developement of new datatypes with the aim that in the future
+datatypes can be defined in Python instead of C.
+By refactoring our datatype API and improving its maintainability,
+future development will become possible, not only for external user datatypes,
+but also within NumPy.
 
 
 The need for a large refactor arises for multiple reasons.
 One of the main issues is the definition of typical functions (such as addition, multiplication, …) for "flexible" datatypes.
->After the above sentence, I was expecting something more on why the definition of the typical functions is an issue. Instead, the next next sentence feels like a whole new topic. 
-Such datatypes – for example the current fixed width strings – require additional steps to define that adding two strings of length four gives a string of length 8.
->After reading this sentence many times, i think you are actually talking aout the issue mentioned earlier. But I would suggest to re-write it. It doesn't flow smoothly while reading.
-Similarly, a datatype such as a physical unit, must calculate the new unit information.
->what new unit? write a bit more.
-A second major issue is that the current casting,and
-the conversion between different datatypes,
+To operate on flexible datatypes these functions need additional steps.
+For example when adding two strings of length four, the result is a string
+of length 8, which is different from the input.
+Similarly, a datatype which has as a physical unit, must calculate the new unit information,
+dividing a distance by a time, results in a speed.
+A related major issue is that the current casting rules – the conversion between different datatypes –
 is limited and behaves differently for user defined datatypes compared to NumPy
 datatypes.
->Is it possible to give an example here? Or say why this is bad?
+> An example of why/how it differs, is a problem?
 
-Internally, datetimes, which have a unit, require monolithic code paths in many places hardcoding their correct support.
-While this works well enough for the limited usecase of datetimes within NumPy,
-it is not accessible for external users and adds a maintenance burden.
+NumPy currently has strings and datetimes as flexible datatypes.
+These, more than the other datatypes, require special code paths in otherwise
+generic code.
+For user defined datatypes, this is not accessible, but also within NumPy it
+means an increased complexity since the concerns of different datatypes
+are not well separated.
 This burden is exacerbated by the exposure of internal structures,
 limiting even the development within NumPy,
-such as the addition of new sorting methods. 
-> Why are you suddenly talking about datetimes? Is this part of an example form before? If yes, then you have make it flow better. If not, then motivate why you're talking about datetimes now.
-There are many factors which limit the creation of new user defined
+such as the addition of new sorting methods.
+
+Thus, there are many factors which limit the creation of new user defined
 datatypes:
 
 * Creating casting rules for flexible user types is either impossible or so complex that it has never been attempted.
@@ -54,9 +57,12 @@ datatypes:
 * In the current design, a unit datatype cannot have a ``.to_si()`` method to easily find the datatype which would represent the same values in SI units.
 
 
->>>Datatypes wrapping existing python types would enable better and simple support for example for variable length strings, or arrays containing arbitrary precision numbers.
-
-The need to solve these issues is apparent in that there are multiple projects implementing physical units as an array-like class instead of a datatype, which would be the more natural solution.
+The large need to solve these issues is apparent for example in the fact that
+there are multiple projects implementing physical units as an array-like
+class instead of a datatype, which would be the more natural solution.
+Similarly, Pandas has made a push into the same direction and undoubtedly
+the community would be best served if such new features could be common
+between NumPy, Pandas, and other projects.
 
 To address these issues in NumPy, multiple development stages are required:
 
@@ -80,13 +86,13 @@ To address these issues in NumPy, multiple development stages are required:
   * Allow strings to be used in functions such as ``np.equal`` or ``np.add``.
   * Removal of legacy code paths within NumPy to improve long term maintainability
 
-This document serves as an outline some general aspects mainly for phases I and II.
-It lists some general design considerations and some details on the current
+This document serves as an outline for aspects mainly for phases I and II.
+It lists general design considerations and some details on the current
 implementation designed to be the foundation for future NEPs.
 
 It should be noted that some of the benefits of a large refacor may only
 take effect after the full deprecation of the current, legacy, implementation.
-This will take years, however, this should not limit new developments and
+This will take years, however, this shall not limit new developments and
 is rather a reason to push forward with a more extensible API.
 
 
@@ -94,15 +100,14 @@ Explicite Decisions
 -------------------
 
 While largely an informational NEP serving as the basis for more technical proposals,
-accepting this NEP
-*represents a commitment from NumPy to move forward in a timely manner*.
+accepting this NEP *represents a commitment from NumPy to move forward in a timely manner*.
 This includes an agreement that finding good technical solutions
-may be more important then finding the best solution if it delays developement
-much.
+may be more important than finding the best solution.
 
-No large incompatibilities are expected due to these changes,
+No large incompatibilities are expected due to implementing the proposed changes,
 but some changes are acceptable.
-If these become more extensive then expected, a major release will be acceptable.
+If these become more extensive then expected, a major NumPy release is
+an acceptable solution, although the vast majority of users shall not be affected.
 
 It also defines some specific design goals (details in sections below):
   1. Each basic datatype should be a class with most logic being implemented
@@ -117,7 +122,7 @@ It also defines some specific design goals (details in sections below):
      possible. It should be identical, although may be more limited, to the
      API used to define the internal NumPy datatypes.
   5. The current numpy scalars will *not* be instances of datatypes.
-  6. It is desirable to create type specific object datatypes.
+
 
 
 Detailed Description
