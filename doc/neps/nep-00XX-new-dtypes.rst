@@ -158,10 +158,19 @@ information is currently provided and will be defined on the class:
 
 * ``is_native(self) -> Boolean`` method, and a corresponding attribute on the
   dtype instance.
-  * Instead of byteorder, we may want an ``is_native`` flag (we could just reuse the ISNBO flag – "is native byte order"), this flag signals that the data is stored in the default/canonical way. In practice this is always an NBO check, but generalization should be possible. A use case is a complex-conjugated instance of Complex which is a non-canonical representation, but may be native byte order).
+  * Instead of byteorder, we may want an ``is_native`` flag (we could just
+    reuse the ISNBO flag – "is native byte order"),
+    this flag signals that the data is stored in the default/canonical way.
+    In practice this is always an NBO check, but generalization should be possible.
+    A use case is a complex-conjugated instance of Complex which is a
+    non-canonical representation, but may be native byte order.
+
+* ``ensure_native(self) -> dtype`` return a new dtype, or new reference to ``self``,
+  the returned dtype must fullfill ``dtype.is_native() is True`` and be otherwise
+  identical.
 
 * ``DType.type`` is the associated scalar type, also ``dtype.type`` is defined
-  in the same way (and must be identical).
+  in the same way and must be identical.
 
 Additionally, existing methods (and C-side fields) will be provided, although
 fields such as the "kind" and and "char" may be set to invalid values on
@@ -188,9 +197,14 @@ Coercion to and from Python Objects
 Coercing to and from python scalars requires two functions:
 
 1. ``__dtype_setitem__(self, item_pointer, value)``
-2. ``__dtype_getitem__(self, item_pionter) -> object``
-3. ``__dtype_get_pyitem(self, item_pointer) -> object`` (initially hidden
-   for new style user defined datatypes, may be exposed on user request).
+2. ``__dtype_getitem__(self, item_pionter, base_obj) -> object``
+   The ``base_obj`` should be ignored normally, it is provided *only* for
+   memory management purposes, pointing to an object owning the data.
+   It exists only to allow support of structured datatypes with subarrays
+   within NumPy, which (currently) return views into the array.
+3. ``__dtype_get_pyitem(self, item_pointer, base_obj) -> object``
+   (initially hidden for new style user defined datatypes, may be exposed
+   on user request).
 
 This largely corresponds to the current definitions. Note the the last
 item may be hidden from user defined datatypes.
@@ -534,15 +548,36 @@ users will initially be limited in what casting functions they can provide
 The choice of using only the DType classes in the first step of finding the
 correct ``CastingImpl`` means that the default implementation of
 ``__common_dtype__`` has a reasonable definition of "safe casting" between
-DTypes available (although e.g. the concatenate operation using it may still
+DTypes classes (although e.g. the concatenate operation using it may still
 fail when attempting to find the actual common instance or cast).
 For this the inclusion of the ``casting="safe"`` argument is necessary,
 however, this does mean that both the ``CastingImpl`` and the methods
-have a notion of casting safety, thus duplicating the logic in two places.
+have a notion of casting safety, thus duplicating some of the logic in two places.
 For non-flexible DTypes both places hold the same information.
 
 Thus, it may be desirable to move this information into the ``CastingImpl``.
 **TODO: That is actually a good point, maybe I should change that right now :)**
+
+This split into two, in some sense distinct, steps may seem to add complexity
+rather than reduce it, while an alternative is to create a slot which
+answers the whether a ``float64`` can cast to ``float32``.
+This has two problems, however.
+First, we still require handling of (possibly
+mixed) dtype instances and DType classes.
+Second, it breaks the separation of concerns for user DTypes.
+A user ``Int24`` dtype may know how to cast to a ``ArbitraryWidthInteger``.
+However, in the above design it does not require any specific knowledge about
+``ArbitraryWidthInteger``, except how to create one sufficient for the casting
+task.
+If ``ArbitraryWidthInteger`` has smaller representations, even if added later on,
+it naturally provides the information that the cast is unsafe in the followup
+step.
+
+The main alternative to the proposed design is to move most of the information
+which is here pushed into the ``CastingImpl`` directly into methods
+on the DTypes. This, however, will not allow the close similarity between casting
+and universal functions. On the up side, it reduces the necessary indirection
+as noted below.
 
 
 **Notes:**
@@ -568,7 +603,127 @@ pass around a specialized casting function directly if so wished.
 C-Side API
 ^^^^^^^^^^
 
+.. note:: At the time of writing, this API is a general design goal.
+          Due to the size of the proposed changes, details and names will be
+          in flux and updated as necessary.
+
+DType creation
+""""""""""""""
+
 As already mentioned in NEP 33, the interface to define new DataTypes in C
 is modelled after the limited API in Python, the above mentioned slots,
-and some additional necessary information will thus 
+and some additional necessary information will thus be passed within a slots
+struct and identified by ``ssize_t`` integers::
 
+    static struct PyArrayMethodDef slots[] = {
+        {NPY_dt_method, method_implementation},
+        ...,
+        {0, NULL}
+    }
+
+    typedef struct{
+      PyTypeObject *typeobj;    /* type of python scalar */
+      int flexible;             /* Is the dtype flexible? */
+      int abstract;             /* Is the dtype abstract? */
+      int flags;                /* Currently only the "needs API" flag */
+      CastingImpl *within_dtype_castingimpl;  /* NULL if singleton instance */
+      PyType_Slot *slots;
+    } PyArrayDTypeMeta_Spec;
+
+    PyObject* PyArray_InitDTypeMetaFromSpec(
+            PyArray_DTypeMeta *user_dtype, PyArrayDTypeMeta_Spec *dtype_spec);
+
+all of this information will be copied during instantiation.
+
+The proposed method slots are (prepended with ``NPY_dt_``), these are
+detailed above and given here for summary:
+
+* ``is_native(self) -> {0, 1}``
+* ``ensure_native(self) -> dtype``
+* ``default_descr(self) -> dtype`` (return must be native and should normally be a singleton)
+* ``get_sort_function(self, NPY_SORTKIND sort_kind, void **out_sortfunction) -> success {-1, 0}``.
+  ``out_sortfunction`` may be ``NULL`` if the sort kind is unknown or not implemented.
+* ``setitem(self, char *item_ptr, PyObject *value) -> {-1, 0}``
+* ``getitem(self, char *item_ptr, PyObject (base_obj) -> object or NULL``
+* ``discover_descr_from_pyobject(cls, PyObject) -> dtype or NULL``
+* ``common_dtype(cls, other) -> DType, NotImplemented, or NULL``
+* ``common_instance(self, other) -> dtype or NULL``
+* ``can_cast_from_other(cls, DTypeMeta : other, casting="safe") -> CastingImpl``
+* ``can_cast_to_other(cls, DTypeMeta : other, casting="safe") -> CastingImpl``
+
+If not set, most slots are filled with slots which either error or defer automatically.
+Non-flexible dtypes do not have to implement:
+
+* ``discover_descr_from_pyobject`` (uses ``default_descr`` instead)
+* ``common_instance`` (uses ``default_descr`` instead)
+* ``ensure_native`` (uses ``default_descr`` instead)
+
+Which will be correct for most dtypes *which do not store metadata*.
+
+Other slots may be replaced by convenience versions, e.g. sorting methods
+can be defined by providing:
+
+* ``compare(self, char *item_ptr1, char *item_ptr2, int *res) -> {-1, 0}``
+  *TODO: We would like an error return, is this reasonable? (similar to old
+  python compare)*
+
+which uses generic sorting functionality.
+
+
+CastingImpl
+"""""""""""
+
+The external API for ``CastingImpl`` will be limited initially to defining:
+
+* ``adjust_descriptors(dtypes_in[2], dtypes_out[2], casting) -> int {0, -1}``
+* ``strided_loop(char **args, npy_intp *dimensions, npy_intp *strides, dtypes[2]) -> int {0, nonzero}`` (must currently succeed)
+
+This is identical to the proposed API for ufuncs. By default the two dtypes
+are passed in as the last argument. On error return (if no error is set) a
+generic error will be given. Note that right now users can only provide a contiguous
+loop.
+The iterator API currently does not currently support casting errors, this is
+a bug that needs to be fixed. While it is not fixed the loop should always
+succeed (return 0).
+
+Although verbose, the API shall mimic the one for creating a new DType.
+The ``PyArrayCastingImpl_Spec`` will include a field for ``dtypes`` and may
+be identical (or replaced by) the ``PyArrayUFuncImpl_Spec`` with some slots
+being ignored.
+
+**Note:** If it should proof simpler to initially only allow a contiguous
+loop, that is an acceptable alternative.
+
+
+Alternatives
+""""""""""""
+
+Aside from name changes, and possible signature tweaks, there seems few
+alternatives to the above structure.
+Keeping the creation process close the Python limited API has some advantage.
+Convenience functions could still be provided to allow creation with less
+code.
+The central point in the above design is that the enumerated slots design
+is extensible and can be changed without breaking binary compatibility.
+A downside is the possible need to pass in e.g. integer flags using a void
+pointer inside this structure.
+
+A downside of this is that compilers cannot warn about function
+pointer incompatibilities, there is currently no proposed solution to this.
+
+
+Issues
+""""""
+
+Any possible design decision will have issues, two of which should be mentioned
+here.
+The above split into Python objects has the disadvantage that reference cycles
+naturally occur, unless ``CastingImpl`` is bound every time it is returned.
+Although normally numpy DTypes are not expected to have a limited lifetime,
+this may require some thought.
+
+A second downside is that by splitting up the code into more natural and
+logical parts, some exceptions will be less specific.
+This should be alleviated almost entirely by exception chaining, although it
+is likely that the quality of some error messages will be impacted at least
+temporarily.

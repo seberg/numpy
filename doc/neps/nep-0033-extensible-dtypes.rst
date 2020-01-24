@@ -199,7 +199,7 @@ API [PEP-384]:
 
 .. code-block:: C
 
-    static struct PyArrayDtypeMethodDef slots[] = {
+    static struct PyArrayMethodDef slots[] = {
         {NPY_dt_method, method_implementation},
         ...,
         {0, NULL}
@@ -208,7 +208,7 @@ API [PEP-384]:
     typedef struct{
       PyTypeObject *typeobj;  /* type of python scalar */
       ...;
-      PyType_Slot *slots; /* terminated by slot==0. */
+      PyType_Slot *slots;
     } PyArrayDTypeMeta_Spec;
 
     PyObject* PyArray_InitDTypeMetaFromSpec(
