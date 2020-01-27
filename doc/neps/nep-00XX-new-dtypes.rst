@@ -14,7 +14,7 @@ Abstract
 
 NEP 33 detailed the need for the creation of a new datatype system within
 NumPy to serve downstream use cases better and improve the maintainability
-and extendability of NumPy itself.
+and the ability to extend NumPy.
 A main issue with the current dtype API is that datatypes are written as
 a single Python class with special instances for each of the actual datatypes.
 While this certainly has been a practical approach in implementing numerical
@@ -37,7 +37,7 @@ Note that only the implementation of both NEPs will provide the desired full
 functionality.
 The implementation may be possible in steps, however, there is little or no
 gain expected if only this proposal is implemented.
-On the other hand, this proposal is a prerequisit for the universal function
+On the other hand, this proposal is a prerequisite for the universal function
 improvements.
 
 
@@ -283,7 +283,7 @@ attribute is associated to each class.
 This will be cached globally to create a mapping (dictionary)
 ``knwon_python_types[type] = DType``.
 NumPy currently uses a small hard-coded a mapping and conversion of numpy scalars
-(inhereting from ``np.generic``) to achieve this, however, this forces a certain
+(inheriting from ``np.generic``) to achieve this, however, this forces a certain
 structure on the associated ``type``.
 
 Once the datatype is found (a step that is skipped if the user provides it),
@@ -332,7 +332,7 @@ the flag to disable registration when in doubt.
 
 Instead of a flag disabling the registration, it would be possible to define
 that only scalars of ``np.generic`` subclasses or with a ``dtype`` attribute
-may automatically map to a numpy dtype, and all other dtypes must be passes
+may automatically map to a NumPy dtype, and all other dtypes must be passes
 explicitly by the user.
 This removes the need to trust downstream packages to take care not to have
 the potential for modifying existing code.
@@ -372,7 +372,7 @@ Furthermore, it may be used to find the correct dtype to use for functions with
 different inputs (including universal functions).
 This includes an interesting distinction:
 
-1. Universal functions use the DType classes for disaptching, they thus
+1. Universal functions use the DType classes for dispatching, they thus
    require the common DType class (as a first step).
    While this can help with finding the correct loop to execute, the loop
    may not need the actual common dtype instance.
@@ -384,14 +384,14 @@ This includes an interesting distinction:
 **Implementation:**
 The implementation of the common dtype (instance) has some overlap with
 casting.
-Casting from a specific dtype (Float64) to another (String) needs to find
+Casting from a specific dtype (Float64) to a String needs to find
 the correct string length (a step that is mainly necessary for flexible dtypes).
 
 We propose the following implementation:
 
 1. ``__common_dtype__(cls, other : DTypeMeta) -> DTypeMeta`` answers what the common
    DType class is. It may return ``NotImplemented`` to defer to ``other``.
-   (For abstract DTypes the subtypes get precedence, concrete types are always
+   (For abstract DTypes, subclasses get precedence, concrete types are always
    leaves, so always get preference or are tried from left to right). 
 2. ``__common_instance__(self, other : cls) -> cls`` is used when two instances
    of the same DType are given. For builtin dtypes (that are not flexible), this
@@ -433,7 +433,7 @@ In cases of mixed DType (classes), it also adds an additional indirection
 into finding the common dtype.
 The common dtype (of two instances) could thus be implemented explicitly to avoid
 this indirection, potentially only as a fast-path.
-The above suggestion assumes that this is however not a speed relavent path,
+The above suggestion assumes that this is however not a speed relevant path,
 since in most cases, e.g. in array coercion, only a single python type (and thus
 dtype) is involved.
 
@@ -455,7 +455,7 @@ There mainly two distinctions:
    is necessary for current universal functions. 
 
 Casting from one dtype to another can be complex, and generally a casting
-functioni may not implement all details of each input datatype (such as
+function may not implement all details of each input datatype (such as
 non-native byte order or unaligned access).
 Thus casting naturally is performed in up to three steps:
 
@@ -480,7 +480,7 @@ Where the first case is also noted in NEP 33 as a design goal, since
 The implementation of casting should also come with as little duplicate
 implementation as necessary, i.e. to avoid unnecessary methods on the
 DTypes.
-Furthmore, it is desirable that casting is implemented similar to universal
+Furthermore, it is desirable that casting is implemented similar to universal
 functions.
 
 Analogous to the above, the following also need to be defined:
@@ -498,11 +498,12 @@ However, it is initially not necessary to expose to Python.
 
 The DTypes will have the two additional classmethods:
 
-* ``__can_cast_from_other__(cls, DTypeMeta : other, casting="safe") -> CastingImpl``
-* ``__can_cast_to_other__(cls, DTypeMeta : other, casting="safe") -> CastingImpl``
+* ``__can_cast_from_other__(cls, DTypeMeta : other) -> CastingImpl``
+* ``__can_cast_to_other__(cls, DTypeMeta : other) -> CastingImpl``
 
 These return a ``CastingImpl`` defined in more detail in the next section.
-And also answers the last question: ``np.can_cast(DType, OtherDType, "safe")``.
+It also answers the last question: ``np.can_cast(DType, OtherDType, "safe")``
+since ``CastingImpl`` defines a ``CastingImpl.cast_kind = "safe"``.
 
 The returned ``CastingImpl`` has a specific DType signature:
 ``CastingImpl[InputDtype, RequestedDtype]``.
@@ -545,18 +546,16 @@ users will initially be limited in what casting functions they can provide
 
 
 **Alternatives:**
+
 The choice of using only the DType classes in the first step of finding the
 correct ``CastingImpl`` means that the default implementation of
 ``__common_dtype__`` has a reasonable definition of "safe casting" between
 DTypes classes (although e.g. the concatenate operation using it may still
 fail when attempting to find the actual common instance or cast).
-For this the inclusion of the ``casting="safe"`` argument is necessary,
-however, this does mean that both the ``CastingImpl`` and the methods
-have a notion of casting safety, thus duplicating some of the logic in two places.
-For non-flexible DTypes both places hold the same information.
-
-Thus, it may be desirable to move this information into the ``CastingImpl``.
-**TODO: That is actually a good point, maybe I should change that right now :)**
+Initially, the thought was to add a ``casting="safe"`` argument to the methods.
+However, adding it as a special attribute to ``CastingImpl`` keeps the
+information in one place, and enables a default implementation for the
+``adjust_descriptors`` methods.
 
 This split into two, in some sense distinct, steps may seem to add complexity
 rather than reduce it, while an alternative is to create a slot which
@@ -584,7 +583,7 @@ as noted below.
 
 The above design combines the question of whether or not casting is possible
 with the casting functions themselves.
-In general returnin a ``CastingImpl`` should have very little overhead, since
+In general returning a ``CastingImpl`` should have very little overhead, since
 only a single ``Py_INCREF`` is needed.
 However, it does add one (or even more, since additional ``CastingImpl`` may
 be needed) indirections of getting a new object and calling another function.
@@ -675,6 +674,11 @@ CastingImpl
 
 The external API for ``CastingImpl`` will be limited initially to defining:
 
+* ``cast_kind`` attribute, which can be one of the supported casting kinds.
+  This is the safest cast possible. For example casting between two NumPy
+  strings is of course "safe" in general, but may be "same kind" in a specific
+  instance if the second string is shorter. If neither type is flexible this
+  ``adjust_descriptors`` must use it. 
 * ``adjust_descriptors(dtypes_in[2], dtypes_out[2], casting) -> int {0, -1}``
 * ``strided_loop(char **args, npy_intp *dimensions, npy_intp *strides, dtypes[2]) -> int {0, nonzero}`` (must currently succeed)
 
@@ -713,7 +717,7 @@ pointer incompatibilities, there is currently no proposed solution to this.
 
 
 Issues
-""""""
+^^^^^^
 
 Any possible design decision will have issues, two of which should be mentioned
 here.
@@ -727,3 +731,14 @@ logical parts, some exceptions will be less specific.
 This should be alleviated almost entirely by exception chaining, although it
 is likely that the quality of some error messages will be impacted at least
 temporarily.
+
+
+
+Discussion
+----------
+
+There is a large space of possible implementations with many discussions
+in various places, as well as initial thoughts and design documents.
+These are listed in the discussion of NEP 33 and not repeated here for
+brievaty.
+

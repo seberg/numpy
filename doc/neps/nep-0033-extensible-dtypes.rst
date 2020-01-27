@@ -75,29 +75,31 @@ To address these issues in NumPy, multiple development stages are required:
 
   * Make it possible to allow functions such as ``np.add`` to be extended by user defined datatypes such as Units.
   * Allow efficient lookup for the correct implementation for user defined datatypes.
-  * Enable simple definition of "promotion" rules. A Unit datatype should not need to list that it can be multiplied by: int8, int16, …, float16,… separately.
+  * Enable simple definition of "promotion" rules. This should include the ability
+    to reuse or fall back to existing rules for e.g. units, which, after resolving
+    and unit information, should behave the same as the numerical datatype used
+    to store the value.
 
-* Phase III: Growth of NumPy capabilities and Ecosystem
+* Phase III: Growth of NumPy and Scientific Python Ecosystem capabilities
 
-  * Cleanup of legacy behaviour in those parts where it is considered buggy
-    or undesired.
+  * Cleanup of legacy behaviour where it is considered buggy or undesired.
   * Easy definition of new datatypes in Python
   * Assist the community in creating types such as Units or Categoricals
   * Allow strings to be used in functions such as ``np.equal`` or ``np.add``.
   * Removal of legacy code paths within NumPy to improve long term maintainability
 
-This document serves as an outline for aspects mainly for phases I and II.
+This document serves as a basis mainly for phases I and II.
 It lists general design considerations and some details on the current
 implementation designed to be the foundation for future NEPs.
 
-It should be noted that some of the benefits of a large refacor may only
-take effect after the full deprecation of the current, legacy, implementation.
-This will take years, however, this shall not limit new developments and
+It should be noted that some of the benefits of a large refactor may only
+take effect after the full deprecation of the current, legacy implementation.
+This will take years. However, this shall not limit new developments and
 is rather a reason to push forward with a more extensible API.
 
 
-Explicite Decisions
--------------------
+Explicit Decisions
+------------------
 
 While largely an informational NEP serving as the basis for more technical proposals,
 accepting this NEP *represents a commitment from NumPy to move forward in a timely manner*.
@@ -105,23 +107,27 @@ This includes an agreement that finding good technical solutions
 may be more important than finding the best solution.
 
 No large incompatibilities are expected due to implementing the proposed changes,
-but some changes are acceptable.
-If these become more extensive then expected, a major NumPy release is
+ideally only requiring minor changes in downstream libraries on a similar scale
+to other updates in the recent past.
+If incompatibilities become more extensive then expected, a major NumPy release is
 an acceptable solution, although the vast majority of users shall not be affected.
+A transition requiring large code adaptation, similar to the Python 2 to 3
+transition is not anticipated and not covered by this NEP.
 
 It also defines some specific design goals (details in sections below):
-  1. Each basic datatype should be a class with most logic being implemented
-     as special methods on the class. In the C-API, these correspond to specific
-     slots.
-  2. The current datatypes will be instances of these classes. Anything defined
-     on the instance, will instead move to the class.
-  3. The UFunc machinery will be changed to replace the current dispatching
-     and type resolution system. The old system should be (mostly) supported
-     as a legacy version for some time. This should thus not affect most users.
-  4. Any new API provided to the user will hide implementation as much as
-     possible. It should be identical, although may be more limited, to the
-     API used to define the internal NumPy datatypes.
-  5. The current numpy scalars will *not* be instances of datatypes.
+
+1. Each basic datatype should be a class with most logic being implemented
+   as special methods on the class. In the C-API, these correspond to specific
+   slots.
+2. The current datatypes will be instances of these classes. Anything defined
+   on the instance, will instead move to the class.
+3. The UFunc machinery will be changed to replace the current dispatching
+   and type resolution system. The old system should be (mostly) supported
+   as a legacy version for some time. This should thus not affect most users.
+4. Any new API provided to the user will hide implementation as much as
+   possible. It should be identical, although may be more limited, to the
+   API used to define the internal NumPy datatypes.
+5. The current numpy scalars will *not* be instances of datatypes.
 
 
 
@@ -135,20 +141,22 @@ The current ecosystem has very few user defined datatypes using NumPy, the
 two most promient being: ``rational`` and ``quaternion``.
 These represent fairly simple datatypes which are not as strongly impacted
 but the current limitations.
-However, the current available for usertypes is in strong contrast to the need
-for datatypes such as:
+However, the number of currently available user defined datatypes
+is in strong contrast with the need for datatypes such as:
 
-* categorical types (and variations thereof)
+* categorical types
 * bfloat16, used in deep learning
 * physical units (such as meters)
-* extending integer dtypes to have a sentinel NA value
-* Geometrical objects [pygeos]_
+* extending e.g. integer dtypes to have a sentinel NA value
+* geometrical objects [pygeos]_
+* datatypes for tracing/automatic differentiation
+* high or arbitrary precision math
+* ….
 
-to name just a few examples.
-Some of these are partially solved, for example unit capability is provided
+Some of these are partially solved; for example unit capability is provided
 in ``astropy.units``, ``unyt``, or ``pint``. However, these have to subclass
-or wrap ``ndarray`` when special datatypes would provide a much more natural
-representation, and would immediately allow use within tools such as
+or wrap ``ndarray`` whereas special datatypes would provide a much more natural
+representation, and would immediately allow usage within tools such as
 ``xarray`` [xarray_dtype_issue]_ or Dask.
 The need for these datatypes has also already led to the implementation of
 ExtensionArrays inside pandas [pandas_extension_arrays]_.
@@ -169,12 +177,14 @@ This will also add the possibility to use ``isinstance(dtype, np.Float64)``
 thus removing the need to use ``dtype.kind``, ``dtype.char``, or ``dtype.type``
 to do this check.
 
-One side of this could include the creation of _abstract_ datatypes.
-These would be datatypes such as ``np.Floating``, representing any floating
-point number.
-These would serve a similar purpose as pythons ABCs to establish a class
-hierarchy.
-There would be no instance of these, however (thus the name _abstract_).
+If DTypes were full scale Python classes, the question of subclassing arises.
+But inheritance appear problematic and a complexity best avoided.
+To still define a class hierarchy and subclass order, a possible approach is to allow
+the creation of *abstract* datatypes.
+An example for an abstract datatype would be ``np.Floating``,
+representing any floating point number.
+These can serve the same purpose as Python's abstract base classes.
+
 
 
 C-API for creating new Datatypes
@@ -182,8 +192,9 @@ C-API for creating new Datatypes
 
 An important first step is to revise the current C-API with which users
 can create new datatypes.
-The current API is limited in scope, and uses user allocated structures, which
-makes it not extensible.
+The current API is limited in scope, and accesses user allocated structures,
+which means it not extensible since no new members can be added to the structure
+without losing binary compatibility.
 This has already limited the inclusion of new sorting methods into
 NumPy [new_sort]_.
 
@@ -193,8 +204,8 @@ Datatypes that currently exist and are defined using these slots will be
 supported for the time being by falling back to the old definitions, but
 will be deprecated.
 
-A _possible_ solution to hide the implementation from the user and thus make
-it extensible in the future is to model the API after pythons stable
+A *possible* solution is to hide the implementation from the user and thus make
+it extensible in the future is to model the API after Python's stable
 API [PEP-384]:
 
 .. code-block:: C
@@ -215,21 +226,22 @@ API [PEP-384]:
             PyArray_DTypeMeta *user_dtype, PyArrayDTypeMeta_Spec *dtype_spec);
 
 The C-side slots should be designed to mirror Python side methods
-such as ``dtype.__dtype_method__``, although the exposure to python may be
-a later step in the implementation.
+such as ``dtype.__dtype_method__``, although the exposure to Python may be
+a later step in the implementation to reduce the complexity of the initial
+implementation.
 
 
 Python level interface
 ^^^^^^^^^^^^^^^^^^^^^^
 
-While a python interface may be a second step, it is a main goal to implement
-one.
-For example, it is a specific design goal that for example the definition
+While a Python interface may be a second step, it is a main feature of this NEP
+to enable a Python interface and work towards it.
+For example, it is a specific long term design goal that the definition
 of a Unit datatype should be possible from within Python.
 Note that a Unit datatype can reuse much existing functionality, but needs
 to add additional logic to it.
 
-A second goal may be to allow defining new dtypes using type annotations:
+One approach, or additional API may be to allow defining new dtypes using type annotations:
 
 .. code-block:: python
 
@@ -245,20 +257,21 @@ to largely replace current structured datatypes.
 Issues and Design Considerations
 --------------------------------
 
-The following section shall list a few issues, and design considerations
-as an information and basis for future NEPs trying to tackle these.
+The following sections list issues and design considerations.
+These provide the necessary background information and a basis for
+future NEPs proposing specific technical designs.
 
 
 Flexible Datatypes
 ^^^^^^^^^^^^^^^^^^
 
-Some datatypes are inherently _flexible_.
+Some datatypes are inherently *flexible*.
 Flexible here means the values representable by the datatype depend on the
 specific instance.
 As an example, ``datetime64[ns]`` can represent partial seconds which
-``datetime64[s]`` cannot.
-Another example are fixed length strings, or a categorical datatype which
-needs to define the accepted values.
+``datetime64[s]`` cannot and ``"S8"`` can represent more strings than ``"S4"``.
+Further, a categorical datatype only accepts certain values, which differ for
+different instances.
 
 The basic numerical datatypes are naturally represented as non-flexible:
 Float64, Float32, etc. can all be specific dtypes [flexible_floating]_.
@@ -266,29 +279,32 @@ Float64, Float32, etc. can all be specific dtypes [flexible_floating]_.
 Flexible datatypes are interesting for two reasons:
 
 1. Although both datetimes above naturally have the same dtype class with
-   the instance only differing in their _unit_, a safe conversion is not
+   the instance only differing in their *unit*, a safe conversion is not
    necessarily possible.
-2. When writing code such as ``np.array(["string1", "string2"])``, NumPy
-   will currenlty find the correct string length.
-   This requires additional logic and complexity. It may or may not be desirable
-   to support this for user defined datatypes.
+2. When writing code such as ``np.array(["string1", 123.], dtype="S")``, NumPy
+   will attempt to find the correct string length by using ``str(123.0)``.
+   Without ``dtype="S"`` such behaviour is currently ill defined [gh-15327].
+   However, only the first form seems necessary to be supported, the form
+   without the DType class being passed should probably result in an error.
+   (Currently, ``"S"`` typically behaves like a new ``np.String`` class although it is
+   implemented as an ``"S0"`` instance.)
 
 
 Dispatching of Universal Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Currently the dispatching of universal functionsi (ufuncs) is limited for
+Currently the dispatching of universal function (ufuncs) is limited for
 user defined dtypes.
 Typically, this is done by finding the first loop for which all inputs can
-be cast to safely.
+be cast to safely
 (see also the current implementation section).
 
 However, in some cases this is problematic.
 For example the ``np.isnant`` function is currently only defined for
-datetime and timedelta even though integers are defined to be safely
+datetime and timedelta, even though integers are defined to be safely
 castable to timedelta.
 
-With respect to to user defined dtypes, this works largely similarly,
+With respect to to user defined dtypes, dispatching works largely similar,
 however, it enforces an exact match of the datetypes (type numbers).
 Because the current method is separate and fairly slow, it will also only check
 for loops for datatypes already existing in the inputs.
@@ -368,42 +384,47 @@ Scalars should not be instances of the datatypes
 
 For simple datatypes such as ``float64`` (see also below), it seems
 tempting that the instance of a ``np.dtype("float64")`` can be the scalar.
-This idea may be even more so prominent due to the fact that scalars,
-rather than datatypes, currently define the correct type hierarchy which
-also applies to the datatypes (see also below).
+This idea may be even more appealing due to the fact that scalars,
+rather than datatypes, currently define a useful type hierarchy.
 
 However, we have specifically decided against this.
 There are several reason for this.
-First, the above described new datatypes should would be instances of DType
-classes, making these also classes, while possible, adds an additional
-complexity for users to understand.
+First, the above described new datatypes would be instances of DType
+classes.
+Making these instances themselves classes, while possible, adds an additional
+complexity that users need to understand.
 Second, while the simple NumPy scalars such as ``float64`` may be such instances,
-it should be possible to create a ``DecimalDType``.
-Its instances would, however, would than be ``decimal.decimal`` instances,
-which knows nothing about NumPy, adding complexity rather than reducing it.
+it should be possible to create data types for Python objects without enforcing
+NumPy as a dependency.
+Python objects that do not depend on NumPy cannot be instances of a NumPy DType
+however.
 Third, methods which are useful for instances (such as ``to_float()``)
 cannot be defined for a datatype which is attached to a NumPy array.
-Forth, in the reverse direction, scalars are currently only defined for
+While at the same time scalars are currently only defined for
 native byte order and do not need many of the methods and information that
-generic datatypes need.
+generic datatypes require.
 
-Overall, it seem rather than reducing the complexity, e.g. by merging
-the two distinct type hierarchies, this would add complexity for the user.
+Overall, it seem rather than reducing the complexity, i.e. by merging
+the two distinct type hierarchies, making scalars instances of DTypes would
+add complexity for the user.
 
-A possible future path may be to rather simplify the current scalars to
-be much simpler objects falling back to behaviour defined on the datatypes
-instead.
+A possible future path may be to instead simplify the current NumPy scalars to
+be much simpler objects which largely derived their behaviour from the datatypes.
 
 
 Value Based Casting
 ^^^^^^^^^^^^^^^^^^^
 
-Currently, numpy uses the value when deciding whether casting is safe or not [value_based]_.
+Currently, NumPy uses the value when deciding whether casting is safe or not [value_based]_.
 This is done only when the object in question is a scalar or a zero dimensional
 array.
-The intention of changing this, is not explicitely part of this NEP, however,
-partial support of this behaviour for user defined datatypes is considered
-*unused legacy behaviour and may be dropped*.
+The intention of changing this is not part of this NEP.
+Even though it is not part of the NEP the intention is to take steps which
+will allow limiting the current value based casting to only encompass Python
+scalars in the future
+(e.g. a python float ``3.`` will use it, but a NumPy ``np.float64(3.)`` will not).
+Currently, such behaviour is partially supported even for user defined datatype.
+*This support for user defined datatypes is considered unused legacy behaviour and may be removed without a transition period*.
 
 
 The Object Datatype
@@ -411,10 +432,11 @@ The Object Datatype
 
 The object datatype currently serves as a generic fallback for any value
 which is not representable otherwise.
-However, due to not having a well defined type, it has some issues for
-example when sequences are included into the array.
-It also means that certain functions such as ``isnan()`` or ``conjugate()``
-do not work for an array holding decimal values.
+However, due to not having a well defined type, it has some issues,
+for example when an array is filled with Python sequences.
+Further, without a well defined type, functions such as ``isnan()`` or ``conjugate()``
+do not necessarily work for example for an array holding decimal values since they cannot
+use ``decimal.Decimal`` specific API.
 To improve this situation it seems desirable to make it easy to create
 object dtypes with a specific python datatype.
 This is listed here specifically, for two reasons:
@@ -422,29 +444,43 @@ This is listed here specifically, for two reasons:
 1. Object datatypes require reference counting, which adds complexity to
    which we may not want to (initially) hide from general user defined datatypes.
 2. In many use-cases it seems likely that a generic type specific solution
-   can be sufficient to improve type safety in user-code (e.g. by specfying
+   can be sufficient to improve type safety in user-code (e.g. by specifying
    that an array will only hold such ``decimal.Decimal`` objects.)
 
 However, the actual implementation of this may be part of the future development
 in Phase III.
+Creating python datatypes for generic Python objects comes with certain issues
+that require more thoughts and discussion, independently from the implementation
+of this NEP:
+
+* NumPy currently returns *scalars* even for array input in some cases, in most
+  cases this works seamlessly. However, this is only true because the NumPy
+  scalars behave much like NumPy arrays, a feature that general Python objects
+  do not have.
+* Seamless integration probably requires that ``np.array(scalar)`` finds the
+  correct DType automatically since some operations (such as indexing) are
+  always desired to return the scalar.
+  This is problematic if multiple users independently decide to implement
+  for example a DType for ``decimal.Decimal``.
 
 
 Current Implementation
 ----------------------
 
-These section give a very brief overview of the current implementation, it is
-not meant to be a comprehensive explenatation.
+These secitons give a very brief overview of the current implementation, it is
+not meant to be a comprehensive explanation, but a basic reference for further
+technical NEPs.
 
 Current ``dtype`` Implementation
 """"""""""""""""""""""""""""""""
 
 Currently ``np.dtype`` is a Python class with its instances being the
 ``np.dtype(">float64")``, etc. instances.
-To set the actual behaviour of these instances, a protopye instance is stored
-globally and looke dup based on the ``dtype.typenum``.
-This prototype instance is then copied (if necessary) and adjust for byte
-swapping, or for example to support the string datatype which needs to store
-the length.
+To set the actual behaviour of these instances, a prototype instance is stored
+globally and looked up based on the ``dtype.typenum``.
+This prototype instance is then copied (if necessary) and modified for
+endianess or to support the string datatype which needs to additionally store
+the maximum string length.
 
 Many datatype specific functions are defined within a C structure called
 ``ArrayFuncs``, which is part of each ``dtype`` instance.
@@ -456,14 +492,19 @@ We believe that some of the functionality currently defined here should not
 be defined as part of the datatype but rather in a seperate (generalized)
 ufunc.
 
-A further issue with the current implementation is that instead of working
-like Python methods, most of these functions are not provided with an instance
-of the dtype when called, but instead of the array.
-However, generally the array passed in is solely used to extract the datatype
-again.
-**We believe that it is sufficient for backward compatibility if the original
+A further issue with the current implementation is that unlike methods
+they are not passed an instance of the dtype when called – thus behaving more
+like static methods.
+Instead in many cases the array which is being operated on is passed.
+This array is typically only used to extract the datatype again..
+*We believe that it is sufficient for backward compatibility if the original
 array is not passed in, but instead the passed in object only supports the
-extraction of the datatype.**
+extraction of the datatype.* In many cases alignment information of the array
+may be important and set as well.
+These may be passed in explicitly in the future where necessary.
+Aside from the decision that it is acceptable to not include the full
+original array object this is not part of this NEP, it should be noted that
+some casting methods already use a similar simplification.
 
 
 NumPy Scalars and Type Hierarchy
@@ -484,8 +525,9 @@ Current Implementation of Casting
 
 One of the main features which datatypes need to support is casting between one another using ``arr.astype(new_dtype, casting="unsafe")``, or while executing ufuncs with different types (such as adding integer and floating point numbers).
 
-The definition of whether or not casting is possible is mainly done in monolithic
-logic and by the use of casting tables.
+The decision of whether or not casting is possible is mainly done in monolithic
+logic using casting tables where applicable; in particular casting tables
+cannot handle the flexible datatypes: strings, void/structured, datetimes.
 
 The actual casting has two distinct parts:
 
@@ -496,84 +538,74 @@ The actual casting has two distinct parts:
 
 When casting (small) buffers will be used when necessary,
 using the first ``copyswapn`` to ensure that the second ``castfunc`` can handle the data.
-A general may thus implement the casting chain of the three functions
+Generally NumPy will thus perform the casting as chain of the three functions
 ``in_copyswapn -> castfunc -> out_copyswapn``.
 
 However, while user types use only these definitions,
-almost all actual casting uses a monolithic code which may or may not combine the above functions.
-This specific code uses specialized implementations for various memory layout
-similar, but not identical, to specialized universal function inner loops.
+almost all actual casting uses a second implementation which may or may not
+combine the above functions.
+This second implementation uses specialized implementations for various memory
+layouts and optimizes most NumPy datatypes.
+This works similar but not identical to specialized universal function inner loops.
 
 
 DType code for Universal functions
 """"""""""""""""""""""""""""""""""
 
-Universal functions are implemented as UFunc objects with an ordered
+Universal functions are implemented as ufunc objects with an ordered
 list of datatype specific (based on the type number, not datatype instances)
 implementations:
-These are listed as ``ufunc.types``, using C-style typecodes.
-For example:
-```
->>> np.add.types
-[...,
- 'll->l',
- ...,
- 'dd->d',
- ...]
-```
+This list of implementations can be seen with ``ufunc.types`` where
+all implementations are listed with their C-style typecodes.
+For example::
+
+    >>> np.add.types
+    [...,
+     'll->l',
+     ...,
+     'dd->d',
+     ...]
+
 Each of these types is associated with a single inner-loop function defined
 in C, which does the actual calculation, and may be called multiple times.
 
 The main step in finding the correct inner-loop function is to call a
-``TypeResolver`` which is passed the input dtypes (in form of the actual input
+``TypeResolver`` which recieves the input dtypes (in the form of the actual input
 arrays) and will find the full type signature to be executed.
 
-By default the ``TypeResolver`` is implemented by searching all in
-order and stopping as soon as all inputs can be safely cast to fit to the
+By default the ``TypeResolver`` is implemented by searching all of the implementations
+listed in ``ufunc.types`` in order and stopping if all inputs can be safely cast to fit to the
 current inner-loop function.
 This means that if long (``l``) and double (``d``) arrays are added,
-numpy will find that the ``'dd->d'`` defintion works
+numpy will find that the ``'dd->d'`` definition works
 (long can safely cast to double) and uses that.
 
-In some cases this is not desirable, for example the ``np.isnat`` universal
+In some cases this is not desirable. For example the ``np.isnat`` universal
 function has a ``TypeResolver`` which rejects integer inputs instead of
 allowing them to be cast to float.
-In principle downstream projects can currently use their own non-default
+In principle, downstream projects can currently use their own non-default
 ``TypeResolver``, since the corresponding C-structure necessary to do this
 is public.
-The only project known to do this is Astropy, and it is willing to adapt if
-necessary.
+The only project known to do this is Astropy, which is willing to switch to
+a new API if NumPy were to remove the possibility to replace the TypeResolver.
 
 A second step necessary for flexible dtypes is currently performed within
 the ``TypeResolver``:
-the datetime and timedelta datatypes have to decide on the correct unit for
+i.e. the datetime and timedelta datatypes have to decide on the correct unit for
 the operation and output array.
 While this is part of the type resolution as of now,
-it can be seen as separate step which find the correct dtype instances,
-after deciding on the dtype class (i.e. the type number in current NumPy).
-This step can actually occur after deciding which loop to run and may be part
-of the generally necessary check that all inputs can be cast if necessary.
+it can be seen as separate step, which finds the correct dtype instances.
+This separate step occurs only after deciding on the DType class
+(i.e. the type number in current NumPy).
 
 For user defined datatypes, the logic is similar, although separately
 implemented.
 It is currently only possible for user defined functions to be found/resolved
-if any of the inputs (or the output) has the user datatype.
+if any of the inputs (or the outputs) has the user datatype.
+(For example ``fraction_divide(int, int) -> Fraction`` could be implemented
+currently, because ``fraction_divide(4, 5)`` will fail, requiring the user
+to provide more information.)
 
-
-Notes on Casting and DType Discovery
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The design presented here means that DType classes are first class objects and finding the correct DType class always happens first both for coercion from python and when finding the correct ``UFuncImpl`` to call.
-
-For non-flexible DTypes, the second step is trivial, since they have a canonical implementation (if there is only a single instance, that one should be typically used for backward compatibility though). For flexible DTypes a second pass is needed, this is either an ``adjust_dtypes`` step within UFuncs, or ``__discover_descr_from_pyobject__`` when coercing within ``np.array``. For the latter, this generally means a second pass is necessary for flexible dtypes (although it may be possible to optimize that for common cases). In this case the ``__common_instance__`` method has to be used as well.
-
-There is currently an open question whether ``adjust_dtypes`` may require the values in some cases. This is currently *not* strictly necessary (with the exception that ``objarr.astype("S")`` will use coercion rather than casting logic, a special case that needs to remain). It could be allowed by giving ``adjust_dtypes`` the input array in certain cases. For the moment it seems preferable to avoid this, if such a discovery step is required, it will require a helper function:
-
-.. code-block:: python
-
-    arr = np.random.randint(100, size=1000)
-    categorical = find_categorical_dtype(arr)
-    cat_array = arr.astype(categorical)  # may error if arr was mutated
 
 
 Related Changes
@@ -584,8 +616,14 @@ which are only partially tied to the general refactor.
 
 **Stricter array rules for dtype discovery**
 
-When coercing arrays with ``np.array`` and related functions, numpy currently uses ``isinstance(pyobj, float)`` logic (user types do not have this ability, they can only automatically be discovered from numpy scalars). In general, user dtypes should be capable of ensuring that specific input is coerced correctly.
-However, in general these should be exact types and not ``isinstance`` checks. A python float subclass, could have a completely different meaning and should generally viewed as a ``"float64"`` dtype. Instead, the current ``isinstance`` checks should become a fallback discovery mechanisms and *be deprecated*.
+When coercing arrays with ``np.array`` and related functions, numpy currently uses
+``isinstance(pyobj, float)`` logic.
+User types do not have this ability, they can only automatically be discovered from NumPy scalars.
+In general, user DTypes should be capable of ensuring that specific input is coerced correctly.
+However, these should be exact types and not ``isinstance`` checks.
+For example a python float subclass can for example have a Unit attached and thus
+should not be silently cast to a ``"float64"`` dtype.
+Instead, the current ``isinstance`` checks should become a fallback discovery mechanisms and *be deprecated*.
 
 
 
@@ -595,11 +633,14 @@ Related Work
 * Julia has similar split of abstract and concrete types [julia-types]_. 
 
 * In Julia promotion can occur based on abstract types. If a promoter is
-  defined, it will be called and then retry the resolution [julia-promotion]_.
+  defined, it will cast the inputs and then Julia can then retry to find
+  an implementation with the new values [julia-promotion]_.
 
-* ``xnd-project`` https://github.com/xnd-project) with ndtypes and gumath
+* ``xnd-project`` (https://github.com/xnd-project) with ndtypes and gumath
 
-  *  Different in that it does not use promotion at all.
+  * The ``xnd-project`` solves a similar project, however, it does not use
+    casting during function execution, so that it does not require a promotion
+    step.
 
 
 Backward compatibility
@@ -622,9 +663,9 @@ we anticipate, and accept the following changes:
 Existing ``PyArray_Descr`` fields
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Although not extensively used outside of NumPy itself, the currentl
+Although not extensively used outside of NumPy itself, the currently
 ``PyArray_Descr`` is a public structure.
-This is especially also true for the ``ArrFunctions`` strcuture stored in
+This is especially also true for the ``ArrFunctions`` structure stored in
 the ``f`` field. 
 Due to compatibility they may need remain supported for a very long time,
 with the possibility of replacing them by functions that dispatch to a newer API.
@@ -639,13 +680,15 @@ Open Issues
 
 ``np.load`` (and others) currently translate all extension dtypes to void dtypes.
 This means they cannot be stored using the ``npy`` format.
-Similar issues probably exist with the buffer interface.
+If we wish to add support for ``npy`` format in user datatypes, a new protocol
+will have to be designed to achieve this.
 
-In some cases, the only option would be to raise an error instead of silently
-converting the data.
-For saving arrays we may have to force pickling right now,
-although we could store known dtypes and force users to simply import that library first?
-
+The additional existence of masked arrays and especially masked datatypes
+within Pandas has the interesting implications of interoperability.
+Even though NumPy itself may never have true support for masked values,
+the datatype system could grow it.
+This means support for datatypes where the actual mask information is not
+stored as part of the datatype, but as part of a bit array in the array object.
 
 
 Discussion
@@ -653,15 +696,16 @@ Discussion
 
 The above document is based on various ideas, suggestions, and issues many
 of which have come up more than once.
-As such it is difficult 
+As such it is difficult to make a complete list of discussions, the following
+lists a subset of more recent ones:
 
 * Draft on NEP by Stephan Hoyer after a developer meeting (was updated on the next developer meeting) https://hackmd.io/6YmDt_PgSVORRNRxHyPaNQ
 
-* List of related documents gathered previousl here https://hackmd.io/UVOtgj1wRZSsoNQCjkhq1g (TODO: Reduce to the most important ones):
+* List of related documents gathered previously here https://hackmd.io/UVOtgj1wRZSsoNQCjkhq1g (TODO: Reduce to the most important ones):
 
   * https://github.com/numpy/numpy/pull/12630
 
-    * Matti's NEP, discusses the technical side of subclassing  more from the side of ``ArrFunctions``
+    * Matti Picus NEP, discusses the technical side of subclassing  more from the side of ``ArrFunctions``
 
   * https://hackmd.io/ok21UoAQQmOtSVk6keaJhw and https://hackmd.io/s/ryTFaOPHE
 
@@ -671,7 +715,7 @@ As such it is difficult
 
   * 2018-11-30 developer meeting notes: https://github.com/BIDS-numpy/docs/blob/master/meetings/2018-11-30-dev-meeting.md and subsequent draft for an NEP: https://hackmd.io/6YmDt_PgSVORRNRxHyPaNQ
 
-    * BIDS Meeting on November 30, 2018 and document by Stephan Hoyer about what numpy should provide and thoughts of how to get there. Meeting with Eric Wieser, Matti Pincus, Charles Harris, and Travis Oliphant.
+    * BIDS Meeting on November 30, 2018 and document by Stephan Hoyer about what numpy should provide and thoughts of how to get there. Meeting with Eric Wieser, Matti Pincus, Charles Harris, Tyler Reddy, Stéfan van der Walt, and Travis Oliphant. (TODO: Full list of people?)
     * Important summaries of use cases.
 
   * SciPy 2018 brainstorming session: https://github.com/numpy/numpy/wiki/Dtype-Brainstorming
