@@ -128,7 +128,10 @@ It also defines some specific design goals (details in sections below):
    possible. It should be identical, although may be more limited, to the
    API used to define the internal NumPy datatypes.
 5. The current numpy scalars will *not* be instances of datatypes.
-
+6. The import of additional datatypes shall *not* change behaviour of programs
+   (unless done so intentionally or "maliciously").
+   This must not occur even if that behaviour is well defined.
+   **TODO: This one is very important, make sure it is listed below**.
 
 
 Detailed Description

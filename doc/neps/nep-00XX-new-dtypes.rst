@@ -417,28 +417,42 @@ Even if tempted, the above Float64 cannot assume it knows how to step 3 correctl
 
 
 **Note:**
-The common type operation cannot be simplifies to using only safe casting
+
+The common type operation cannot be simplified to using only safe casting
 logic.
 As a fall-back testing whether one of the inputs can be safely cast to the
-other could be used when no specific ``__common_dtype__`` is imlemented.
+other could be used when no specific ``__common_dtype__`` is implemented.
 However, this does not allow for the case of::
 
     np.promote_types("int64", "float32") -> np.dtype("float64")
 
+However, *if one DType can be safely cast to the other this should also be
+the common DType*. The operation is mainly required because the common dtype
+will often be neither of the inputs.
+
+If a "safe casting" fallback is desired (the default implementation),
+this has to be implemented by the overriding implementation.
 
 **Alternatives:**
+
 The use of casting for common dtype (instance) neatly separates the concerns
 and allows for a minimal set of duplicate functionality being implemented.
 In cases of mixed DType (classes), it also adds an additional indirection
 into finding the common dtype.
 The common dtype (of two instances) could thus be implemented explicitly to avoid
 this indirection, potentially only as a fast-path.
-The above suggestion assumes that this is however not a speed relevant path,
+The above suggestion assumes that this is, however, not a speed relevant path,
 since in most cases, e.g. in array coercion, only a single python type (and thus
 dtype) is involved.
-
-The proposed design however hinges in the implementation of casting to be
+The proposed design hinges in the implementation of casting to be
 separated into its own ufunc-like object as described below.
+
+In principle common DType could be defined only based on "safe casting" rules,
+if we order all DTypes and find the first one both can cast to safely.
+However, the issue with this approach is that a newly added DType can change
+the behaviour of an existing program. For example, a new ``int24`` would be
+the first valid common type for ``int16`` and ``uint16``, demoting the currently
+defined behaviour of ``int32``.
 
 
 Casting
