@@ -81,7 +81,7 @@ these are not dtypes but the corresponding scalar classes
 
 
 Hierarchy of DataTypes and Abstract DTypes
-------------------------------------------
+""""""""""""""""""""""""""""""""""""""""""
 
 **Motivation:**
 The creation of a DType classes has already been decided in NEP 33.
@@ -130,7 +130,7 @@ and extensible interface.
 
 
 Methods/Slots defined for each DType
-------------------------------------
+""""""""""""""""""""""""""""""""""""
 
 NEP 33 detailed that all logic should be defined through special methods
 on the DTypes.
@@ -518,6 +518,12 @@ the cast within the same DType (from one instance to another).
 A DType which does not define this, must have only a single implementation
 and not be flexible.
 
+DTypes such as a Unit datatype, wrapping an existing Numerical datatype *must*
+be able to access these ``CastingImpl``.
+The will be able to wrap and modify them as necessary. This means that
+a DType which wraps another can automatically define casts for any DType it
+knows at construction time (see also Alternatives).
+
 These return a ``CastingImpl`` defined in some more detail in the next section.
 It also answers the last question: ``np.can_cast(DType, OtherDType, "safe")``
 since ``CastingImpl`` defines a ``CastingImpl.cast_kind = "safe"``.
@@ -599,6 +605,8 @@ problematic. As an example two different ``Float64WithUnit`` implementations
 both could infer that they can unsafely cast between one another when in fact
 some conbinations should cast safely or preserve the Unit (both of which the
 "base" ``Float64`` would discard).
+In the proposed implementation this is not possible, since the two implementations
+are not aware of each other.
 
 
 **Notes:**
@@ -640,7 +648,8 @@ struct and identified by ``ssize_t`` integers::
       int flexible;             /* Is the dtype flexible? */
       int abstract;             /* Is the dtype abstract? */
       int flags;                /* Currently only the "needs API" flag */
-      CastingImpl *castingimpls[];  /* NULL terminated */
+      /* NULL terminated CastingImpl; is copied and references are stolen */
+      CastingImpl *castingimpls[];
       PyType_Slot *slots;
     } PyArrayDTypeMeta_Spec;
 
@@ -704,12 +713,23 @@ a bug that needs to be fixed. While it is not fixed the loop should always
 succeed (return 0).
 
 Although verbose, the API shall mimic the one for creating a new DType.
-The ``PyArrayCastingImpl_Spec`` will include a field for ``dtypes`` and may
-be identical (or replaced by) the ``PyArrayUFuncImpl_Spec`` with some slots
-being ignored.
+The ``PyArrayCastingImpl_Spec`` will include a field for ``dtypes`` and largely
+identical to a ``PyArrayUFuncImpl_Spec``::
+
+    typedef struct{
+      NPY_CASTING casting;           /* maximum casting safety defined */
+      int needs_api;                 /* whether the cast requires the API */
+      PyArray_DTypeMeta *in_dtype;   /* input DType class */
+      PyArray_DTypeMeta *out_dtype;  /* output DType class */
+      /* NULL terminated slots defining the methods */
+      PyType_Slot *slots;
+    } PyArrayCastingImpl_Spec;
 
 **Note:** If it should proof simpler to initially only allow a contiguous
 loop, that is an acceptable alternative.
+
+The slots/methods used will be prefixed ``NPY_uf_`` for similarity to the ufunc
+machinery.
 
 
 Alternatives
@@ -736,7 +756,7 @@ Any possible design decision will have issues, two of which should be mentioned
 here.
 The above split into Python objects has the disadvantage that reference cycles
 naturally occur, unless ``CastingImpl`` is bound every time it is returned.
-Although normally numpy DTypes are not expected to have a limited lifetime,
+Although normally Numpy DTypes are not expected to have a limited lifetime,
 this may require some thought.
 
 A second downside is that by splitting up the code into more natural and
@@ -745,6 +765,20 @@ This should be alleviated almost entirely by exception chaining, although it
 is likely that the quality of some error messages will be impacted at least
 temporarily.
 
+
+Implementation
+--------------
+
+Internally a few implementation details have to be decided. These will be
+fully opaque to the user and can be changed at a later time.
+
+This includes:
+
+* How ``CastingImpl`` lookup, and thus the decision whether a cast is possible,
+  is defined. (This is speed relevant, although mainly during a transition
+  phase where UFuncs where NEP YY is not yet implemented).
+  Thus, it is not very relevant to the NEP. It is only necessary to ensure fast
+  lookup during the transition phase for the current builtin Numerical types.
 
 
 Discussion
