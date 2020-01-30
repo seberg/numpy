@@ -508,18 +508,21 @@ The question of ``np.can_cast(DType, OtherDType, "safe")`` is also possibly
 and may be used internally.
 However, it is initially not necessary to expose to Python.
 
+
 **Implementation:**
 
-The DTypes will have the two additional classmethods:
+During DType creation, DTypes will have the ability to pass a list of
+``CastingImpl`` objects, which can define casting to and from the DType.
+One of these ``CastingImpl`` objects is special because it should define
+the cast within the same DType (from one instance to another).
+A DType which does not define this, must have only a single implementation
+and not be flexible.
 
-* ``__can_cast_from_other__(cls, DTypeMeta : other) -> CastingImpl``
-* ``__can_cast_to_other__(cls, DTypeMeta : other) -> CastingImpl``
-
-These return a ``CastingImpl`` defined in more detail in the next section.
+These return a ``CastingImpl`` defined in some more detail in the next section.
 It also answers the last question: ``np.can_cast(DType, OtherDType, "safe")``
 since ``CastingImpl`` defines a ``CastingImpl.cast_kind = "safe"``.
 
-The returned ``CastingImpl`` has a specific DType signature:
+Each ``CastingImpl`` has a specific DType signature:
 ``CastingImpl[InputDtype, RequestedDtype]``.
 Additionally, it will have one more method::
 
@@ -566,25 +569,19 @@ correct ``CastingImpl`` means that the default implementation of
 ``__common_dtype__`` has a reasonable definition of "safe casting" between
 DTypes classes (although e.g. the concatenate operation using it may still
 fail when attempting to find the actual common instance or cast).
-Initially, the thought was to add a ``casting="safe"`` argument to the methods.
-However, adding it as a special attribute to ``CastingImpl`` keeps the
-information in one place, and enables a default implementation for the
-``adjust_descriptors`` methods.
 
-This split into two, in some sense distinct, steps may seem to add complexity
-rather than reduce it, while an alternative is to create a slot which
-answers the whether a ``float64`` can cast to ``float32``.
-This has two problems, however.
-First, we still require handling of (possibly
-mixed) dtype instances and DType classes.
-Second, it breaks the separation of concerns for user DTypes.
-A user ``Int24`` dtype may know how to cast to a ``ArbitraryWidthInteger``.
-However, in the above design it does not require any specific knowledge about
-``ArbitraryWidthInteger``, except how to create one sufficient for the casting
-task.
-If ``ArbitraryWidthInteger`` has smaller representations, even if added later on,
-it naturally provides the information that the cast is unsafe in the followup
-step.
+The split into multiple steps may seem to add complexity
+rather than reduce it, however, it consolidates that we have the two distinct
+signatures of ``np.can_cast(dtype, DTypeClass)`` and ``np.can_cast(dtype, other_dtype)``.
+Further, the above API guarantees the separation of concerns for user DTypes.
+A user ``Int24`` dtype may know how to cast to a ``ArbitraryWidthInteger``,
+but does not require any specific knowledge about ``ArbitraryWidthInteger``.
+``Int24`` is allowed to cast to *any* ``ArbitraryWidthInteger`` which is knows
+to be safe and NumPy will then ask ``ArbitraryWidthInteger`` to cast to the
+specifically requested instance.
+If ``ArbitraryWidthInteger`` has smaller representations, even ones that ``Int24``
+does not know exist,
+this provides the information that the cast is unsafe in the followup step.
 
 The main alternative to the proposed design is to move most of the information
 which is here pushed into the ``CastingImpl`` directly into methods
@@ -592,18 +589,19 @@ on the DTypes. This, however, will not allow the close similarity between castin
 and universal functions. On the up side, it reduces the necessary indirection
 as noted below.
 
+An initial proposal defined two methods ``__can_cast_to__(self, other)``
+to dynamically return ``CastingImpl``.
+The advantage of this addition is that it removes the requirement to know all
+possible casts at DType creation time (of one of the involved DTypes).
+Such API could be added at a later time. It should be noted, however,
+that it would be mainly useful for inheritance like logic, which can be
+problematic. As an example two different ``Float64WithUnit`` implementations
+both could infer that they can unsafely cast between one another when in fact
+some conbinations should cast safely or preserve the Unit (both of which the
+"base" ``Float64`` would discard).
+
 
 **Notes:**
-
-The above design combines the question of whether or not casting is possible
-with the casting functions themselves.
-In general returning a ``CastingImpl`` should have very little overhead, since
-only a single ``Py_INCREF`` is needed.
-However, it does add one (or even more, since additional ``CastingImpl`` may
-be needed) indirections of getting a new object and calling another function.
-It could be possible add fast-path special cases which just answer
-``np.can_cast`` and in most cases a ``np.can_cast`` is followed by the
-actual cast.
 
 The proposed ``CastingImpl`` this designed to be compatible with the
 ``UFuncImpl`` proposed in NEP YY.
@@ -611,6 +609,9 @@ While initially it will be a distinct object, the aim is that ``CastingImpl``
 can be a subclass of ``UFuncImpl``.
 Once this happens, this will naturally allow the use of a ``CastingImpl`` to
 pass around a specialized casting function directly if so wished.
+
+In the future, we may considering adding a way to spell out that specific
+casts are known to be *not* possible.
 
 
 C-Side API
@@ -639,7 +640,7 @@ struct and identified by ``ssize_t`` integers::
       int flexible;             /* Is the dtype flexible? */
       int abstract;             /* Is the dtype abstract? */
       int flags;                /* Currently only the "needs API" flag */
-      CastingImpl *within_dtype_castingimpl;  /* NULL if singleton instance */
+      CastingImpl *castingimpls[];  /* NULL terminated */
       PyType_Slot *slots;
     } PyArrayDTypeMeta_Spec;
 
@@ -661,8 +662,6 @@ detailed above and given here for summary:
 * ``discover_descr_from_pyobject(cls, PyObject) -> dtype or NULL``
 * ``common_dtype(cls, other) -> DType, NotImplemented, or NULL``
 * ``common_instance(self, other) -> dtype or NULL``
-* ``can_cast_from_other(cls, DTypeMeta : other, casting="safe") -> CastingImpl``
-* ``can_cast_to_other(cls, DTypeMeta : other, casting="safe") -> CastingImpl``
 
 If not set, most slots are filled with slots which either error or defer automatically.
 Non-flexible dtypes do not have to implement:
