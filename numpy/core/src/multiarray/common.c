@@ -81,6 +81,12 @@ _array_find_python_scalar_type(PyObject *op)
  * PyArray_DTypeFromObject encountered a string type, and that the recursive
  * search must be restarted so that string representation lengths can be
  * computed for all scalar types.
+ *
+ * DEPRECATED NumPy 19.0, 2020-03
+ * The use of RETRY_WITH_STRING and RETRY_WITH_UNICODE is only necessary
+ * because promotion of numbers to strings was valid.  By deprecating promotion
+ * this path is effectively unnecessary.  Users have to provide dtype="U"
+ * instead.
  */
 #define RETRY_WITH_STRING 1
 #define RETRY_WITH_UNICODE 2

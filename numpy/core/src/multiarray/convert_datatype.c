@@ -1189,9 +1189,19 @@ PyArray_PromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
         return NULL;
     }
 
+    static const char *string_promotion_deprecation_msg = (
+            "Promotion of numbers and bools to strings is deprecated:\n"
+            "  * use `np.array(..., dtype='U')` or `dtype='S'` in array creation\n"
+            "  * use `arr.astype('U')` or `arr.astype('S')` when "
+            "concatenating/stacking multiple arrays.");
+
     switch (type_num1) {
         /* BOOL can convert to anything except datetime/void */
         case NPY_BOOL:
+            /* Deprecated NumPy 1.19, 2020-03 */
+            if (DEPRECATE(string_promotion_deprecation_msg) < 0) {
+                return NULL;
+            }
             if (type_num2 == NPY_STRING || type_num2 == NPY_UNICODE) {
                 int char_size = 1;
                 if (type_num2 == NPY_UNICODE) {
@@ -1234,8 +1244,12 @@ PyArray_PromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
                     return d;
                 }
             }
-            /* Allow NUMBER -> STRING */
+            /* Allow NUMBER (or bool) -> STRING */
             else if (PyTypeNum_ISNUMBER(type_num2)) {
+                /* Deprecated NumPy 1.19, 2020-03 */
+                if (DEPRECATE(string_promotion_deprecation_msg) < 0) {
+                    return NULL;
+                }
                 PyArray_Descr *ret = NULL;
                 PyArray_Descr *temp = PyArray_DescrNew(type1);
                 PyDataType_MAKEUNSIZED(temp);
@@ -1276,8 +1290,12 @@ PyArray_PromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
                     return d;
                 }
             }
-            /* Allow NUMBER -> UNICODE */
+            /* Allow NUMBER (or bool) -> UNICODE */
             else if (PyTypeNum_ISNUMBER(type_num2)) {
+                /* Deprecated NumPy 1.19, 2020-03 */
+                if (DEPRECATE(string_promotion_deprecation_msg) < 0) {
+                    return NULL;
+                }
                 PyArray_Descr *ret = NULL;
                 PyArray_Descr *temp = PyArray_DescrNew(type1);
                 PyDataType_MAKEUNSIZED(temp);
@@ -1307,6 +1325,10 @@ PyArray_PromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
         /* BOOL can convert to almost anything */
         case NPY_BOOL:
             if (type_num2 == NPY_STRING || type_num2 == NPY_UNICODE) {
+                /* Deprecated NumPy 1.19, 2020-03 */
+                if (DEPRECATE(string_promotion_deprecation_msg) < 0) {
+                    return NULL;
+                }
                 int char_size = 1;
                 if (type_num2 == NPY_UNICODE) {
                     char_size = 4;
@@ -1327,8 +1349,12 @@ PyArray_PromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
             }
             break;
         case NPY_STRING:
-            /* Allow NUMBER -> STRING */
+            /* Allow NUMBER (or bool) -> STRING */
             if (PyTypeNum_ISNUMBER(type_num1)) {
+                /* Deprecated NumPy 1.19, 2020-03 */
+                if (DEPRECATE(string_promotion_deprecation_msg) < 0) {
+                    return NULL;
+                }
                 PyArray_Descr *ret = NULL;
                 PyArray_Descr *temp = PyArray_DescrNew(type2);
                 PyDataType_MAKEUNSIZED(temp);
@@ -1347,8 +1373,12 @@ PyArray_PromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
             }
             break;
         case NPY_UNICODE:
-            /* Allow NUMBER -> UNICODE */
+            /* Allow NUMBER (or bool) -> UNICODE */
             if (PyTypeNum_ISNUMBER(type_num1)) {
+                /* Deprecated NumPy 1.19, 2020-03 */
+                if (DEPRECATE(string_promotion_deprecation_msg) < 0) {
+                    return NULL;
+                }
                 PyArray_Descr *ret = NULL;
                 PyArray_Descr *temp = PyArray_DescrNew(type2);
                 PyDataType_MAKEUNSIZED(temp);

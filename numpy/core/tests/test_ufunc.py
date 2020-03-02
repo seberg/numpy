@@ -1849,6 +1849,9 @@ class TestUfunc:
         assert_(not (a == b))
         assert_(not (b == a))
 
+    # NumPy 1.19, 2020-03 warns for promotion from numbers to strings
+    # which affects some ufuncs.
+    @pytest.mark.filterwarnings('ignore:DeprecationWarning')
     def test_NotImplemented_not_returned(self):
         # See gh-5964 and gh-2091. Some of these functions are not operator
         # related and were fixed for other reasons in the past.
