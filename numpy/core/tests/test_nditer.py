@@ -1499,11 +1499,11 @@ def test_iter_allocate_output_errors():
     # Allocated output can't have buffering without delayed bufalloc
     assert_raises(ValueError, nditer, [a, None], ['buffered'],
                                             ['allocate', 'readwrite'])
-    # Must specify at least one input
-    assert_raises(ValueError, nditer, [None, None], [],
+    # Must specify at least one dtype (or an array)
+    assert_raises(TypeError, nditer, [None, None], [],
                         [['writeonly', 'allocate'],
                          ['writeonly', 'allocate']],
-                        op_dtypes=[np.dtype('f4'), np.dtype('f4')])
+                        op_dtypes=[None, None])
     # If using op_axes, must specify all the axes
     a = arange(24, dtype='i4').reshape(2, 3, 4)
     assert_raises(ValueError, nditer, [a, None], [],
@@ -1520,6 +1520,15 @@ def test_iter_allocate_output_errors():
                         [['readonly'], ['writeonly', 'allocate']],
                         op_dtypes=[None, np.dtype('f4')],
                         op_axes=[None, [0, 2, 1, 0]])
+
+def test_all_operands_allocated():
+    it = nditer([None, None], [],
+                [['writeonly', 'allocate'],
+                 ['readwrite', 'allocate']],
+                op_dtypes=[None, np.int16])
+    assert it.shape == ()
+    # first dtype is set from the readable one, which was specified:
+    assert it.operands[0].dtype == np.int16
 
 def test_iter_remove_axis():
     a = arange(24).reshape(2, 3, 4)
