@@ -133,6 +133,8 @@
 #define NPY_OP_ITFLAG_FORCECOPY    0x0200
 /* The operand has temporary data, write it back at dealloc */
 #define NPY_OP_ITFLAG_HAS_WRITEBACK 0x0400
+/* The operand requires reduction, but cannot be reduced (construction only) */
+#define NPY_OP_ITFLAG_NO_REDUCE 0x0800
 
 /*
  * The data layout of the iterator is fully specified by
