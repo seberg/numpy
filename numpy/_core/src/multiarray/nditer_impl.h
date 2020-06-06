@@ -141,6 +141,8 @@
 #define NPY_OP_ITFLAG_HAS_WRITEBACK 0x0400
 /* Whether the user requested a contiguous operand */
 #define NPY_OP_ITFLAG_CONTIG 0x0800
+/* The operand requires reduction, but cannot be reduced (construction only) */
+#define NPY_OP_ITFLAG_NO_REDUCE 0x1000
 
 /*
  * The data layout of the iterator is fully specified by

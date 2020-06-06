@@ -33,7 +33,8 @@ static int
 npyiter_calculate_ndim(int nop, PyArrayObject **op_in,
                        int oa_ndim);
 static int
-npyiter_check_per_op_flags(npy_uint32 flags, npyiter_opitflags *op_itflags);
+npyiter_check_per_op_flags(
+        npy_uint32 flags, npyiter_opitflags *op_itflags, int reduce_ok);
 static int
 npyiter_prepare_one_operand(PyArrayObject **op,
                         char **op_dataptr,
@@ -916,7 +917,8 @@ npyiter_calculate_ndim(int nop, PyArrayObject **op_in,
  * Returns 1 on success, 0 on failure.
  */
 static int
-npyiter_check_per_op_flags(npy_uint32 op_flags, npyiter_opitflags *op_itflags)
+npyiter_check_per_op_flags(
+        npy_uint32 op_flags, npyiter_opitflags *op_itflags, int reduce_ok)
 {
     if ((op_flags & NPY_ITER_GLOBAL_FLAGS) != 0) {
         PyErr_SetString(PyExc_ValueError,
@@ -947,11 +949,19 @@ npyiter_check_per_op_flags(npy_uint32 op_flags, npyiter_opitflags *op_itflags)
                     "specified for an operand");
             return 0;
         }
-
         *op_itflags = NPY_OP_ITFLAG_READ|NPY_OP_ITFLAG_WRITE;
+        if (!reduce_ok || op_flags & NPY_ITER_ARRAYMASK) {
+            /*
+             * read/write operand requires the reduce_ok flag to be broadcast,
+             * but the mask operand is never reduced.
+             */
+            *op_itflags |= NPY_OP_ITFLAG_NO_REDUCE;
+        }
     }
     else if(op_flags & NPY_ITER_WRITEONLY) {
         *op_itflags = NPY_OP_ITFLAG_WRITE;
+        /* writeonly arrays cannot be broadcast */
+        *op_itflags |= NPY_OP_ITFLAG_NO_REDUCE;
     }
     else {
         PyErr_SetString(PyExc_ValueError,
@@ -1204,7 +1214,9 @@ npyiter_prepare_operands(int nop, PyArrayObject **op_in,
         op_dtype[iop] = NULL;
 
         /* Check the readonly/writeonly flags, and fill in op_itflags */
-        if (!npyiter_check_per_op_flags(op_flags[iop], &op_itflags[iop])) {
+        if (!npyiter_check_per_op_flags(
+                op_flags[iop], &op_itflags[iop],
+                (flags & NPY_ITER_REDUCE_OK) == NPY_ITER_REDUCE_OK)) {
             goto fail_iop;
         }
 
@@ -1407,12 +1419,17 @@ check_mask_for_writemasked_reduction(NpyIter *iter, int iop)
  * should be reduced. If axes are specified explicitly, the flag is
  * unnecessary.
  */
-static int
+static NPY_INLINE int
 npyiter_check_reduce_ok_and_set_flags(
         NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itflags,
         int iop, int maskop, int dim) {
     /* If it's writeable, this means a reduction */
-    if (op_itflags[iop] & NPY_OP_ITFLAG_WRITE) {
+    if (!(op_itflags[iop] & NPY_OP_ITFLAG_WRITE)) {
+        return 1;
+    }
+
+    if (NPY_UNLIKELY(op_itflags[iop] & NPY_OP_ITFLAG_NO_REDUCE)) {
+        /* Reducing the operand is not possible. Give more detailed error. */
         if (!(flags & NPY_ITER_REDUCE_OK)) {
             PyErr_Format(PyExc_ValueError,
                     "output operand requires a reduction along dimension %d, "
@@ -1444,12 +1461,12 @@ npyiter_check_reduce_ok_and_set_flags(
                     "result of a reduction");
             return 0;
         }
-        NPY_IT_DBG_PRINT("Iterator: Indicating that a reduction is"
-                         "occurring\n");
-
-        NIT_ITFLAGS(iter) |= NPY_ITFLAG_REDUCE;
-        op_itflags[iop] |= NPY_OP_ITFLAG_REDUCE;
     }
+    NPY_IT_DBG_PRINT("Iterator: Indicating that a reduction is"
+                     "occurring\n");
+
+    NIT_ITFLAGS(iter) |= NPY_ITFLAG_REDUCE;
+    op_itflags[iop] |= NPY_OP_ITFLAG_REDUCE;
     return 1;
 }
 
@@ -1498,92 +1515,39 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
     int ondim;
     NpyIter_AxisData *axisdata;
     npy_intp sizeof_axisdata;
-    PyArrayObject **op = NIT_OPERANDS(iter), *op_cur;
+    PyArrayObject **op = NIT_OPERANDS(iter);
     npy_intp broadcast_shape[NPY_MAXDIMS];
 
     /* First broadcast the shapes together */
     if (itershape == NULL) {
         for (idim = 0; idim < ndim; ++idim) {
-            broadcast_shape[idim] = 1;
+            broadcast_shape[idim] = -1;
         }
     }
     else {
         for (idim = 0; idim < ndim; ++idim) {
-            broadcast_shape[idim] = itershape[idim];
             /* Negative shape entries are deduced from the operands */
-            if (broadcast_shape[idim] < 0) {
-                broadcast_shape[idim] = 1;
+            if (broadcast_shape < 0) {
+                broadcast_shape[idim] = -1;
+            }
+            else {
+                broadcast_shape[idim] = itershape[idim];
             }
         }
     }
-    for (iop = 0; iop < nop; ++iop) {
-        op_cur = op[iop];
-        if (op_cur != NULL) {
-            npy_intp *shape = PyArray_DIMS(op_cur);
-            ondim = PyArray_NDIM(op_cur);
 
-            if (op_axes == NULL || op_axes[iop] == NULL) {
+    for (iop = 0; iop < nop; ++iop) {
+        if (op_axes == NULL || op_axes[iop] == NULL) {
+            PyArrayObject *op_cur = op[iop];
+            if (op_cur != NULL && PyArray_NDIM(op_cur) > ndim) {
                 /*
                  * Possible if op_axes are being used, but
                  * op_axes[iop] is NULL
                  */
-                if (ondim > ndim) {
-                    PyErr_SetString(PyExc_ValueError,
-                            "input operand has more dimensions than allowed "
-                            "by the axis remapping");
-                    return 0;
-                }
-                for (idim = 0; idim < ondim; ++idim) {
-                    npy_intp bshape = broadcast_shape[idim+ndim-ondim];
-                    npy_intp op_shape = shape[idim];
-
-                    if (bshape == 1) {
-                        broadcast_shape[idim+ndim-ondim] = op_shape;
-                    }
-                    else if (bshape != op_shape && op_shape != 1) {
-                        goto broadcast_error;
-                    }
-                }
-            }
-            else {
-                int *axes = op_axes[iop];
-                for (idim = 0; idim < ndim; ++idim) {
-                    int i = npyiter_get_op_axis(axes[idim], NULL);
-
-                    if (i >= 0) {
-                        if (i < ondim) {
-                            npy_intp bshape = broadcast_shape[idim];
-                            npy_intp op_shape = shape[i];
-
-                            if (bshape == 1) {
-                                broadcast_shape[idim] = op_shape;
-                            }
-                            else if (bshape != op_shape && op_shape != 1) {
-                                goto broadcast_error;
-                            }
-                        }
-                        else {
-                            PyErr_Format(PyExc_ValueError,
-                                    "Iterator input op_axes[%d][%d] (==%d) "
-                                    "is not a valid axis of op[%d], which "
-                                    "has %d dimensions ",
-                                    iop, (ndim-idim-1), i,
-                                    iop, ondim);
-                            return 0;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    /*
-     * If a shape was provided with a 1 entry, make sure that entry didn't
-     * get expanded by broadcasting.
-     */
-    if (itershape != NULL) {
-        for (idim = 0; idim < ndim; ++idim) {
-            if (itershape[idim] == 1 && broadcast_shape[idim] != 1) {
-                goto broadcast_error;
+                PyErr_SetString(PyExc_ValueError,
+                        "input operand has more dimensions than allowed "
+                        "by the axis remapping");
+                return 0;
             }
         }
     }
@@ -1599,120 +1563,186 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
         memset(NAD_STRIDES(axisdata), 0, NPY_SIZEOF_INTP*nop);
     }
 
-    /* Now process the operands, filling in the axisdata */
-    for (idim = 0; idim < ndim; ++idim) {
-        npy_intp bshape = broadcast_shape[ndim-idim-1];
-        npy_intp *strides = NAD_STRIDES(axisdata);
+    /*
+     * Now process the operands, filling in the axisdata (broadcast shape
+     * and strides). As well as the final iterator size.
+     */
 
-        NAD_SHAPE(axisdata) = bshape;
+    /*
+     * If a broadcast error occurred, still continue, so that we can report
+     * a more useful error message with the full shape found.  If no common
+     * shape could be found, sets the error operand to -1.
+     */
+    assert(nop < NPY_MAXARGS);
+    int broadcast_error_operand = NPY_MAXARGS;
+    int broadcast_error_dim = -1;  /* The dimension where the error occurred */
+    /*
+     * If there is a reduce op, we may leave an axis at -1, if it is set
+     * later on, all previous operands did not set it, and will need to be
+     * flagged for reduction.  (unless set to 1).
+     * This is likely not vital for performance in general, but retains
+     * behaviour.  This has to be done once at the end.
+     */
+    int set_reduce_operands = 0;
+
+    NIT_ITERSIZE(iter) = 1;
+    for (idim = 0; idim < ndim; ++idim) {
+        npy_intp *bshape = &NAD_SHAPE(axisdata);
+        /*
+         * The operand shape will be set during the iteration and can be -1
+         * if the operand is allocated, or the dimension is marked as a
+         * reduction dimension (broadcast is always valid).
+         */
+        npy_intp op_shape;
+        npy_intp *strides = NAD_STRIDES(axisdata);
         NAD_INDEX(axisdata) = 0;
 
+        *bshape = broadcast_shape[ndim-idim-1];
+
+        /*
+         * Flag for all operands whether they may be reduced. We do not set
+         * the reduce iterator flag, if the shape is 1.
+         */
+        npy_bool broadcasting_op[NPY_MAXARGS];
+
+
         for (iop = 0; iop < nop; ++iop) {
-            op_cur = op[iop];
+            PyArrayObject *op_cur = op[iop];
+            int op_axis;
+            npy_bool reduction_axis = NPY_FALSE;
+            broadcasting_op[iop] = NPY_FALSE;
 
             if (op_axes == NULL || op_axes[iop] == NULL) {
                 if (op_cur == NULL) {
-                    strides[iop] = 0;
+                    /* allocated output is matched to iterator */
+                    op_shape = -1;
+                    op_axis = -1;
                 }
                 else {
                     ondim = PyArray_NDIM(op_cur);
-                    if (bshape == 1) {
-                        strides[iop] = 0;
-                        if (idim >= ondim &&
-                                    (op_flags[iop] & NPY_ITER_NO_BROADCAST)) {
-                            goto operand_different_than_broadcast;
-                        }
-                    }
-                    else if (idim >= ondim ||
-                                    PyArray_DIM(op_cur, ondim-idim-1) == 1) {
-                        strides[iop] = 0;
+                    if (idim >= ondim) {
                         if (op_flags[iop] & NPY_ITER_NO_BROADCAST) {
-                            goto operand_different_than_broadcast;
+                            /*
+                             * Additional dimensions are only valid if the
+                             * broadcast flag is set for the operand.
+                             * (This is similar to too many op_axes).
+                             */
+                            if (broadcast_error_operand > iop) {
+                                broadcast_error_dim = idim;
+                                broadcast_error_operand = iop;
+                            }
                         }
-                        /* If it's writeable, this means a reduction */
-                        if (!npyiter_check_reduce_ok_and_set_flags(
-                                iter, flags, op_itflags, iop, maskop, idim)) {
-                            return 0;
-                        }
+                        op_axis = -1;
+                        op_shape = 1;
                     }
                     else {
-                        strides[iop] = PyArray_STRIDE(op_cur, ondim-idim-1);
+                        op_axis = ondim-idim-1;
+                        op_shape = PyArray_DIMS(op_cur)[op_axis];
                     }
                 }
             }
             else {
                 int *axes = op_axes[iop];
-                npy_bool reduction_axis;
-                int i;
-                i = npyiter_get_op_axis(axes[ndim - idim - 1], &reduction_axis);
+                op_axis = npyiter_get_op_axis(
+                        axes[ndim - idim - 1], &reduction_axis);
 
-                if (reduction_axis) {
-                    /* This is explicitly a reduction axis */
-                    strides[iop] = 0;
-                    NIT_ITFLAGS(iter) |= NPY_ITFLAG_REDUCE;
-                    op_itflags[iop] |= NPY_OP_ITFLAG_REDUCE;
-
-                    if (NPY_UNLIKELY((i >= 0) && (op_cur != NULL) &&
-                            (PyArray_DIM(op_cur, i) != 1))) {
+                if (op_axis < 0) {
+                    /* shape must be one, but may be broadcast */
+                    op_shape = 1;
+                }
+                else if (op_cur == NULL) {
+                    /* allocated output is matched to iterator */
+                    op_shape = -1;
+                }
+                else {
+                    if (op_axis < PyArray_NDIM(op_cur)) {
+                        op_shape = PyArray_DIM(op_cur, op_axis);
+                    }
+                    else {
                         PyErr_Format(PyExc_ValueError,
-                                "operand was set up as a reduction along axis "
-                                "%d, but the length of the axis is %zd "
-                                "(it has to be 1)",
-                                i, (Py_ssize_t)PyArray_DIM(op_cur, i));
+                                "Iterator input op_axes[%d][%d] (==%d) "
+                                "is not a valid axis of op[%d], which "
+                                "has %d dimensions ",
+                                iop, (ndim-idim-1), op_axis,
+                                iop, PyArray_DIM(op_cur, op_axis));
                         return 0;
                     }
                 }
-                else if (bshape == 1) {
-                    /*
-                     * If the full iterator shape is 1, zero always works.
-                     * NOTE: We thus always allow broadcast dimensions (i = -1)
-                     *       if the shape is 1.
-                     */
-                    strides[iop] = 0;
-                }
-                else if (i >= 0) {
-                    if (op_cur == NULL) {
-                        /* stride is filled later, shape will match `bshape` */
-                        strides[iop] = 0;
+                /* If this is an explicit reduction, check shape and mark it. */
+                if (reduction_axis) {
+                    broadcasting_op[iop] = NPY_TRUE;
+                    if (op_shape == 1) {
+                        /* mark shape as explicit broadcast if not already -1 */
+                        op_shape = -1;
                     }
-                    else if (PyArray_DIM(op_cur, i) == 1) {
-                        strides[iop] = 0;
-                        if (op_flags[iop] & NPY_ITER_NO_BROADCAST) {
-                            goto operand_different_than_broadcast;
-                        }
-                        if (!npyiter_check_reduce_ok_and_set_flags(
-                                iter, flags, op_itflags, iop, maskop, i)) {
-                            return 0;
-                        }
-                    }
-                    else {
-                        strides[iop] = PyArray_STRIDE(op_cur, i);
-                    }
-                }
-                else {
-                    strides[iop] = 0;
-                    /*
-                     * If deleting this axis produces a reduction, but
-                     * reduction wasn't enabled, throw an error.
-                     * NOTE: We currently always allow new-axis if the iteration
-                     *       size is 1 (thus allowing broadcasting sometimes).
-                     */
-                    if (!npyiter_check_reduce_ok_and_set_flags(
-                            iter, flags, op_itflags, iop, maskop, i)) {
+                    if (op_shape != -1) {
+                        PyErr_Format(PyExc_ValueError,
+                                "operand was set up as a reduction along axis "
+                                "%d, but the length of the axis is %zd "
+                                "(it has to be 1)", op_axis,
+                                (Py_ssize_t)PyArray_DIM(op_cur, op_axis));
                         return 0;
                     }
                 }
             }
+            /*
+             * We now have a shape (or -1) for the axis and need to see if it
+             * fits to the broadcast shape. If the shape is 1, we may or may
+             * not allow it to be considered broadcasting.
+             */
+            if (op_shape == -1) {
+                /* Either allocated or marked as broadcast */
+                strides[iop] = 0;
+                continue;
+            }
+            if (op_shape == 1) {
+                strides[iop] = 0;
+            }
+            else {
+                assert(op_axis > 0);
+                strides[iop] = PyArray_STRIDE(op_cur, op_axis);
+            }
+            /* Now update the bshape if necessary. */
+            if (*bshape == op_shape) {
+                /* The shapes match (or both -1), nothing more to do */
+                continue;
+            }
+            /* If this is not a (potential) reduction, set final shape */
+            if (op_shape != 1 || (op_flags[iop] & NPY_ITER_NO_BROADCAST ||
+                        op_itflags[iop] & NPY_OP_ITFLAG_NO_REDUCE)) {
+                if (NPY_LIKELY(*bshape == -1)) {
+                    *bshape = op_shape;
+                }
+                else if (broadcast_error_operand > iop) {
+                    broadcast_error_dim = idim;
+                    if (*bshape == 1) {
+                        /* Update the shape anyway to report full broadcast */
+                        *bshape = op_shape;
+                    }
+                    if (op_shape != 1) {
+                        /* Incompatible shape, that error takes precedence */
+                        broadcast_error_operand = -1;
+                    }
+                    else {
+                        /* broadcast error, store operand */
+                        broadcast_error_operand = iop;
+                    }
+                }
+            }
+            assert(op_shape == 1);
+            broadcasting_op[iop] = NPY_TRUE;
+        }
+        if (*bshape == -1) {
+            /* No operand defined the shape, so it as 1. */
+            *bshape = 1;
         }
 
-        NIT_ADVANCE_AXISDATA(axisdata, 1);
-    }
-
-    /* Now fill in the ITERSIZE member */
-    NIT_ITERSIZE(iter) = 1;
-    for (idim = 0; idim < ndim; ++idim) {
-        if (npy_mul_sizes_with_overflow(&NIT_ITERSIZE(iter),
-                    NIT_ITERSIZE(iter), broadcast_shape[idim])) {
+        /* Now update the iterator shape. */
+        if (NIT_ITERSIZE(iter) == -1) {
+            /* The size overflowed in a previous iteration, ignore. */
+        }
+        if (npy_mul_with_overflow_intp(&NIT_ITERSIZE(iter),
+                                       NIT_ITERSIZE(iter), *bshape)) {
             if ((itflags & NPY_ITFLAG_HASMULTIINDEX) &&
                     !(itflags & NPY_ITFLAG_HASINDEX) &&
                     !(itflags & NPY_ITFLAG_BUFFER)) {
@@ -1722,14 +1752,38 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                  * is called.
                  */
                 NIT_ITERSIZE(iter) = -1;
-                break;
             }
             else {
                 PyErr_SetString(PyExc_ValueError, "iterator is too large");
                 return 0;
             }
         }
+
+        if (*bshape != 1) {
+            for (iop = 0; iop < nop; iop++) {
+                if (!broadcasting_op[iop]) {
+                    continue;
+                }
+                if (op_itflags[iop] & NPY_OP_ITFLAG_WRITE) {
+                    NIT_ITFLAGS(iter) |= NPY_ITFLAG_REDUCE;
+                    op_itflags[iop] |= NPY_OP_ITFLAG_REDUCE;
+                }
+            }
+        }
+
+        NIT_ADVANCE_AXISDATA(axisdata, 1);
     }
+
+    if (broadcast_error_operand < NPY_MAXARGS) {
+        idim = broadcast_error_dim;
+        iop = broadcast_error_operand;
+        if (broadcast_error_operand < 0) {
+            iop += NPY_MAXARGS;
+            goto broadcast_error;
+        }
+        goto operand_different_than_broadcast;
+    }
+
     /* The range defaults to everything */
     NIT_ITERSTART(iter) = 0;
     NIT_ITEREND(iter) = NIT_ITERSIZE(iter);
@@ -1853,11 +1907,28 @@ broadcast_error: {
     }
 
 operand_different_than_broadcast: {
-        /* operand shape */
-        int ndims = PyArray_NDIM(op[iop]);
-        npy_intp *dims = PyArray_DIMS(op[iop]);
-        PyObject *shape1 = convert_shape_to_string(ndims, dims, "");
-        if (shape1 == NULL) {
+        npy_intp remdims[NPY_MAXDIMS];
+        PyObject *errmsg, *tmp;
+
+        if (!(op_flags[iop] & NPY_ITER_NO_BROADCAST)) {
+            /* the error must have happened due to a reduction, give details */
+            if (!npyiter_check_reduce_ok_and_set_flags(
+                    iter, flags, op_itflags, iop, maskop, idim)) {
+                return 0;
+            }
+            assert(0);
+        }
+
+        /* Start of error message */
+        if (op_flags[iop] & NPY_ITER_READONLY) {
+            errmsg = PyUString_FromString("non-broadcastable operand "
+                                          "with shape ");
+        }
+        else {
+            errmsg = PyUString_FromString("non-broadcastable output "
+                                          "operand with shape ");
+        }
+        if (errmsg == NULL) {
             return 0;
         }
 
