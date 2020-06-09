@@ -334,7 +334,7 @@ Coercing to and from Python scalars requires two to three methods:
 (The above is meant for C-API. A Python-side API would have to use byte
 buffers or similar to implement this, which may be useful for prototyping.)
 
-These largely corresponds to the current definitions.  When a certain scalar
+These largely correspond to the current definitions.  When a certain scalar
 has a known (different) dtype, NumPy may in the future use casting instead
 of ``__dtype_setitem__``.
 A user datatype is (initially) expected to implement ``__dtype_setitem__``
