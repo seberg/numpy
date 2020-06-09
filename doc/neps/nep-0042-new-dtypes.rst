@@ -794,7 +794,7 @@ Maybe the most complex and interesting operation which is provided
 by DTypes is the ability to cast from one dtype to another.
 The casting operation is much like a typical function (universal function) on
 arrays converting one input to a new output.
-There mainly two distinctions:
+There are mainly two distinctions:
 
 1. Casting always requires an explicit output datatype to be given.
 2. The NumPy iterator API requires access to lower-level functions than
