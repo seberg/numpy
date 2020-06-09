@@ -40,7 +40,7 @@ The current datatypes are not well encapsulated, so modifications targeting
 a single datatype inevitably touch code involving others.
 As detailed in NEP 41, the desired general design is to create classes for
 each of the NumPy-provided datatypes, meaning that ``np.dtype("float64")``
-is an instance of a ``Float64`` class which is a subclass of ``np.dtype``.
+returns an instance of a ``Float64`` class which is a subclass of ``np.dtype``.
 ``np.dtype[float64]`` will also be used to denote this class.
 This will allow moving all logic into special methods on the ``np.dtype``
 subclasses.  This ``DType`` class would then serve as the central
