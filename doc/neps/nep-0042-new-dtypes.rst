@@ -985,7 +985,7 @@ to dynamically return ``CastingImpl``.
 The advantage of this addition is that it removes the requirement to know all
 possible casts at DType creation time (of one of the involved DTypes).
 Such API could be added at a later time. It should be noted, however,
-that it would be mainly useful for inheritance like logic, which can be
+that it would be mainly useful for inheritance-like logic, which can be
 problematic. As an example two different ``Float64WithUnit`` implementations
 both could infer that they can unsafely cast between one another when in fact
 some combinations should cast safely or preserve the Unit (both of which the
