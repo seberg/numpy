@@ -246,11 +246,11 @@ information is currently provided and will be defined on the class:
 
 * ``self.canonical`` method (Alternative: new instance attribute)
 
-  * Instead of byteorder, we may want an ``canonical`` flag (reusing the
+  * Instead of byteorder, we may want a ``canonical`` flag (reusing the
     ISNBO flag – "is native byte order" seems possible here).
     This flag signals that the data are stored in the default/canonical way.
     In practice this is always an NBO check, but generalization should be possible.
-    A potential use case is a complex-conjugated instance of Complex which
+    A potential use-case is a complex-conjugated instance of Complex which
     stores ``real - imag`` instead of ``real + imag`` and is thus not
     the canonical storage.
 
