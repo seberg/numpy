@@ -133,7 +133,7 @@ Hierarchy of DTypes and Abstract DTypes
 
 **Motivation:**
 The creation of a DType classes has already been decided in NEP 41.
-Here we discuss the notion of _abstract_ DTypes.
+Here we discuss the notion of **abstract** DTypes.
 There are multiple reasons for this:
 
 1. It allows the definition of a class hierarchy, in principle allowing checks like
