@@ -1147,7 +1147,7 @@ The external API for ``CastingImpl`` will be limited initially to defining:
 * ``cast_kind`` attribute, which can be one of the supported casting kinds.
   This is the safest cast possible. For example casting between two NumPy
   strings is of course "safe" in general, but may be "same kind" in a specific
-  instance if the second string is shorter. If neither type is parametric this
+  instance if the second string is shorter. If neither type is parametric the
   ``adjust_descriptors`` must use it. 
 * ``adjust_descriptors(dtypes_in[2], dtypes_out[2], casting_out) -> int {0, -1}``
   The out dtypes must be set correctly to dtypes which the stirded loop
