@@ -309,7 +309,7 @@ Coercion to and from Python Objects
 
 **Motivation:**
 
-When storing a single value in an array or taking it out of the array
+When storing a single value in an array or taking it out of the array,
 a conversion must be made from the low-level representation to the Python
 object describing the scalar value.
 
