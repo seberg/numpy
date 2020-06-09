@@ -844,8 +844,8 @@ Analogous to the above, the following also need to be defined:
 
 overloading the meaning of ``dtype`` to mean either class or instance
 (on the Python level).
-The question of ``np.can_cast(DType, OtherDType, "safe")`` is also possibly
-and may be used internally.
+The question of ``np.can_cast(DType, OtherDType, "safe")`` is also a
+possibility and may be used internally.
 However, it is initially not necessary to expose to Python.
 
 
