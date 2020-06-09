@@ -904,7 +904,7 @@ conversions.  The full process is:
    ``int24(42) -> S8("42") -> S20("42")``. 
 
 Note that in this example the ``adjust_descriptors`` function plays a less
-central role.  It becomes more important for ``np.can_cast`.
+central role.  It becomes more important for ``np.can_cast``.
 
 Further, ``adjust_descriptors`` allows the implementation for
 ``np.array(42, dtype=int24).astype(String)`` to call
