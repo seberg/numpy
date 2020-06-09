@@ -238,7 +238,7 @@ information is currently provided and will be defined on the class:
     Python API will instead use a ``ParametricDType`` class from
     which to inherit.  (This is similar to Python's type flags, which include
     flags for some basic subclasses such as subclasses of ``float`` or ``tuple``)
-  * This flag is mainly to simplify DType and casting creation and
+  * This flag is mainly to simplify DType creation and casting and
     allow for performance tweaks.
   * DTypes which are not parametric must define a canonical dtype instance
     which should be a singleton.
