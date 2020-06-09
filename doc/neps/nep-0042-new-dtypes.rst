@@ -174,12 +174,12 @@ These two rules are identical to the type choices made for example in the
 `Julia language <https://docs.julialang.org/en/v1/manual/types/#man-abstract-types-1>`_.
 It allows for the creation of a datatype hierarchy, but avoids issues with
 subclassing concrete DTypes directly:
-Logic such as ``can_cast`` does not cleanly inherit e.g. from a
+logic such as ``can_cast`` does not cleanly inherit e.g. from a
 ``Int64`` to a ``Datetime64`` even though the ``Datetime64`` could be seen
 as an integer with only a unit attached (and thus as a subclass).
 
-For the DType implementor this currently mainly means that DTypes are
-never subclasses of existing concrete DTypes.
+The main consequence for the DType implementor is that DTypes would
+never be subclasses of existing concrete DTypes.
 End-users should not notice or need to know about this distinction.
 
 The combination of (initially) rejecting subclassing of concrete DTypes
