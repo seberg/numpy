@@ -121,7 +121,7 @@ although, in many cases a library may choose to provide a more direct
 way to access the specific DType class.
 This method may initially be limited to concrete DTypes. 
 The main reason for this choice is to provide a single
-clear, and future-proof way to find the DType class given the
+clear and future-proof way to find the DType class given the
 Python (scalar) class.
 
 This should not be a common operation, so providing this helper reduces the
