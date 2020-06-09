@@ -234,7 +234,7 @@ information is currently provided and will be defined on the class:
 
 * ``cls.parametric`` (see also `NEP 40 <NEP40>`_):
 
-  * Parametric will be a flag in (private) the C-API. However, the
+  * Parametric will be a flag in the (private) C-API. However, the
     Python API will instead use a ``ParametricDType`` class instead from
     which to inherit.  (This similar to Python's type flags, which include
     flags for some basic subclasses such as subclasses of ``float`` or ``tuple``)
