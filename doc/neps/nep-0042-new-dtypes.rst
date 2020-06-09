@@ -15,9 +15,9 @@ NEP 42 — Implementation of New DataTypes
     about the previous dtype implementation and issues with it in
     :ref:`NEP 40 <NEP40>`.
     :ref:`NEP 41 <NEP41>` then provides an overview and generic design
-    choices for the refactor. Further NEPs 42 (this document)
-    and 43 go into the technical details of the datatype
-    and universal function related internal and external API changes.
+    choices for the refactor. NEPs 42 (this document)
+    and 43 go into the technical details of the internal and external
+    API changes related to datatypes and universal functions, respectively.
     In some cases it may be necessary to consult the other NEPs for a full
     picture of the desired changes and why these changes are necessary.
 
