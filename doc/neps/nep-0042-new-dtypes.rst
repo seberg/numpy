@@ -192,10 +192,10 @@ in the future; not necessarily to implement new datatypes
 but rather to allow specialized implementations such as a GPU
 float64 subclassing a NumPy float64.
 
-As a technical implementation detail the DType class will require the C-side
+As a technical implementation detail: the DType class will require the C-side
 storage of methods and additional information.
 This requires the creation of a ``DTypeMeta`` class.
-Each ``DType`` class is thus an instance of ``DTypeMeta`` with a well defined
+Each ``DType`` class is thus an instance of ``DTypeMeta`` with a well-defined
 and extensible interface.
 The end-user will not need to be aware of this.
 
