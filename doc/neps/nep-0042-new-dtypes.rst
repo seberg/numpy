@@ -744,7 +744,7 @@ However, this cannot define all such operations, and will fail for example for::
 
 In this design, it is the responsibility of the DType author to ensure that
 in most cases a safe-cast implies that this will be the result of the
-``__common_dtype`` method.
+``__common_dtype__`` method.
 
 Note that some exceptions may apply. For example casting ``int32`` to
 a (long enough) string is – at least at this time – considered "safe".
