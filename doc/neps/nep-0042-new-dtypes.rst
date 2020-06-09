@@ -916,7 +916,8 @@ In this case the result of ``(int24, "S8")`` defines the correct cast:
 
 To answer the question of casting safety
 ``np.can_cast(int24, "S20", casting="safe")``, only the ``adjust_descriptors``
-function is required and called in the same way as in the Figure <cast_figure>`_.
+function is required and called is in the same way as in 
+`Figure <cast_figure>`_.
 In this case, the calls to ``adjust_descriptors``, will also provide the
 information that ``int24 -> "S8"`` as well as ``"S8" -> "S20"`` are safe casts,
 and thus also the ``int24 -> "S20"`` is a safe cast.
