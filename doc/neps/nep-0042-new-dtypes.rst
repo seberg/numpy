@@ -1057,7 +1057,7 @@ DType creation
 """"""""""""""
 
 As already mentioned in NEP 41, the interface to define new DTypes in C
-is modeled after the limited API in Python, the above mentioned slots,
+is modeled after the limited API in Python: the above-mentioned slots
 and some additional necessary information will thus be passed within a slots
 struct and identified by ``ssize_t`` integers::
 
