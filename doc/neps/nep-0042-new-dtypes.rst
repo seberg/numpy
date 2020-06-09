@@ -971,8 +971,8 @@ The user ``Int24`` dtype does not have to handle all string lengths if it
 does not wish to do so.  Further, if an encoding was added to the ``String``
 DType, this does not affect the overall cast.
 The ``adjust_descriptor`` function can keep returning the default encoding
-and the ``CastingImpl[String, String]`` can take of any encoding changes
-necessary.
+and the ``CastingImpl[String, String]`` can take care of any necessary encoding
+changes.
 
 The main alternative to the proposed design is to move most of the information
 which is here pushed into the ``CastingImpl`` directly into methods
