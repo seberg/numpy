@@ -457,9 +457,9 @@ There are three further issues to consider:
    assumes that sequences are always collections of elements (the sequence cannot be an
    element itself). An example for this is would be a ``vector`` DType.
 3. An array may itself contain arrays with a specific dtype (even 
-   general Python objects).  In the above example of
+   general Python objects).  For example:
    ``np.array([np.array(None, dtype=object)], dtype=np.String)``
-   this creates the issue of how to handle the included array.
+   poses the issue of how to handle the included array.
 
 Some of these difficulties arise due to the fact that finding the correct shape
 of the output array and finding the correct datatype are closely related.
