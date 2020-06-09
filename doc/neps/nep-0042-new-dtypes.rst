@@ -137,9 +137,9 @@ Here we discuss the notion of **abstract** DTypes.
 There are multiple reasons for this:
 
 1. It allows the definition of a class hierarchy, in principle allowing checks like
-   ``isinstance(np.dtype("float64"), np.Inexact)``.
-   **This hierarchy may be a prerequisite to implement dispatching
-   for universal function (NEP 43)**
+   ``isinstance(np.dtype("float64"), np.inexact)``.
+   **This hierarchy may be a prerequisite to implementing dispatching
+   for universal functions (NEP 43)**
 2. Abstract DTypes can enable code such as
    ``arr.astype(Complex)`` to express the desire to cast to a
    complex data type of any precision.
