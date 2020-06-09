@@ -373,8 +373,8 @@ Current ``datetime64`` returns ``np.datetime64`` scalars and can be assigned
 from ``np.datetime64``.
 However, the datetime ``__dtype_setitem__`` also allows assignment from
 date strings ("2016-05-01") or Python integers.
-And the datetime ``__dtype_get_pyitem__`` function actually returns
-Python ``datetime.datetime`` (most of the time).
+Additionally the datetime ``__dtype_get_pyitem__`` function actually returns
+Python ``datetime.datetime`` object (most of the time).
 
 
 **Alternatives:**
