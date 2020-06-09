@@ -326,7 +326,7 @@ Coercing to and from Python scalars requires two to three methods:
    The function returns an equivalent Python scalar (i.e. typically a NumPy
    scalar).
 3. ``__dtype_get_pyitem__(self, item_pointer, base_obj) -> object``
-   (initially hidden for new style user defined datatypes, may be exposed
+   (initially hidden for new-style user-defined datatypes, may be exposed
    on user request). This corresponds to the ``arr.item()`` method which
    is also used by ``arr.tolist()`` and returns e.g. Python floats instead of
    NumPy floats.
