@@ -888,7 +888,7 @@ with the signature.
 cast for example an ``int24`` with a value of ``42`` to a string of length 20
 (``"S20"``).
 In this example, the implementer only provided the functionality of casting
-and ``int24`` to an ``S8`` string (which can hold all 24bit integers).
+an ``int24`` to an ``S8`` string (which can hold all 24bit integers).
 Due to this limited implementation, the full cast has to do multiple
 conversions.  The full process is:
 
