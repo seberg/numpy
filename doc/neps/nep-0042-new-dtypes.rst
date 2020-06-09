@@ -515,7 +515,7 @@ NumPy currently uses a small hard-coded mapping and conversion of numpy scalars
 
 To allow for a DType to accept specific inputs as known scalars, we will
 initially use a method such as ``known_scalar_type`` or ``known_scalar_object``
-which allows discovering a e.g. ``vector`` as a scalar (element) instead of
+which allows discovering an e.g. ``vector`` as a scalar (element) instead of
 a sequence (for the command ``np.array(vector, dtype=VectorDType)``).
 This will *not* be public API initially, but may be made public at a later
 time.
