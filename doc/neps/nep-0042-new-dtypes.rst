@@ -44,7 +44,7 @@ returns an instance of a ``Float64`` class which is a subclass of ``np.dtype``.
 ``np.dtype[float64]`` will also be used to denote this class.
 This will allow moving all logic into special methods on the ``np.dtype``
 subclasses.  This ``DType`` class would then serve as the central
-extension point  for adding new types to NumPy.
+extension point  for adding new dtypes to NumPy.
 
 This document proposes the new API for the datatypes itself.
 A second proposal NEP 43 details proposed changes to the universal
