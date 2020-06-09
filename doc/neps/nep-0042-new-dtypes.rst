@@ -118,7 +118,7 @@ we propose the addition of::
 
 as a class getter. This can work both for user and NumPy DTypes,
 although, in many cases a library may choose to provide a more direct
-way to access the type.
+way to access the specific DType class.
 This method may initially be limited to concrete DTypes. 
 The main reason for this choice is to provide a single
 clear, and future-proof way to find the DType class given the
