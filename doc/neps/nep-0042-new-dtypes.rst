@@ -405,7 +405,7 @@ conversion also occurs for casts from the string dtype to ``datetime64``.
 In the future, we may expose a way to signal whether a conversion is known,
 and otherwise a normal cast is made so that the item is effectively set to ``np.array(scalar).astype(requested_dtype)``.
 
-There is a general issue about handling of subclasses. We anticipate to not
+There is a general issue about the handling of subclasses. We anticipate to not
 automatically detect the dtype for ``np.array(float64_subclass)`` to be
 float64.  The user can still provide ``dtype=np.float64``. However, the above
 "assign by casting" using ``np.array(scalar_subclass).astype(requested_dtype)``
