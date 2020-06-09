@@ -884,7 +884,7 @@ with the signature.
 .. figure:: _static/casting_flow.svg
     :figclass: align-center
 
-Figure <cast_figure>`_ illustrates the multi-step logic necessary to
+`Figure <cast_figure>`_ illustrates the multi-step logic necessary to
 cast for example an ``int24`` with a value of ``42`` to a string of length 20
 (``"S20"``).
 In this example, the implementer only provided the functionality of casting
