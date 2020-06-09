@@ -27,7 +27,7 @@ Abstract
 
 NEP 40 and 41 detailed the need for the creation of a new datatype system within
 NumPy to better serve downstream use-cases and improve the maintainability
-and the extensibility NumPy.
+and the extensibility of NumPy.
 A main issue with the current dtype API is that datatypes are written as
 a single Python class with special instances for each of the actual datatypes.
 While this certainly has been a practical approach in implementing numerical
