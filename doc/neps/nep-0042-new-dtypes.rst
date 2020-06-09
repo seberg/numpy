@@ -455,7 +455,7 @@ There are three further issues to consider:
    have a ``dtype`` attribute already.
 2. In general, a datatype could represent a sequence, however, NumPy currently
    assumes that sequences are always collections of elements (the sequence cannot be an
-   element itself). An example for this is would be ``vector`` DType.
+   element itself). An example for this is would be a ``vector`` DType.
 3. An array may itself contain arrays with a specific dtype (even 
    general Python objects).  In the above example of
    ``np.array([np.array(None, dtype=object)], dtype=np.String)``
