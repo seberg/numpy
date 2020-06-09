@@ -1150,7 +1150,7 @@ The external API for ``CastingImpl`` will be limited initially to defining:
   instance if the second string is shorter. If neither type is parametric the
   ``adjust_descriptors`` must use it. 
 * ``adjust_descriptors(dtypes_in[2], dtypes_out[2], casting_out) -> int {0, -1}``
-  The out dtypes must be set correctly to dtypes which the stirded loop
+  The out dtypes must be set correctly to dtypes which the strided loop
   (transfer function) can handle.  Initially the result must have be instances
   of the same DType class as the ``CastingImpl`` is defined for.
   The ``casting_out`` will be set to ``NPY_SAFE_CASTING``, ``NPY_UNSAFE_CASTING``,
