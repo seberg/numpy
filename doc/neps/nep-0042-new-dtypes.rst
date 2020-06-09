@@ -37,7 +37,7 @@ This monolithic code structure means that user-defined datatypes do not have
 the same capabilities as NumPy datatypes have.
 The current structure also makes reasoning about and modifying datatypes harder.
 The current datatypes are not well encapsulated, so modifications targeting
-a single datatype inevitably touches code involving others.
+a single datatype inevitably touch code involving others.
 As detailed in NEP 41, the desired general design is to create classes for
 each of the NumPy-provided datatypes, meaning that ``np.dtype("float64")``
 is an instance of a ``Float64`` class which is a subclass of ``np.dtype``.
