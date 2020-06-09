@@ -1164,7 +1164,7 @@ are passed in as the last argument. On error return (if no error is set) a
 generic error will be given.
 More optimized loops are in use internally, and will be made available to users
 in the future (see notes)
-The iterator API does not currently support casting errors, this is
+The iterator API does not currently support casting errors: this is
 a bug that needs to be fixed. Until it is fixed the loop should always
 succeed (return 0).
 
