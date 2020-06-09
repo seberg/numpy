@@ -259,7 +259,7 @@ information is currently provided and will be defined on the class:
 
 * ``DType.type`` is the associated scalar type.  ``dtype.type`` will be a
   class attribute and the current ``dtype.type`` field considered
-  deprecated. This may be relaxed if a usecase arises.
+  deprecated. This may be relaxed if a use-case arises.
 
 Additionally, existing methods (and C-side fields) will be provided, although
 fields such as the "kind" and and "char" may be set to invalid values on
