@@ -291,7 +291,7 @@ to Python to represent the same thing.
 **Example:**
 
 The ``datetime64`` DType is considered parametric, due to its unit, and
-unlike a float64 has no canonical representation. The associated type
+unlike a float64 has no canonical representation. The associated ``type``
 is the ``np.datetime64`` scalar.
 
 
