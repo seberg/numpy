@@ -234,6 +234,14 @@ typedef struct _tagPyUFuncObject {
         /* Identity for reduction, when identity == PyUFunc_IdentityValue */
         PyObject *identity_value;
 
+        /* New private fields related to dispatching */
+        void *_dispatch_cache;
+        /*
+         * Currently, just a list, but that can never allow deletion (unless
+         * elements that may get deleted again are deleted occasionally).
+         */
+        PyObject *_loops;
+        PyObject *_legacy_array_method;
 } PyUFuncObject;
 
 #include "arrayobject.h"
