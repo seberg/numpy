@@ -589,7 +589,7 @@ descr_from_basic_scalar(PyObject *obj, PyArray_Descr **descr)
     else if (PyLong_CheckExact(obj)) {
         int overflow;
         if (PyLong_AsLongAndOverflow(obj, &overflow) < 0) {
-            /* overflow must have occured */
+            /* overflow must have occurred */
             assert(overflow != 0);
             return -1;
         }
@@ -611,19 +611,40 @@ descr_from_basic_scalar(PyObject *obj, PyArray_Descr **descr)
  * 1) Defer if the other scalar has a higher type number, since type numbers
  *    are ordered, if the other scalar has a higher number it must perform
  *    the operation. (-1 return, leading to NotImplemented)
- * 2) If the other type is not a known NumPy scalar (or float or int)
- *    always fall back to the array (or generic) method. (-2 return)
+ * 2) If the other type is not a builtin NumPy scalar (or float or int)
+ *    we have to either fall back, or defer.  (-3 return)
  * 3) If the other scalar cannot be cast to this scalar we fall back
- *    to the array (or generic) method. (-2 return)
- *    (Note that the fallback method may still decide to defer)
- * 4) During the above steps, we extract the raw C type of all scalars.
+ *    to the array (or generic) method, effectively using ufuncs. (-2 return)
  *
- * After the initial set, we perform the operation much like in ufuncs:
+ * During the above steps, we extract the raw C value of all scalars.
+ *
+ * After that initial logic, we perform the operation much like in ufuncs:
  *
  * 4) Perform the function on the C-type.
  * 5) If an error condition occurred, check to see what the current
  *    error-handling is and handle the error.
  * 6) Construct and return the output scalar.
+ *
+ * In principle we could almost always defer to ufuncs. These do incur
+ * overheads, but these may be acceptable in many cases currently covered
+ * here (e.g. all cases requiring casting, while e.g. `float32 + python float`
+ * may be a much more likely, but currently unoptimized path).
+ * However, we must not defer to ufuncs in the case where the other object
+ * is a scalar not known to NumPy. This happens exactly when::
+ *
+ *     np.array(other, dtype=self.dtype)
+ *
+ * returns a 0-D object array including `other`.  In that case, the current
+ * logic (implemented via ufuncs/arrays), is to fall back to returning
+ * `op(self.item(), other)`. I.e. the calculation is actually performed by
+ * converting to the corresponding *python* scalar type.
+ * The ufunc machinery implicitly supports this fallback for most builtin
+ * types due to `arr.astype(object)` using `self.item()`.  However,  it must
+ * be avoided for longdouble, which would lead to infinite recursion since
+ * `longdouble.item() is longdouble`.
+ * This logic has the effect, that NumPy ints/floats work where Python
+ * ints/floats work, such as `Decimal(1) + np.int32(1)` ending up calling
+ * `Decimal(1) + np.int32(1).item()`.
  */
 
 
@@ -664,14 +685,18 @@ _@name@_convert_to_ctype(PyObject *a, @type@ *arg)
     }
     PyArray_Descr *value_descr;
     int pyscalar = descr_from_basic_scalar(a, &value_descr);
-    if (pyscalar < 0) {
-        return -2;
+    if (NPY_UNLIKELY(pyscalar < 0)) {
+        /*
+         * Not a NumPy (or handled Python) scalar. It could be array-like or
+         * 3rd party scalar.
+         */
+        return -3;
     }
     int type_num = value_descr->type_num;
     if (type_num > @TYPE@) {
         /*
          * Always refer to the larger type number, the types are ordered.
-         * We cannot refer to a Python type, however.
+         * We cannot defer to a Python type, however.
          */
         Py_DECREF(value_descr);
         return pyscalar ? -2 : -1;
@@ -713,6 +738,10 @@ _@name@_convert2_to_ctypes(PyObject *a, @type@ *arg1,
     }
     ret = _@name@_convert_to_ctype(b, arg2);
     if (ret < 0) {
+        if (ret == -4) {
+            /* Indicate which scalar may need wrapping. */
+            return -4;
+        }
         return ret;
     }
     return 0;
@@ -789,13 +818,69 @@ static PyObject *
 #endif
 
     switch(_@name@_convert2_to_ctypes(a, &arg1, b, &arg2)) {
+        PyObject *self, *other;
         case 0:
             break;
         case -1:
             Py_RETURN_NOTIMPLEMENTED;
         case -2:
             /* one of them can't be cast safely must be mixed-types */
-            return PyGenericArrType_Type.tp_as_number->nb_@oper@(a,b);
+            return PyGenericArrType_Type.tp_as_number->nb_@oper@(a, b);
+        case -3:
+            self = b;
+            other = a;
+        case -4:
+            self = a;
+            other = b;
+            /*
+             * This case covers two possible cases, either one of the operands
+             * is an array-like, or a (scalar) type not known to NumPy.
+             * In the first case, we may need to defer with the typical
+             * binop deferal logic (if no deferral occurs we are allowed to
+             * coerce the object to an array).
+             * If it is an unknown scalar we have a caveat. `np.array(other)`
+             * will be an object array containing `other`. In this case we
+             * cannot handle the operation. We deal with this by either:
+             * 1. Returning `oper(self.item(), other)`, potentially
+             * 2. Defering to the other type (longdouble, clongdouble)
+             * Where case 1. must be used if `self.item() is self`.
+             */
+            BINOP_GIVE_UP_IF_NEEDED(a, b, nb_@oper@, @name@_@oper@);
+            /* Normalize a and b */
+            PyObject *tmp = PyArray_FROM_O(other);
+            if (tmp == NULL) {
+                return NULL;
+            }
+            if (PyArray_NDIM(tmp) == 0 && PyArray_ISOBJECT(tmp) &&
+                    ((PyObject *)PyArray_BYTES(tmp))[0] == other) {
+                /* This is a scalar unknown to NumPy */
+                Py_DECREF(tmp);
+#if defined(_IS_LongDouble) || defined(_IS_CLongDouble)
+                /* Defer directly for longdouble and clongdouble */
+                Py_RETURN_NOTIMPLEMENTED;
+#else  /* Not (C)LongDouble, so conversion to python is valid */
+
+  #elif defined(_IS_Double) || defined(_IS_Float) || defined(_IS_Half)
+                tmp = PyNumber_Float(self);
+  #elif defined(_IS_CDouble) || defined(_IS_CFloat)
+                tmp = PyNumber_Complex(self);
+  #else
+                tmp = PyNumber_Long(self);
+  #endif
+                if (temp == NULL) {
+                    return NULL;
+                }
+                /* Try again with the same operation after replacing self */
+                if (b == self) {
+                    res = python_function(a, tmp);
+                }
+                else {
+                    res = python_function(tmp, b);
+                }
+                Py_DECREF(tmp);
+                return res;
+#endif /* (C)LongDouble */
+            }
     }
 
 #if @fperr@

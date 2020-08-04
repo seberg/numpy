@@ -108,6 +108,7 @@ gentype_power(PyObject *m1, PyObject *m2, PyObject *modulo)
         return Py_NotImplemented;
     }
 
+    BINOP_GIVE_UP_IF_NEEDED(m1, m2, nb_power, gentype_power);
     return PyArray_Type.tp_as_number->nb_power(m1, m2, Py_None);
 }
 
