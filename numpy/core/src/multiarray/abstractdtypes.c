@@ -1,3 +1,5 @@
+#include <numpy/ndarraytypes.h>
+
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include "structmember.h"
@@ -11,6 +13,75 @@
 #include "abstractdtypes.h"
 #include "array_coercion.h"
 #include "common.h"
+
+
+/*
+ * Value Based Promotion Notes
+ * ---------------------------
+ *
+ * One thing we have to solve here is "value based promotion" which is not
+ * a walk in the park...
+ *
+ * Value based promotion in NumPy is limited to:
+ *
+ *   * A _mix_ of scalars and arrays.
+ *   * Should only be used for Python scalars (As of NumPy 1.20 not the case).
+ *
+ * The first point is important, because it means that when we have only
+ * scalars with the respective abstract DTypes (defined here largely), we
+ * do not need to promote them at all.  We can instead convert them to their
+ * "default" DType and promote those instead.
+ *
+ * The second point is mainly important because it narrows down when value
+ * based promotion is used. For example `np.add(1, [2, 3])` will never consider
+ * the list `[2, 3]` as a "value" and can convert it using `np.asarray()`
+ * without checking for value based promotion.
+ *
+ * This means we can implement the following scheme:
+ *   1. We first promote all concrete DTypes, those which do not come with a
+ *      scalar value. (Users will have to be careful to do this also.)
+ *   2. If there is no concrete DType, we convert all of the abstract ones
+ *      to their respective concrete version (using the provided value)
+ *      and perform 1. on those.
+ *   3. If we have a mix, there will be a single concrete DType left after
+ *      step 1.  We promote this _with_ value with the first abstract DType.
+ *      The result must be concrete again, and the process is continued until
+ *      we have the final, concrete, result.
+ *
+ * To implement this scheme, we have to pass around scalar values for abstract
+ * DTypes (note that if an abstract DType does not wish to take part in value
+ * based promotion, it will always be converted to the concrete version right
+ * away, `np.result_type`, etc. will reject this case).
+ * This means we must pass scalars into the C-equivalent of `np.result_types`
+ * as well as the universal function promoters.
+ *
+ * In NumPy 1.20, only the abstract DType will have a slot to actually perform
+ * value based promotion. But to allow value based promotion for user DTypes
+ * this slot will need to be public. In that case the slot of the concrete
+ * DType will be guaranteed to be called first (if it is defined).
+ *
+ * In NumPy 1.20 we reuse `discover_descriptor_from_pyobject()` even when
+ * we may only require the type of that descriptor. A dedicated function
+ * may be preferable if we allow users to create such "value sensitive"
+ * abstract DTypes. (Investigate how and where would use it.)
+ */
+
+
+NPY_NO_EXPORT PyArray_DTypeMeta *  // TODO: oops, static!
+pyint_common_dtype_with_value(PyArray_DTypeMeta *self,
+        PyArray_DTypeMeta *other, PyObject *value)
+{
+    if (other->type_num > NPY_NTYPES ) {
+        /*
+         * Return NotImplemented, indicating that the promotion machinery
+         * should make one last attempt by discovering the correct concrete
+         * DType from the value.
+         */
+        Py_INCREF(Py_NotImplemented);
+        return (PyArray_DTypeMeta *)Py_NotImplemented;
+    }
+    return NULL;
+}
 
 
 static PyArray_Descr *
@@ -66,10 +137,6 @@ discover_descriptor_from_pycomplex(
 NPY_NO_EXPORT int
 initialize_and_map_pytypes_to_dtypes()
 {
-    PyArrayAbstractObjDTypeMeta_Type.tp_base = &PyArrayDTypeMeta_Type;
-    if (PyType_Ready(&PyArrayAbstractObjDTypeMeta_Type) < 0) {
-        return -1;
-    }
     ((PyTypeObject *)&PyArray_PyIntAbstractDType)->tp_base = &PyArrayDTypeMeta_Type;
     PyArray_PyIntAbstractDType.scalar_type = &PyLong_Type;
     if (PyType_Ready((PyTypeObject *)&PyArray_PyIntAbstractDType) < 0) {
@@ -127,18 +194,10 @@ initialize_and_map_pytypes_to_dtypes()
 
 
 
-/* Note: This is currently largely not used, but will be required eventually. */
-NPY_NO_EXPORT PyTypeObject PyArrayAbstractObjDTypeMeta_Type = {
-        PyVarObject_HEAD_INIT(NULL, 0)
-        .tp_name = "numpy._AbstractObjDTypeMeta",
-        .tp_basicsize = sizeof(PyArray_DTypeMeta),
-        .tp_flags = Py_TPFLAGS_DEFAULT,
-        .tp_doc = "Helper MetaClass for value based casting AbstractDTypes.",
-};
-
 NPY_NO_EXPORT PyArray_DTypeMeta PyArray_PyIntAbstractDType = {{{
-        PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
-        .tp_basicsize = sizeof(PyArray_DTypeMeta),
+        PyVarObject_HEAD_INIT(&PyArrayDTypeMeta_Type, 0)
+        .tp_basicsize = sizeof(PyArray_Descr),
+        .tp_flags = Py_TPFLAGS_DEFAULT,
         .tp_name = "numpy._PyIntBaseAbstractDType",
     },},
     .abstract = 1,
@@ -147,8 +206,9 @@ NPY_NO_EXPORT PyArray_DTypeMeta PyArray_PyIntAbstractDType = {{{
 };
 
 NPY_NO_EXPORT PyArray_DTypeMeta PyArray_PyFloatAbstractDType = {{{
-        PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
-        .tp_basicsize = sizeof(PyArray_DTypeMeta),
+        PyVarObject_HEAD_INIT(&PyArrayDTypeMeta_Type, 0)
+        .tp_basicsize = sizeof(PyArray_Descr),
+       .tp_flags = Py_TPFLAGS_DEFAULT,
         .tp_name = "numpy._PyFloatBaseAbstractDType",
     },},
     .abstract = 1,
@@ -157,12 +217,12 @@ NPY_NO_EXPORT PyArray_DTypeMeta PyArray_PyFloatAbstractDType = {{{
 };
 
 NPY_NO_EXPORT PyArray_DTypeMeta PyArray_PyComplexAbstractDType = {{{
-        PyVarObject_HEAD_INIT(&PyArrayAbstractObjDTypeMeta_Type, 0)
-        .tp_basicsize = sizeof(PyArray_DTypeMeta),
+        PyVarObject_HEAD_INIT(&PyArrayDTypeMeta_Type, 0)
+        .tp_basicsize = sizeof(PyArray_Descr),
+         .tp_flags = Py_TPFLAGS_DEFAULT,
         .tp_name = "numpy._PyComplexBaseAbstractDType",
     },},
     .abstract = 1,
     .discover_descr_from_pyobject = discover_descriptor_from_pycomplex,
     .kind = 'c',
 };
-
