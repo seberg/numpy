@@ -1400,17 +1400,23 @@ NPY_NO_EXPORT PyObject *
 _discover_array_parameters(PyObject *NPY_UNUSED(self),
                            PyObject *args, PyObject *kwargs)
 {
-    static char *kwlist[] = {"obj", "dtype", NULL};
+    static char *kwlist[] = {"obj", "dtype", "ndmax", NULL};
 
     PyObject *obj;
     PyObject *dtype = NULL;
     PyArray_Descr *fixed_descriptor = NULL;
     PyArray_DTypeMeta *fixed_DType = NULL;
+    int ndmax = NPY_MAXDIMS;
     npy_intp shape[NPY_MAXDIMS];
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "O|O:_discover_array_parameters", kwlist,
-            &obj, &dtype)) {
+            args, kwargs, "O|Oi:_discover_array_parameters", kwlist,
+            &obj, &dtype, &ndmax)) {
+        return NULL;
+    }
+    if (ndmax < 0 || ndmax > NPY_MAXDIMS) {
+        PyErr_SetString(PyExc_ValueError,
+                "`ndmax` must be between 0 and NPY_MAXDIMS");
         return NULL;
     }
 
@@ -1422,7 +1428,7 @@ _discover_array_parameters(PyObject *NPY_UNUSED(self),
     coercion_cache_obj *coercion_cache = NULL;
     PyObject *out_dtype = NULL;
     int ndim = PyArray_DiscoverDTypeAndShape(
-            obj, NPY_MAXDIMS, shape,
+            obj, ndmax, shape,
             &coercion_cache,
             fixed_DType, fixed_descriptor, (PyArray_Descr **)&out_dtype);
     Py_XDECREF(fixed_DType);

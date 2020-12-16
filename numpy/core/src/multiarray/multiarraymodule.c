@@ -4259,7 +4259,9 @@ static struct PyMethodDef array_module_methods[] = {
     {"set_legacy_print_mode", (PyCFunction)set_legacy_print_mode,
         METH_VARARGS, NULL},
     {"_discover_array_parameters", (PyCFunction)_discover_array_parameters,
-        METH_VARARGS | METH_KEYWORDS, NULL},
+        METH_VARARGS | METH_KEYWORDS,
+        "Private exposure of dtype and shape discovery for an python object. "
+        "Possible kwargs are `dtype` (a dtype or type(dtype)) and `ndmax`."},
     {"_get_castingimpl",  (PyCFunction)_get_castingimpl,
      METH_VARARGS | METH_KEYWORDS, NULL},
     /* from umath */
