@@ -940,50 +940,6 @@ PyArray_FindConcatenationDescriptor(
 }
 
 
-/**
- * This function defines the common DType operator.
- *
- * Note that the common DType will not be "object" (unless one of the dtypes
- * is object), even though object can technically represent all values
- * correctly.
- *
- * TODO: Before exposure, we should review the return value (e.g. no error
- *       when no common DType is found).
- *
- * @param dtype1 DType class to find the common type for.
- * @param dtype2 Second DType class.
- * @return The common DType or NULL with an error set
- */
-NPY_NO_EXPORT PyArray_DTypeMeta *
-PyArray_CommonDType(PyArray_DTypeMeta *dtype1, PyArray_DTypeMeta *dtype2)
-{
-    if (dtype1 == dtype2) {
-        Py_INCREF(dtype1);
-        return dtype1;
-    }
-
-    PyArray_DTypeMeta *common_dtype;
-
-    common_dtype = dtype1->common_dtype(dtype1, dtype2);
-    if (common_dtype == (PyArray_DTypeMeta *)Py_NotImplemented) {
-        Py_DECREF(common_dtype);
-        common_dtype = dtype2->common_dtype(dtype2, dtype1);
-    }
-    if (common_dtype == NULL) {
-        return NULL;
-    }
-    if (common_dtype == (PyArray_DTypeMeta *)Py_NotImplemented) {
-        Py_DECREF(Py_NotImplemented);
-        PyErr_Format(PyExc_TypeError,
-                "The DTypes %S and %S do not have a common DType. "
-                "For example they cannot be stored in a single array unless "
-                "the dtype is `object`.", dtype1, dtype2);
-        return NULL;
-    }
-    return common_dtype;
-}
-
-
 /*NUMPY_API
  * Produces the smallest size and lowest kind type to which both
  * input types can be cast.
