@@ -3705,11 +3705,16 @@ def var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=np._NoValue, *,
 
 # Aliases of other functions. These have their own definitions only so that
 # they can have unique docstrings.
-
+@overrides.discouraged_api
 @array_function_dispatch(_around_dispatcher)
 def round_(a, decimals=0, out=None):
     """
     Round an array to the given number of decimals.
+
+    .. note::
+
+        This function is discouraged, please use `numpy.round` or
+        `numpy.around` instead.
 
     See Also
     --------
@@ -3718,10 +3723,15 @@ def round_(a, decimals=0, out=None):
     return around(a, decimals=decimals, out=out)
 
 
+@overrides.discouraged_api
 @array_function_dispatch(_prod_dispatcher, verify=False)
 def product(*args, **kwargs):
     """
     Return the product of array elements over a given axis.
+
+    .. note::
+
+        This function is discouraged, please use `numpy.prod` instead.
 
     See Also
     --------
@@ -3730,10 +3740,15 @@ def product(*args, **kwargs):
     return prod(*args, **kwargs)
 
 
+@overrides.discouraged_api
 @array_function_dispatch(_cumprod_dispatcher, verify=False)
 def cumproduct(*args, **kwargs):
     """
     Return the cumulative product over the given axis.
+
+    .. note::
+
+        This function is discouraged, please use `numpy.cumprod` instead.
 
     See Also
     --------
@@ -3742,12 +3757,15 @@ def cumproduct(*args, **kwargs):
     return cumprod(*args, **kwargs)
 
 
+@overrides.discouraged_api
 @array_function_dispatch(_any_dispatcher, verify=False)
 def sometrue(*args, **kwargs):
     """
     Check whether some values are true.
 
-    Refer to `any` for full documentation.
+    .. note::
+
+        This function is discouraged, please use `numpy.any` instead.
 
     See Also
     --------
@@ -3756,10 +3774,16 @@ def sometrue(*args, **kwargs):
     return any(*args, **kwargs)
 
 
+@overrides.discouraged_api
 @array_function_dispatch(_all_dispatcher, verify=False)
 def alltrue(*args, **kwargs):
     """
     Check if all elements of input array are true.
+
+
+    .. note::
+
+        This function is discouraged, please use `numpy.all` instead.
 
     See Also
     --------

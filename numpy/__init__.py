@@ -134,6 +134,8 @@ else:
     __all__ = ['ModuleDeprecationWarning',
                'VisibleDeprecationWarning']
 
+    __discouraged_api = set()  # marked functions will not be in __dir__
+
     # get the version using versioneer
     from ._version import get_versions
     vinfo = get_versions()
@@ -309,7 +311,7 @@ else:
                                  "{!r}".format(__name__, attr))
 
         def __dir__():
-            return list(globals().keys() | {'Tester', 'testing'})
+            return list((globals().keys() | {'Tester', 'testing'}) - __discouraged_api)
 
     else:
         # We don't actually use this ourselves anymore, but I'm not 100% sure that

@@ -1,4 +1,6 @@
 """Implementation of __array_function__ overrides from NEP-18."""
+import numpy
+
 import collections
 import functools
 import os
@@ -129,6 +131,10 @@ def set_module(module):
         return func
     return decorator
 
+
+def discouraged_api(func):
+    numpy.__discouraged_api.add(func.__name__)
+    return func
 
 
 # Call textwrap.dedent here instead of in the function so as to avoid
