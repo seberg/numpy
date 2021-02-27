@@ -1382,6 +1382,8 @@ dtype_kind_to_simplified_ordering(char kind)
  * If the scalars are of a lower or same category as the arrays, they may be
  * demoted to a lower type within their category (the lowest type they can
  * be cast to safely according to scalar casting rules).
+ *
+ * If any new style dtype is involved (non-legacy), always returns 0.
  */
 NPY_NO_EXPORT int
 should_use_min_scalar(npy_intp narrs, PyArrayObject **arr,
@@ -1398,6 +1400,9 @@ should_use_min_scalar(npy_intp narrs, PyArrayObject **arr,
 
         /* Compute the maximum "kinds" and whether everything is scalar */
         for (npy_intp i = 0; i < narrs; ++i) {
+            if (!NPY_DTYPE(PyArray_DESCR(arr[i]))->legacy) {
+                return 0;
+            }
             if (PyArray_NDIM(arr[i]) == 0) {
                 int kind = dtype_kind_to_simplified_ordering(
                                     PyArray_DESCR(arr[i])->kind);
@@ -1419,6 +1424,9 @@ should_use_min_scalar(npy_intp narrs, PyArrayObject **arr,
          * finish computing the max array kind
          */
         for (npy_intp i = 0; i < ndtypes; ++i) {
+            if (!NPY_DTYPE(dtypes[i])->legacy) {
+                return 0;
+            }
             int kind = dtype_kind_to_simplified_ordering(dtypes[i]->kind);
             if (kind > max_array_kind) {
                 max_array_kind = kind;
@@ -1449,8 +1457,10 @@ should_use_min_scalar(npy_intp narrs, PyArrayObject **arr,
  *
  */
 NPY_NO_EXPORT PyArray_Descr *
-PyArray_ResultType(npy_intp narrs, PyArrayObject **arr,
-                    npy_intp ndtypes, PyArray_Descr **dtypes)
+PyArray_ResultType(
+        npy_intp narrs, PyArrayObject **arr,
+        npy_intp ndtypes, PyArray_Descr **dtypes,
+        char *weak_flags[])
 {
     npy_intp i;
 

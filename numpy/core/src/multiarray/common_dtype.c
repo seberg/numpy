@@ -235,13 +235,12 @@ reduce_all_numpy_scalar_dtypes(
 
 /*
  * When dealing with potential values, we need to find the "minimum scalar
- * type" with the legacy way of doing this.
- * We would also like to change this in the future (as of NumPy 1.21), whic
- * may require warnings.  So the way this is implemented is by first
- * reducing _without_ value.
+ * type" with the legacy way of doing this, which means doing the value based
+ * logic we have always been using.  At this point, we only have to do that
+ * for all of the remaining types with values.
  */
 static PyObject *
-reduce_dtypes_with_value()
+reduce_scalars_as_minimal_dtype()
 {
 
     int abstract_value_type = -1;
@@ -487,7 +486,7 @@ PyArray_PromoteDTypesWithValues(
         /*
          * Case 2 -- NumPy style value-based promotion.
          */
-        Py_SETREF(result, reduce_dtypes_with_value(result, dtypes, values));
+        Py_SETREF(result, reduce_scalars_as_minimal_dtype(result, dtypes, values));
         goto finish;
     }
     else {
