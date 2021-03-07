@@ -388,7 +388,7 @@ class TestHistogram:
             return
 
         # previously crashed
-        count, x_loc = np.histogram(arr, bins=1, range=range)
+        count, x_loc = np.histogram(arr, bins=1, range=range[0])
         assert_equal(count, [1])
 
         # gh-10322 means that the type comes from arr - this may change

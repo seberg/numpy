@@ -341,7 +341,7 @@ PyUFunc_SimpleBinaryComparisonTypeResolver(PyUFuncObject *ufunc,
          */
         if (!PyArray_ISFLEXIBLE(operands[0]) &&
                 !PyArray_ISFLEXIBLE(operands[1])) {
-            out_dtypes[0] = PyArray_ResultType(2, operands, 0, NULL);
+            out_dtypes[0] = PyArray_CommonDescriptorFromObjsAndTypes(2, operands, NULL, 0, NULL, 0);
             if (out_dtypes[0] == NULL) {
                 return -1;
             }

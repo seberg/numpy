@@ -1470,7 +1470,6 @@ array_putmask(PyObject *NPY_UNUSED(module), PyObject *args, PyObject *kwds)
 NPY_NO_EXPORT unsigned char
 PyArray_EquivTypes(PyArray_Descr *type1, PyArray_Descr *type2)
 {
-#if NPY_USE_NEW_CASTINGIMPL
     /*
      * Do not use PyArray_CanCastTypeTo because it supports legacy flexible
      * dtypes as input.
@@ -1482,9 +1481,6 @@ PyArray_EquivTypes(PyArray_Descr *type1, PyArray_Descr *type2)
     }
     /* If casting is "no casting" this dtypes are considered equivalent. */
     return PyArray_MinCastSafety(safety, NPY_NO_CASTING) == NPY_NO_CASTING;
-#else
-    return PyArray_LegacyEquivTypes(type1, type2);
-#endif
 }
 
 
@@ -3352,6 +3348,7 @@ array_result_type(PyObject *NPY_UNUSED(dummy), PyObject *args)
 {
     npy_intp i, len, narr = 0, ndtypes = 0;
     PyArrayObject **arr = NULL;
+    PyObject **values = NULL;  /* The original value for each "array" */
     PyArray_Descr **dtypes = NULL;
     PyObject *ret = NULL;
 
@@ -3362,22 +3359,25 @@ array_result_type(PyObject *NPY_UNUSED(dummy), PyObject *args)
         goto finish;
     }
 
-    arr = PyArray_malloc(2 * len * sizeof(void *));
+    arr = PyMem_Malloc(3 * len * sizeof(void *));
     if (arr == NULL) {
         return PyErr_NoMemory();
     }
-    dtypes = (PyArray_Descr**)&arr[len];
+    values = (PyObject **)&arr[len];
+    dtypes = (PyArray_Descr**)&arr[2 * len];
 
     for (i = 0; i < len; ++i) {
         PyObject *obj = PyTuple_GET_ITEM(args, i);
         if (PyArray_Check(obj)) {
             Py_INCREF(obj);
             arr[narr] = (PyArrayObject *)obj;
+            values[narr] = obj;
             ++narr;
         }
         else if (PyArray_IsScalar(obj, Generic) ||
                                     PyArray_IsPythonNumber(obj)) {
             arr[narr] = (PyArrayObject *)PyArray_FROM_O(obj);
+            values[narr] = obj;
             if (arr[narr] == NULL) {
                 goto finish;
             }
@@ -3391,7 +3391,8 @@ array_result_type(PyObject *NPY_UNUSED(dummy), PyObject *args)
         }
     }
 
-    ret = (PyObject *)PyArray_ResultType(narr, arr, ndtypes, dtypes);
+    ret = (PyObject *)PyArray_CommonDescriptorFromObjsAndTypes(
+            narr, arr, values, ndtypes, dtypes, 1);
 
 finish:
     for (i = 0; i < narr; ++i) {
@@ -3400,7 +3401,7 @@ finish:
     for (i = 0; i < ndtypes; ++i) {
         Py_DECREF(dtypes[i]);
     }
-    PyArray_free(arr);
+    PyMem_Free(arr);
     return ret;
 }
 

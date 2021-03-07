@@ -91,8 +91,9 @@ PyArray_GetCastingImpl(PyArray_DTypeMeta *from, PyArray_DTypeMeta *to)
     }
     else if (from->type_num < NPY_NTYPES && to->type_num < NPY_NTYPES) {
         /* All builtin dtypes have their casts explicitly defined. */
+        assert(0);
         PyErr_Format(PyExc_RuntimeError,
-                "builtin cast from %S to %s not found, this should not "
+                "builtin cast from %S to %S not found, this should not "
                 "be possible.", from, to);
         return NULL;
     }
@@ -419,7 +420,24 @@ PyArray_GetCastSafety(
 NPY_NO_EXPORT int
 PyArray_CanCastSafely(int fromtype, int totype)
 {
-#if NPY_USE_NEW_CASTINGIMPL
+    /* Identity */
+    if (fromtype == totype) {
+        return 1;
+    }
+    /*
+     * As a micro-optimization, keep the cast table around.  This can probably
+     * be removed as soon as the ufunc loop lookup is modified (presumably
+     * before the 1.21 release).  It does no harm, but the main user of this
+     * function is the ufunc-loop lookup calling it until a loop matches!
+     *
+     * (The table extends further, but is not strictly correct for void).
+     * TODO: Check this!
+     */
+    if ((unsigned int)fromtype <= NPY_CLONGDOUBLE &&
+            (unsigned int)totype <= NPY_CLONGDOUBLE) {
+        return _npy_can_cast_safely_table[fromtype][totype];
+    }
+
     PyArray_DTypeMeta *from = PyArray_DTypeFromTypeNum(fromtype);
     if (from == NULL) {
         PyErr_WriteUnraisable(NULL);
@@ -446,9 +464,6 @@ PyArray_CanCastSafely(int fromtype, int totype)
     int res = PyArray_MinCastSafety(safety, NPY_SAFE_CASTING) == NPY_SAFE_CASTING;
     Py_DECREF(castingimpl);
     return res;
-#else
-    return PyArray_LegacyCanCastSafely(fromtype, totype);
-#endif
 }
 
 
@@ -462,11 +477,7 @@ PyArray_CanCastSafely(int fromtype, int totype)
 NPY_NO_EXPORT npy_bool
 PyArray_CanCastTo(PyArray_Descr *from, PyArray_Descr *to)
 {
-#if NPY_USE_NEW_CASTINGIMPL
     return PyArray_CanCastTypeTo(from, to, NPY_SAFE_CASTING);
-#else
-    return PyArray_LegacyCanCastTo(from, to);
-#endif
 }
 
 
@@ -541,7 +552,6 @@ NPY_NO_EXPORT npy_bool
 PyArray_CanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
         NPY_CASTING casting)
 {
-#if NPY_USE_NEW_CASTINGIMPL
     /*
      * NOTE: This code supports U and S, this is identical to the code
      *       in `ctors.c` which does not allow these dtypes to be attached
@@ -568,9 +578,6 @@ PyArray_CanCastTypeTo(PyArray_Descr *from, PyArray_Descr *to,
     }
     /* If casting is the smaller (or equal) safety we match */
     return PyArray_MinCastSafety(safety, casting) == casting;
-#else
-    return PyArray_LegacyCanCastTypeTo(from, to, casting);
-#endif
 }
 
 
@@ -830,7 +837,6 @@ PyArray_CastDescrToDType(PyArray_Descr *descr, PyArray_DTypeMeta *given_DType)
         return descr;
     }
 
-#if NPY_USE_NEW_CASTINGIMPL
     PyObject *tmp = PyArray_GetCastingImpl(NPY_DTYPE(descr), given_DType);
     if (tmp == NULL || tmp == Py_None) {
         Py_XDECREF(tmp);
@@ -855,21 +861,8 @@ PyArray_CastDescrToDType(PyArray_Descr *descr, PyArray_DTypeMeta *given_DType)
     PyErr_Fetch(&err_type, &err_value, &err_traceback);
     PyErr_Format(PyExc_ValueError,
             "cannot cast dtype %S to %S.", descr, given_DType);
-    npy_PyErr_ChainExceptions(err_type, err_value, err_traceback);
+    npy_PyErr_ChainExceptionsCause(err_type, err_value, err_traceback);
     return NULL;
-
-#else  /* NPY_USE_NEW_CASTS */
-    if (!given_DType->legacy) {
-        PyErr_SetString(PyExc_NotImplementedError,
-                "Must use casting to find the correct DType for a parametric "
-                "user DType. This is not yet implemented (this error should be "
-                "unreachable).");
-        return NULL;
-    }
-
-    PyArray_Descr *flex_dtype = PyArray_DescrNew(given_DType->singleton);
-    return PyArray_AdaptFlexibleDType(descr, flex_dtype);
-#endif  /* NPY_USE_NEW_CASTS */
 }
 
 
@@ -889,7 +882,7 @@ PyArray_FindConcatenationDescriptor(
         npy_intp n, PyArrayObject **arrays, PyObject *requested_dtype)
 {
     if (requested_dtype == NULL) {
-        return PyArray_ResultType(n, arrays, 0, NULL);
+        return PyArray_LegacyResultType(n, arrays, 0, NULL);
     }
 
     PyArray_DTypeMeta *common_dtype;
@@ -910,16 +903,16 @@ PyArray_FindConcatenationDescriptor(
         goto finish;
     }
     assert(n > 0);  /* concatenate requires at least one array input. */
+
+    /*
+     * NOTE: This code duplicates `PyArray_CastToDTypeAndPromoteDescriptors`
+     *       to use arrays, copying the descriptors seems not better.
+     */
     PyArray_Descr *descr = PyArray_DESCR(arrays[0]);
     result = PyArray_CastDescrToDType(descr, common_dtype);
     if (result == NULL || n == 1) {
         goto finish;
     }
-    /*
-     * This could short-cut a bit, calling `common_instance` directly and/or
-     * returning the `default_descr()` directly. Avoiding that (for now) as
-     * it would duplicate code from `PyArray_PromoteTypes`.
-     */
     for (npy_intp i = 1; i < n; i++) {
         descr = PyArray_DESCR(arrays[i]);
         PyArray_Descr *curr = PyArray_CastDescrToDType(descr, common_dtype);
@@ -927,7 +920,7 @@ PyArray_FindConcatenationDescriptor(
             Py_SETREF(result, NULL);
             goto finish;
         }
-        Py_SETREF(result, PyArray_PromoteTypes(result, curr));
+        Py_SETREF(result, common_dtype->common_instance(result, curr));
         Py_DECREF(curr);
         if (result == NULL) {
             goto finish;
@@ -962,6 +955,7 @@ PyArray_PromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
     }
 
     if (!common_dtype->parametric) {
+        /* Note that this path loses all metadata */
         res = common_dtype->default_descr(common_dtype);
         Py_DECREF(common_dtype);
         return res;
@@ -995,28 +989,17 @@ PyArray_PromoteTypes(PyArray_Descr *type1, PyArray_Descr *type2)
  * Produces the smallest size and lowest kind type to which all
  * input types can be cast.
  *
- * Equivalent to functools.reduce(PyArray_PromoteTypes, types)
+ * Roughly equivalent to functools.reduce(PyArray_PromoteTypes, types)
+ * but uses a more complex pairwise approach.
  */
 NPY_NO_EXPORT PyArray_Descr *
 PyArray_PromoteTypeSequence(PyArray_Descr **types, npy_intp ntypes)
 {
-    npy_intp i;
-    PyArray_Descr *ret = NULL;
     if (ntypes == 0) {
         PyErr_SetString(PyExc_TypeError, "at least one type needed to promote");
         return NULL;
     }
-    ret = types[0];
-    Py_INCREF(ret);
-    for (i = 1; i < ntypes; ++i) {
-        PyArray_Descr *tmp = PyArray_PromoteTypes(types[i], ret);
-        Py_DECREF(ret);
-        ret = tmp;
-        if (ret == NULL) {
-            return NULL;
-        }
-    }
-    return ret;
+    return PyArray_CommonDescriptorFromObjsAndTypes(0, NULL, NULL, ntypes, types, 1);
 }
 
 /*
@@ -1443,6 +1426,25 @@ should_use_min_scalar(npy_intp narrs, PyArrayObject **arr,
 
 
 /*NUMPY_API
+ *
+ * Produces the result type of a bunch of inputs, using the same rules
+ * as `np.result_type`, except that none of the arrays can behave like
+ * the NumPy like a Python scalars does there.
+ *
+ * As of NumPy 1.20 this function transitions to a "strict" future, where
+ * arrays are treated identically to dtypes.
+ */
+NPY_NO_EXPORT PyArray_Descr *
+PyArray_ResultType(
+        npy_intp narrs, PyArrayObject **arr,
+        npy_intp ndtypes, PyArray_Descr **dtypes)
+{
+    return PyArray_CommonDescriptorFromObjsAndTypes(
+            narrs, arr, NULL, ndtypes, dtypes, 1);
+}
+
+
+/*
  * Produces the result type of a bunch of inputs, using the UFunc
  * type promotion rules. Use this function when you have a set of
  * input arrays, and need to determine an output array dtype.
@@ -1454,13 +1456,11 @@ should_use_min_scalar(npy_intp narrs, PyArrayObject **arr,
  * Otherwise, does a type promotion on the MinScalarType
  * of all the inputs.  Data types passed directly are treated as array
  * types.
- *
  */
 NPY_NO_EXPORT PyArray_Descr *
-PyArray_ResultType(
+PyArray_LegacyResultType(
         npy_intp narrs, PyArrayObject **arr,
-        npy_intp ndtypes, PyArray_Descr **dtypes,
-        char *weak_flags[])
+        npy_intp ndtypes, PyArray_Descr **dtypes)
 {
     npy_intp i;
 
@@ -1558,6 +1558,203 @@ PyArray_ResultType(
         return ret;
     }
 }
+
+/**
+ * Promotion of descriptors (of arbitrary DType) to their correctly
+ * promoted instances of the given DType.
+ * I.e. the given DType could be a string, which then finds the correct
+ * string length, given all `descrs`.
+ *
+ * @param ndescrs number of descriptors to cast and find the common instance.
+ *        At least one must be passed in.
+ * @param descrs The descriptors to work with.
+ * @param DType The DType of the desired output descriptor.
+ */
+NPY_NO_EXPORT PyArray_Descr *
+PyArray_CastToDTypeAndPromoteDescriptors(
+        npy_intp ndescr, PyArray_Descr *descrs[], PyArray_DTypeMeta *DType)
+{
+    assert(ndescr > 0);
+
+    PyArray_Descr *result = PyArray_CastDescrToDType(descrs[0], DType);
+    if (result == NULL || ndescr == 1) {
+        return result;
+    }
+    if (!DType->parametric) {
+        /* Note that this "fast" path loses all metadata */
+        Py_DECREF(result);
+        return DType->default_descr(DType);
+    }
+
+    for (npy_intp i = 1; i < ndescr; i++) {
+        PyArray_Descr *curr = PyArray_CastDescrToDType(descrs[i], DType);
+        if (curr == NULL) {
+            Py_DECREF(result);
+            return NULL;
+        }
+        Py_SETREF(result, DType->common_instance(result, curr));
+        Py_DECREF(curr);
+        if (result == NULL) {
+            return NULL;
+        }
+    }
+    return result;
+}
+
+/*
+ * This function is much like PyArray_ResultType, except that it supports
+ * more arbitrary values.
+ *
+ * `original_values` may be NULL in which case all inputs are assumed to be
+ * arrays.
+ */
+NPY_NO_EXPORT PyArray_Descr *
+PyArray_CommonDescriptorFromObjsAndTypes(
+        npy_intp narr, PyArrayObject *arrs[], PyObject *original_values[],
+        npy_intp ndtypes, PyArray_Descr *descrs[], int transition)
+{
+    PyArray_Descr *result = NULL;
+    if (original_values == NULL) {
+        original_values = (PyObject **)arrs;
+    }
+
+    if (narr + ndtypes == 1) {
+        /* If the input is a single value, skip promotion. */
+        if (narr == 1) {
+            result = PyArray_DTYPE(arrs[0]);
+        }
+        else {
+            result = descrs[0];
+        }
+        return ensure_dtype_nbo(result);
+    }
+
+    void **info_on_heap = NULL;
+    void *_info_on_stack[NPY_MAXARGS * 2];
+    PyArray_DTypeMeta **all_DTypes;
+    PyArray_Descr **all_descriptors;
+
+    if (narr + ndtypes > NPY_MAXARGS) {
+        info_on_heap = PyMem_Malloc(2 * (narr+ndtypes) * sizeof(PyObject *));
+        if (info_on_heap == NULL) {
+            PyErr_NoMemory();
+            return NULL;
+        }
+        all_DTypes = (PyArray_DTypeMeta **)info_on_heap;
+        all_descriptors = (PyArray_Descr **)(info_on_heap + narr + ndtypes);
+    }
+    else {
+        all_DTypes = (PyArray_DTypeMeta **)_info_on_stack;
+        all_descriptors = (PyArray_Descr **)(_info_on_stack + narr + ndtypes);
+    }
+
+    /* Copy all dtypes into a single array defining non-value-based behaviour */
+    for (npy_intp i=0; i < ndtypes; i++) {
+        all_DTypes[i] = NPY_DTYPE(descrs[i]);
+        Py_INCREF(all_DTypes[i]);
+        all_descriptors[i] = descrs[i];
+    }
+
+    int may_be_using_value_based_logic = 0;
+    for (npy_intp i=0, i_all=ndtypes; i < narr; i++, i_all++) {
+        /* Array descr is also the correct "default" for scalars: */
+        all_descriptors[i_all] = PyArray_DTYPE(arrs[i]);
+        if (PyArray_NDIM(arrs[i]) == 0) {
+            may_be_using_value_based_logic = 1;
+        }
+
+        if (PyArray_NDIM(arrs[i]) == 0 ||
+                original_values[i] != (PyObject *)arrs[i]) {
+            /*
+             * The original value may have been a Python scalar with an
+             * abstract DType, so we discover the original DType.
+             * This could probably be micro-optimized easily if it proofs
+             * worthwhile.
+             */
+            PyArray_DTypeMeta *actual_DType = npy_discover_dtype_from_pytype(
+                    Py_TYPE(original_values[i]));
+            if ((PyObject *)actual_DType == Py_None) {
+                /* A NumPy array */
+                Py_DECREF(Py_None);
+            }
+            else if (actual_DType == NULL) {
+                /* Not a NumPy scalar (fall-through), cannot error. */
+            }
+            else {
+                all_DTypes[i_all] = actual_DType;
+                continue;
+            }
+        }
+        /*
+         * At this point, it might be a Python value mapping to an abstract
+         * DType (namely our Integer, Float, and Complex dtypes).
+         */
+        /* Otherwise, this is no "scalar" with an abstract DType: */
+        all_DTypes[i_all] = NPY_DTYPE(all_descriptors[i_all]);
+        Py_INCREF(all_DTypes[i_all]);
+    }
+
+    PyArray_DTypeMeta *common_dtype = PyArray_PromoteDTypeSequence(
+            narr+ndtypes, all_DTypes);
+    for (npy_intp i=0; i < narr+ndtypes; i++) {
+        Py_DECREF(all_DTypes[i]);
+    }
+    if (common_dtype == NULL) {
+        goto finish;
+    }
+
+    if (common_dtype->abstract) {
+        /* (ab)use default descriptor to define a default */
+        PyArray_Descr *tmp_descr = common_dtype->default_descr(common_dtype);
+        if (tmp_descr == NULL) {
+            goto finish;
+        }
+        Py_INCREF(NPY_DTYPE(tmp_descr));
+        Py_SETREF(common_dtype, NPY_DTYPE(tmp_descr));
+        Py_DECREF(tmp_descr);
+    }
+
+    result = PyArray_CastToDTypeAndPromoteDescriptors(
+            narr+ndtypes, all_descriptors, common_dtype);
+    Py_DECREF(common_dtype);
+    if (result == NULL) {
+        goto finish;
+    }
+
+    if (transition && may_be_using_value_based_logic && result->type_num < NPY_NTYPES) {
+        PyArray_Descr *legacy_result = PyArray_LegacyResultType(narr, arrs, ndtypes, descrs);
+        if (legacy_result == NULL) {
+            /*
+             * Going from error to success should not really happen, but is
+             * probably OK if it does.
+             */
+            Py_SETREF(result, NULL);
+            goto finish;
+        }
+        if (!PyArray_EquivTypes(result, legacy_result)) {
+            if (PyErr_WarnFormat(PyExc_FutureWarning, 1,
+                    "Promotion of the inputs will give a different result "
+                    "in the future. The current result is %R but it will change "
+                    "to %R.\n"
+                    "For information on how to silence this warning and adapt "
+                    "your code, please see: "
+                    "https://numpy.org/devdocs/...",
+                    legacy_result, result) < 0) {
+                Py_DECREF(legacy_result);
+                Py_SETREF(result, NULL);
+                goto finish;
+            }
+        }
+        /* Return the old "legacy" result. */
+        Py_SETREF(result, legacy_result);
+    }
+
+  finish:
+    PyMem_Free(info_on_heap);
+    return result;
+}
+
+
 
 /*NUMPY_API
  * Is the typenum valid?

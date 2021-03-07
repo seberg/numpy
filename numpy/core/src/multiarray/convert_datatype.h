@@ -20,6 +20,16 @@ PyArray_ObjectType(PyObject *op, int minimum_type);
 NPY_NO_EXPORT PyArrayObject **
 PyArray_ConvertToCommonType(PyObject *op, int *retn);
 
+NPY_NO_EXPORT PyArray_Descr *
+PyArray_LegacyResultType(
+        npy_intp narrs, PyArrayObject **arr,
+        npy_intp ndtypes, PyArray_Descr **dtypes);
+
+NPY_NO_EXPORT PyArray_Descr *
+PyArray_CommonDescriptorFromObjsAndTypes(
+        npy_intp narr, PyArrayObject *arrs[], PyObject *original_values[],
+        npy_intp ndtypes, PyArray_Descr *descrs[], int transition);
+
 NPY_NO_EXPORT int
 PyArray_ValidType(int type);
 

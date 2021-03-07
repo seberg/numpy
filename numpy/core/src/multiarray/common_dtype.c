@@ -65,13 +65,6 @@ PyArray_CommonDType(PyArray_DTypeMeta *dtype1, PyArray_DTypeMeta *dtype2)
 }
 
 
-#define SWAP(x, y) do { \
-        void *tmp = x;  \
-        x = y;          \
-        y = tmp;        \
-    } while (0)
-
-
 /**
  * This function takes a list of dtypes and "reduces" them (in a sense,
  * it finds the maximal dtype). Note that "maximum" here is defined by
@@ -111,15 +104,12 @@ PyArray_CommonDType(PyArray_DTypeMeta *dtype1, PyArray_DTypeMeta *dtype2)
  * cases may also be possible in some mixed type scenarios; they can be
  * avoided by defining the promotion explicitly in the user DType.)
  *
- * @param length Number of dtypes (and values)
+ * @param length Number of DTypes
  * @param dtypes
- * @param values Values for each DType, must be passed but is only used to
- *        ensure that the reordering applied to dtypes is also applied to
- *        values.
  */
 static PyArray_DTypeMeta *
 reduce_dtypes_to_most_knowledgeable(
-        npy_intp length, PyArray_DTypeMeta **dtypes, PyObject **values)
+        npy_intp length, PyArray_DTypeMeta **dtypes)
 {
     assert(length >= 2);
     npy_intp half = length / 2;
@@ -127,21 +117,10 @@ reduce_dtypes_to_most_knowledgeable(
     PyArray_DTypeMeta *res = NULL;
 
     for (npy_intp low = 0; low < half; low++) {
-        npy_intp high = length - low;
-        if (dtypes[high]->abstract) {
-            /*
-             * Reverse priority: abstract DTypes at the same category are
-             * considered lower. In particular, it allows the abstract DTypes
-             * with a value to provide a fallback (and de-facto all logic).
-             */
-            npy_intp tmp = low;
-            low = high;
-            high = tmp;
-        }
-
+        npy_intp high = length - 1 - low;
         if (dtypes[high] == dtypes[low]) {
-            res = dtypes[low];
-            Py_INCREF(res);
+            Py_INCREF(dtypes[low]);
+            Py_XSETREF(res, dtypes[low]);
         }
         else {
             Py_XSETREF(res, dtypes[low]->common_dtype(dtypes[low], dtypes[high]));
@@ -150,15 +129,13 @@ reduce_dtypes_to_most_knowledgeable(
             }
         }
         if (res == (PyArray_DTypeMeta *)Py_NotImplemented) {
-            SWAP(dtypes[low], dtypes[high]);
-            SWAP(values[low], values[high]);
-        }
-        else if (res->abstract) {
-            Py_INCREF(Py_NotImplemented);
-            Py_SETREF(res, (PyArray_DTypeMeta *)Py_NotImplemented);
+            PyArray_DTypeMeta *tmp = dtypes[low];
+            dtypes[low] = dtypes[high];
+            dtypes[high] = tmp;
         }
         else if (res == dtypes[low]) {
-            Py_SETREF(dtypes[high], NULL);
+            /* `dtypes[high]` cannot influce the final result, so clear: */
+            dtypes[high] = NULL;
         }
     }
 
@@ -166,100 +143,7 @@ reduce_dtypes_to_most_knowledgeable(
         return res;
     }
     Py_DECREF(res);
-    return reduce_dtypes_to_most_knowledgeable(length - half, dtypes, values);
-}
-
-#undef SWAP
-
-/*
- * Helper function to reduce a single DType in case it is abstract.
- * It will either discover from pyobject or use the default descriptor.
- * (In principle we could replace this with specialized functions to not
- * create a descriptor when we only need the class.)
- */
-static NPY_INLINE PyArray_DTypeMeta *
-convert_value_dependent_dtype(PyArray_DTypeMeta *dtype, PyObject *value)
-{
-    if (NPY_LIKELY(!dtype->abstract)) {
-        Py_INCREF(dtype);
-        return dtype;
-    }
-    PyArray_Descr *descr;
-    if (value == NULL) {
-        descr = dtype->default_descr(dtype);
-    }
-    else {
-        descr = dtype->discover_descr_from_pyobject(dtype, value);
-    }
-    if (descr == NULL) {
-        return NULL;
-    }
-    PyArray_DTypeMeta *res = NPY_DTYPE(descr);
-    Py_DECREF(descr);
-    return res;
-}
-
-
-/*
- * Finds the correct DTypes while honoring original NumPy dtypes and using
- * the default version otherwise.
- * The "future" version of this will probably have to
- */
-static PyArray_DTypeMeta *
-reduce_all_numpy_scalar_dtypes(
-        npy_intp length, PyArray_DTypeMeta *dtypes[], PyObject *values[])
-{
-    PyArray_DTypeMeta *result = NULL;
-
-    npy_intp new_length = 0;
-    for (npy_intp i=0; i < length; i++) {
-        if (values[i] != NULL) {
-            dtypes[new_length] = convert_value_dependent_dtype(
-                    dtypes[i], values[i]);
-            if (dtypes[new_length] == NULL) {
-                goto finish;
-            }
-            new_length += 1;
-        }
-    }
-    result = PyArray_PromoteDTypesWithValues(new_length, dtypes, NULL);
-
-  finish:
-    /* We replaced the DTypes, so they are not borrowed anymore */
-    for (npy_intp i=0; i < new_length; i++) {
-        Py_DECREF(dtypes[i]);
-    }
-  return result;
-}
-
-
-/*
- * When dealing with potential values, we need to find the "minimum scalar
- * type" with the legacy way of doing this, which means doing the value based
- * logic we have always been using.  At this point, we only have to do that
- * for all of the remaining types with values.
- */
-static PyObject *
-reduce_scalars_as_minimal_dtype()
-{
-
-    int abstract_value_type = -1;
-    int is_small_unsigned = 1;  /* If true */
-    npy_intp negative_integer_pos = -1;
-    npy_intp remaining_length = 0;
-    for (npy_intp i = 0; i < length; i++) {
-        PyArray_DTypeMeta *dtype = dtypes[i];
-        if (dtypes[i] == NULL) {
-            continue;
-        }
-        Py_INCREF(dtypes[i]);
-        Py_XINCREF(values[i]);
-        if (i > remaining_length) {
-            dtypes[remaining_length] = dtypes[i];
-            values[remaining_length] = values[i];
-        }
-        remaining_length += 1;
-    }
+    return reduce_dtypes_to_most_knowledgeable(length - half, dtypes);
 }
 
 
@@ -300,111 +184,47 @@ reduce_scalars_as_minimal_dtype()
  *
  * @param length Number of dtypes (and values) must be at least 1
  * @param dtypes The concrete or abstract DTypes to promote
- * @param values NULL or a list of values for each DType (entries may be NULL
- *        and are expected to be for concrete DTypes or abstract ones that are
- *        not value dependent.)
  * @return NULL or the promoted DType.
  */
 NPY_NO_EXPORT PyArray_DTypeMeta *
-PyArray_PromoteDTypesWithValues(
-        npy_intp length, PyArray_DTypeMeta **dtypes_in, PyObject **values_in)
+PyArray_PromoteDTypeSequence(
+        npy_intp length, PyArray_DTypeMeta **dtypes_in)
 {
     assert(length >= 1);
     if (length == 1) {
-        PyObject *value = values_in == NULL ? NULL : values_in[0];
-        return convert_value_dependent_dtype(dtypes_in[0], value);
+        Py_INCREF(dtypes_in[0]);
+        return dtypes_in[0];
     }
     PyArray_DTypeMeta *result = NULL;
 
-    /*
-     * Copy both dtypes and values so that we can reorder them.
-     */
-    PyObject *_scratch_stack[NPY_MAXARGS * 2];
+    /* Copy dtypes so that we can reorder them (only allocate when many) */
+    PyObject *_scratch_stack[NPY_MAXARGS];
     PyObject **_scratch_heap = NULL;
     PyArray_DTypeMeta **dtypes = (PyArray_DTypeMeta **)_scratch_stack;
-    PyObject **values = _scratch_heap + NPY_MAXARGS;
 
     if (length > NPY_MAXARGS) {
-        _scratch_heap = PyMem_Malloc(length * 2 * sizeof(PyObject *));
+        _scratch_heap = PyMem_Malloc(length * sizeof(PyObject *));
         if (_scratch_heap == NULL) {
             PyErr_NoMemory();
             return NULL;
         }
         dtypes = (PyArray_DTypeMeta **)_scratch_heap;
-        values = _scratch_heap + length;
     }
 
     memcpy(dtypes, dtypes_in, length * sizeof(PyObject *));
-    if (values == NULL) {
-        memset(values, 0, length * sizeof(PyObject *));
-    }
-    else {
-        memcpy(values, values_in, length * sizeof(PyObject *));
-    }
 
     /*
-     * `result` is the last promotion result, which can usually be reused.
-     * The passed in dtypes and values are partially sorted (and potentially
-     * cleared). `dtypes[0]` will be the most knowledgeable (highest category).
+     * `result` is the last promotion result, which can usually be reused if
+     * it is not NotImplemneted.
+     * The passed in dtypes are partially sorted (and cleared, when clearly
+     * not relevant anymore).
+     * `dtypes[0]` will be the most knowledgeable (highest category) which
+     * we consider the "main_dtype" here.
      */
-    result = reduce_dtypes_to_most_knowledgeable(length, dtypes, values);
+    result = reduce_dtypes_to_most_knowledgeable(length, dtypes);
     if (result == NULL) {
-        goto error;
+        goto finish;
     }
-
-    /*
-     * The following step is important for dealing with value based abstract
-     * DTypes (specifically python integers, complex, and floats).
-     * A potential solution to many of these things, is to allow implementation
-     * of a `result.__common_dtype_reduce__(*dtypes)`, however, certain
-     * behaviour is very complex and we do not want to expose much of it to
-     * user DTypes (especially not initially).
-     *
-     * For simplicity we remove NULLs from dtypes (and values) and INCREF
-     * both (as necessary).
-     *
-     * There are two further pre-processing steps here:
-     *
-     * 1. For user DTypes (non legacy), we assume that value based casting
-     *    should not be a thing to begin with. We discard all values in this
-     *    case and similar to 1 we honor the original NumPy DType when
-     *    available. However, unlike point 1, we do not replace the abstract
-     *    DType with its default.
-     *    The user DType is expected to define a meaningful promotion with the
-     *    abstract DType (but no value), or an error will occur.
-     *    NOTE: We could provide a default (i.e. float64, long).
-     *
-     * 2. If (and only if) the DType we ended up with at the end is one
-     *    of our "Python scalar" abstract DTypes, we need to convert all
-     *    of them to their "default" (it must be only ours, otherwise we would
-     *    have ended up with a user DType). This means we honor the original
-     *    NumPy DType (if available).
-     *
-     * 3. In the "normal" case, we do two things: By now, we know that we
-     *    (potentially) use current NumPy value based logic. So we handle it
-     *    right here and now.
-     *    That is find the minimal (unsigned) integer or (complex) float
-     *    precision.  This could be moved into either a reduce like logic,
-     *    or potentially a `dtype.__common_dtype_with_value__()` method
-     *    as well. But at long we are OK with using point 2 above for user
-     *    DTypes (and as a potential future here), this seems easier.
-     *
-     * This currently hard codes the three cases above, instead of trying to
-     * generalize them more broadly, which also locks out user DTypes from
-     * all value based promotion (as opposed to "weak" promotion).
-     * Aside from implementing the reduction itself with
-     * `dtype.__common_dtype_reduce__(*dtypes)`, removing these special cases
-     * may require an asymmetry, i.e. a method `__rcommon_dtype__`
-     * (possibly with values).  This could allow a "default" fallback for
-     * value based promotion (point 2 and 3 generalization) defined on the
-     * abstract DType itself.
-     */
-
-    /*
-     * Before getting into the difficult cases, we first "recuce" the dtypes
-     * using "weak" type logic for the "values".  In all cases, we will have
-     * to deal with the values afterwards, unfortunately!
-     */
     PyArray_DTypeMeta *main_dtype = dtypes[0];
 
     npy_intp reduce_start = 1;
@@ -416,17 +236,14 @@ PyArray_PromoteDTypesWithValues(
         reduce_start = 2;
     }
     /*
-     * NOTE: The code assumes that by doing the pairwise "maximum" reduction
-     *       most, or all, corner cases are smoothed out.  It is certainly
-     *       possible to design ways to break it, but it should be safe as
-     *       long as there is a clear hierarchy of which dtype knows about
-     *       which other dtype (i.e. if int24 > int96 and int96 > int48 then
-     *       we assume that int24 > int48 -- i.e. int24 must also know about
-     *       int48).  The main way this might break is potentially the
-     *       "complex" abstract dtype (for python complex scalars), because
-     *       its category is "inexact" rather than "complex".  However,
-     *       the worst failure path here is probably that some orders error
-     *       while others succeed with reasonable results).
+     * At this point, we have only looked at every DType at most once.
+     * The `main_dtype` must know all others (or it will be a failure) and
+     * all dtypes returned by its `common_dtype` must be guaranteed to succeed
+     * promotion with one another.
+     * It is the job of the "main DType" to ensure that at this point order
+     * is irrelevant.
+     * If this turns out to be a limitation, this "reduction" will have to
+     * become a default version and we have to allow DTypes to override it.
      */
     PyArray_DTypeMeta *prev = NULL;
     for (npy_intp i = reduce_start; i < length; i++) {
@@ -441,7 +258,28 @@ PyArray_PromoteDTypesWithValues(
         PyArray_DTypeMeta *promotion = main_dtype->common_dtype(
                 main_dtype, dtypes[i]);
         if (promotion == NULL) {
-            goto error;
+            Py_XSETREF(result, NULL);
+            goto finish;
+        }
+        else if ((PyObject *)promotion == Py_NotImplemented) {
+            Py_DECREF(Py_NotImplemented);
+            Py_XSETREF(result, NULL);
+            PyObject *dtypes_in_tuple = PyTuple_New(length);
+            if (dtypes_in_tuple == NULL) {
+                goto finish;
+            }
+            for (npy_intp l=0; l < length; l++) {
+                Py_INCREF(dtypes_in[l]);
+                PyTuple_SET_ITEM(dtypes_in_tuple, l, (PyObject *)dtypes_in[l]);
+            }
+            PyErr_Format(PyExc_TypeError,
+                    "The DType %S could not be promoted by %S. This means that "
+                    "no common DType exists for the given inputs. "
+                    "For example they cannot be stored in a single array unless "
+                    "the dtype is `object`. The full list of DTypes is: %S",
+                    dtypes[i], main_dtype, dtypes_in_tuple);
+            Py_DECREF(dtypes_in_tuple);
+            goto finish;
         }
         if (result == NULL) {
             result = promotion;
@@ -455,57 +293,11 @@ PyArray_PromoteDTypesWithValues(
         Py_SETREF(result, PyArray_CommonDType(result, promotion));
         Py_DECREF(promotion);
         if (result == NULL) {
-            goto error;
+            goto finish;
         }
     }
 
-    /*
-     * To repeat the above, we still have to deal with three cases here:
-     *
-     * 1. User DTypes, should not use value-based logic for 0-D arrays, but
-     *    did until now. So they need promotion with the "existing dtype".
-     * 2. Our dtypes, must use value-based (as opposed to "weak" that was
-     *    used until here).  However, they should transition to what user
-     *    dtypes do.
-     *    At this time, they need to apply value-based logic to upcast,
-     *    in the future, they have to do the same as user DTypes as well and
-     *    then compare it and warn.
-     * 3.
-     */
-    if (result == &PyArray_PyIntAbstractDType ||
-            result == &PyArray_PyFloatAbstractDType ||
-            result == &PyArray_PyComplexAbstractDType) {
-        /*
-         * Case 3 -- We ended up with our abstract DType (i.e. value) and it
-         * is always necessary to convert all those to their "default".
-         */
-        Py_SETREF(result, reduce_all_numpy_scalar_dtypes(length, dtypes, values));
-        goto finish;
-    }
-    else if (result->type_num < NPY_NTYPES) {
-        /*
-         * Case 2 -- NumPy style value-based promotion.
-         */
-        Py_SETREF(result, reduce_scalars_as_minimal_dtype(result, dtypes, values));
-        goto finish;
-    }
-    else {
-        /*
-         * Case 3 -- User dtypes, this could be an abstract dtype, but let
-         * that pass at this point.  It should not requires the original value.
-         *
-         * NOTE: This path is important because eventually we will have to
-         *       transition is to honor the original NumPy dtypes for 0-D array
-         *       inputs. (But not in *all* cases)
-         */
-    }
-
-    goto finish;
-
-  error:
-    Py_XSETREF(result, NULL);
-
   finish:
-    PyObject_Free(_scratch_heap);
+    PyMem_Free(_scratch_heap);
     return result;
 }

@@ -11,7 +11,7 @@ NPY_NO_EXPORT PyArray_DTypeMeta *
 PyArray_CommonDType(PyArray_DTypeMeta *dtype1, PyArray_DTypeMeta *dtype2);
 
 NPY_NO_EXPORT PyArray_DTypeMeta *
-PyArray_PromoteDTypesWithValues(
-        npy_intp length, PyArray_DTypeMeta **dtypes_in, PyObject **values_in);
+PyArray_PromoteDTypeSequence(
+        npy_intp length, PyArray_DTypeMeta **dtypes_in);
 
 #endif  /* _NPY_COMMON_DTYPE_H_ */
