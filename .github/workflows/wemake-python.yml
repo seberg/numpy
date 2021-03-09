@@ -1,0 +1,15 @@
+name: "Lint Test wemake-python"
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  pr-labeler:
+    runs-on: ubuntu-latest
+    steps:
+    - name: wemake-python-styleguide
+      uses: wemake-services/wemake-python-styleguide@0.15.2
+      with:
+        reporter: 'github-pr-check'
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
