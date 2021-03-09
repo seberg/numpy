@@ -4,12 +4,12 @@ on:
     types: [opened, synchronize, reopened, edited]
 
 jobs:
-  pr-labeler:
+  linter:
     runs-on: ubuntu-latest
     steps:
     - name: wemake-python-styleguide
       uses: wemake-services/wemake-python-styleguide@0.14.1
       with:
-        reporter: 'github-pr-check'
+        reporter: 'terminal'
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
