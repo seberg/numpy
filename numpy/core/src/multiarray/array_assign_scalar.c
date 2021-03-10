@@ -206,8 +206,12 @@ PyArray_AssignRawScalar(PyArrayObject *dst,
     }
 
     /* Check the casting rule */
-    if (!can_cast_scalar_to(src_dtype, src_data,
-                            PyArray_DESCR(dst), casting)) {
+    signed char can_cast = can_cast_scalar_to(
+            src_dtype, src_data, PyArray_DESCR(dst), casting, 0);
+    if (can_cast < 0) {
+        return -1;
+    }
+    if (can_cast == 0) {
         npy_set_invalid_cast_error(
                 src_dtype, PyArray_DESCR(dst), casting, NPY_TRUE);
         return -1;

@@ -313,8 +313,10 @@ can_elide_temp(PyArrayObject * alhs, PyObject * orhs, int * cannot)
         }
 
         /* must be safe to cast (checks values for scalar in rhs) */
-        if (PyArray_CanCastArrayTo(arhs, PyArray_DESCR(alhs),
-                                   NPY_SAFE_CASTING)) {
+        // TODO: Not checking values right now, since that would trigger
+        //       a transition warning. But is there much of a point anyway?
+        if (PyArray_CanCastTypeTo(PyArray_DESCR(arhs), PyArray_DESCR(alhs),
+                                  NPY_SAFE_CASTING)) {
             Py_DECREF(arhs);
             return check_callers(cannot);
         }

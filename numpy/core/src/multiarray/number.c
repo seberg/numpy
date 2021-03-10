@@ -16,6 +16,9 @@
 
 #include "binop_override.h"
 #include "ufunc_override.h"
+#include "abstractdtypes.h"
+#include "common_dtype.h"
+#include "convert_datatype.h"
 
 /*************************************************************************
  ****************   Implement Number Protocol ****************************
@@ -267,31 +270,105 @@ PyArray_GenericAccumulateFunction(PyArrayObject *m1, PyObject *op, int axis,
 }
 
 
+/*
+ * Hardcoded promotion paths for int, float, and complex. In practice those
+ * are the only ones we support currently.
+ * TODO: This should be fixed properly when ufuncs are capable of more complex
+ *       promotion rules. But we have a chicken-egg-problem here...
+ */
+static NPY_INLINE PyObject *
+replace_if_pyscalar(PyObject *scalar)
+{
+    if (PyLong_CheckExact(scalar) ||
+            PyFloat_CheckExact(scalar) ||
+            PyComplex_CheckExact(scalar)) {
+        PyObject *res = PyArray_FROM_O(scalar);
+        if (res == NULL) {
+            return NULL;
+        }
+        ((PyArrayObject_fields *)res)->flags |= _NPY_ARRAY_WAS_PYSCALAR;
+        return res;
+    }
+    Py_INCREF(scalar);
+    return scalar;
+}
+
+
+NPY_NO_EXPORT PyObject *
+PyArray_GenericBinaryCompFunction(PyArrayObject *m1, PyObject *m2, PyObject *op)
+{
+    assert(PyArray_Check(m1));
+    PyObject *m2_new = replace_if_pyscalar(m2);
+    if (m2_new == NULL) {
+        return NULL;
+    }
+    if (m2_new != m2 && PyArray_ISNUMBER(m1)) {
+        /*
+         * m2 was a Python int, float, or complex and the array is numeric.
+         * Even if it is 0-D, we want to downcast the number as much as
+         * possible! (If it is not 0, we shouldn't have to, but it doesn't
+         * hurt).
+         */
+        int res = can_cast_scalar_to(
+                PyArray_DTYPE((PyArrayObject *)m2_new), PyArray_BYTES((PyArrayObject *)m2_new),
+                PyArray_DTYPE(m1), NPY_SAFE_CASTING, 2);
+        if (res < 0) {
+            PyErr_Clear();
+        }
+        else if (res & 1) {
+            /* This can be downcast based on old use, ignore new rules */
+            Py_INCREF(PyArray_DTYPE(m1));
+            PyObject *tmp = (PyObject *)PyArray_CastToType(
+                    (PyArrayObject *)m2_new, PyArray_DTYPE(m1), NPY_UNSAFE_CASTING);
+            Py_SETREF(m2_new, tmp);
+            if (m2_new == NULL) {
+                return NULL;
+            }
+            ((PyArrayObject_fields *)m2_new)->flags |= _NPY_ARRAY_WAS_PYSCALAR;
+        }
+    }
+    PyObject *res = PyObject_CallFunctionObjArgs(op, m1, m2_new, NULL);
+    Py_DECREF(m2_new);
+    return res;
+}
+
+
 NPY_NO_EXPORT PyObject *
 PyArray_GenericBinaryFunction(PyArrayObject *m1, PyObject *m2, PyObject *op)
 {
     /*
-     * I suspect that the next few lines are buggy and cause NotImplemented to
-     * be returned at weird times... but if we raise an error here, then
-     * *everything* breaks. (Like, 'arange(10) + 1' and just
-     * 'repr(arange(10))' both blow up with an error here.) Not sure what's
-     * going on with that, but I'll leave it alone for now. - njs, 2015-06-21
+     * NOTE: This is a temporary measure until the ufunc machinery is capable
+     *       of implementing a more complete solution. At that point, this
+     *       will have to be changed a fair bit...
+     *       It assumes that the common-dtype is always "correct", which is
+     *       not true in general, but true for our numerical types (which
+     *       are the only interesting ones).
      */
-    if (op == NULL) {
-        Py_INCREF(Py_NotImplemented);
-        return Py_NotImplemented;
+    PyObject *m1_new = replace_if_pyscalar((PyObject *)m1);
+    PyObject *m2_new;
+    if (m1_new == NULL) {
+        return NULL;
     }
-
-    return PyObject_CallFunctionObjArgs(op, m1, m2, NULL);
+    else if (m1_new != (PyObject *)m1) {
+        Py_INCREF(m2);
+        m2_new = m2;
+    }
+    else {
+        m2_new = replace_if_pyscalar(m2);
+        if (m2_new == NULL) {
+            Py_DECREF(m1_new);
+            return NULL;
+        }
+    }
+    PyObject *res = PyObject_CallFunctionObjArgs(op, m1_new, m2_new, NULL);
+    Py_DECREF(m1_new);
+    Py_DECREF(m2_new);
+    return res;
 }
 
 NPY_NO_EXPORT PyObject *
 PyArray_GenericUnaryFunction(PyArrayObject *m1, PyObject *op)
 {
-    if (op == NULL) {
-        Py_INCREF(Py_NotImplemented);
-        return Py_NotImplemented;
-    }
     return PyObject_CallFunctionObjArgs(op, m1, NULL);
 }
 
@@ -299,20 +376,18 @@ static PyObject *
 PyArray_GenericInplaceBinaryFunction(PyArrayObject *m1,
                                      PyObject *m2, PyObject *op)
 {
-    if (op == NULL) {
-        Py_INCREF(Py_NotImplemented);
-        return Py_NotImplemented;
+    PyObject *new_m2 = replace_if_pyscalar(m2);
+    if (new_m2 == NULL) {
+        return NULL;
     }
-    return PyObject_CallFunctionObjArgs(op, m1, m2, m1, NULL);
+    PyObject *res = PyObject_CallFunctionObjArgs(op, m1, new_m2, m1, NULL);
+    Py_DECREF(new_m2);
+    return res;
 }
 
 static PyObject *
 PyArray_GenericInplaceUnaryFunction(PyArrayObject *m1, PyObject *op)
 {
-    if (op == NULL) {
-        Py_INCREF(Py_NotImplemented);
-        return Py_NotImplemented;
-    }
     return PyObject_CallFunctionObjArgs(op, m1, m1, NULL);
 }
 

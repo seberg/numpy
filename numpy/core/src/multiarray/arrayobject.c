@@ -1356,11 +1356,11 @@ array_richcompare(PyArrayObject *self, PyObject *other, int cmp_op)
     switch (cmp_op) {
     case Py_LT:
         RICHCMP_GIVE_UP_IF_NEEDED(obj_self, other);
-        result = PyArray_GenericBinaryFunction(self, other, n_ops.less);
+        result = PyArray_GenericBinaryCompFunction(self, other, n_ops.less);
         break;
     case Py_LE:
         RICHCMP_GIVE_UP_IF_NEEDED(obj_self, other);
-        result = PyArray_GenericBinaryFunction(self, other, n_ops.less_equal);
+        result = PyArray_GenericBinaryCompFunction(self, other, n_ops.less_equal);
         break;
     case Py_EQ:
         RICHCMP_GIVE_UP_IF_NEEDED(obj_self, other);
@@ -1388,6 +1388,12 @@ array_richcompare(PyArrayObject *self, PyObject *other, int cmp_op)
                 return Py_NotImplemented;
             }
 
+            if (PyLong_CheckExact(other) ||
+                    PyFloat_CheckExact(other) ||
+                    PyComplex_CheckExact(other)) {
+                ((PyArrayObject_fields *)other)->flags |= _NPY_ARRAY_WAS_PYSCALAR;
+            }
+
             _res = PyArray_CanCastTypeTo(PyArray_DESCR(self),
                                          PyArray_DESCR(array_other),
                                          NPY_EQUIV_CASTING);
@@ -1409,8 +1415,7 @@ array_richcompare(PyArrayObject *self, PyObject *other, int cmp_op)
             Py_DECREF(array_other);
             return result;
         }
-
-        result = PyArray_GenericBinaryFunction(self,
+        result = PyArray_GenericBinaryCompFunction(self,
                 (PyObject *)other,
                 n_ops.equal);
         break;
@@ -1440,6 +1445,12 @@ array_richcompare(PyArrayObject *self, PyObject *other, int cmp_op)
                 return Py_NotImplemented;
             }
 
+            if (PyLong_CheckExact(other) ||
+                    PyFloat_CheckExact(other) ||
+                    PyComplex_CheckExact(other)) {
+                ((PyArrayObject_fields *)other)->flags |= _NPY_ARRAY_WAS_PYSCALAR;
+            }
+
             _res = PyArray_CanCastTypeTo(PyArray_DESCR(self),
                                          PyArray_DESCR(array_other),
                                          NPY_EQUIV_CASTING);
@@ -1462,17 +1473,17 @@ array_richcompare(PyArrayObject *self, PyObject *other, int cmp_op)
             return result;
         }
 
-        result = PyArray_GenericBinaryFunction(self, (PyObject *)other,
+        result = PyArray_GenericBinaryCompFunction(self, other,
                 n_ops.not_equal);
         break;
     case Py_GT:
         RICHCMP_GIVE_UP_IF_NEEDED(obj_self, other);
-        result = PyArray_GenericBinaryFunction(self, other,
+        result = PyArray_GenericBinaryCompFunction(self, other,
                 n_ops.greater);
         break;
     case Py_GE:
         RICHCMP_GIVE_UP_IF_NEEDED(obj_self, other);
-        result = PyArray_GenericBinaryFunction(self, other,
+        result = PyArray_GenericBinaryCompFunction(self, other,
                 n_ops.greater_equal);
         break;
     default:

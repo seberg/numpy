@@ -218,7 +218,7 @@ complex_common_dtype(PyArray_DTypeMeta *cls, PyArray_DTypeMeta *other)
                 return PyArray_DTypeFromTypeNum(NPY_CFLOAT);
             }
             if (other->type_num == NPY_DOUBLE) {
-                return PyArray_DTypeFromTypeNum(NPY_DOUBLE);
+                return PyArray_DTypeFromTypeNum(NPY_CDOUBLE);
             }
             assert(other->type_num == NPY_LONGDOUBLE);
             return PyArray_DTypeFromTypeNum(NPY_CLONGDOUBLE);

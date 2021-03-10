@@ -1032,7 +1032,8 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg='', verbose=True):
 
         # make sure y is an inexact type to avoid abs(MIN_INT); will cause
         # casting of x later.
-        dtype = result_type(y, 1.)
+        dtype = result_type(x.dtype, y.dtype, 1.)
+        x = array(x, dtype=dtype, copy=False, subok=True)
         y = array(y, dtype=dtype, copy=False, subok=True)
         z = abs(x - y)
 

@@ -123,18 +123,29 @@ reduce_dtypes_to_most_knowledgeable(
             Py_XSETREF(res, dtypes[low]);
         }
         else {
+            if (dtypes[high]->abstract) {
+                /*
+                 * Priority inversion, start with abstract, because if it
+                 * returns `other`, we can let other pass instead.
+                 */
+                PyArray_DTypeMeta *tmp = dtypes[low];
+                dtypes[low] = dtypes[high];
+                dtypes[high] = tmp;
+            }
+
             Py_XSETREF(res, dtypes[low]->common_dtype(dtypes[low], dtypes[high]));
             if (res == NULL) {
                 return NULL;
             }
         }
+
         if (res == (PyArray_DTypeMeta *)Py_NotImplemented) {
             PyArray_DTypeMeta *tmp = dtypes[low];
             dtypes[low] = dtypes[high];
             dtypes[high] = tmp;
         }
-        else if (res == dtypes[low]) {
-            /* `dtypes[high]` cannot influce the final result, so clear: */
+        if (res == dtypes[low]) {
+            /* `dtypes[high]` cannot influence the final result, so clear: */
             dtypes[high] = NULL;
         }
     }
@@ -190,7 +201,6 @@ NPY_NO_EXPORT PyArray_DTypeMeta *
 PyArray_PromoteDTypeSequence(
         npy_intp length, PyArray_DTypeMeta **dtypes_in)
 {
-    assert(length >= 1);
     if (length == 1) {
         Py_INCREF(dtypes_in[0]);
         return dtypes_in[0];

@@ -849,6 +849,15 @@ typedef int (PyArray_FinalizeFunc)(PyArrayObject *, PyObject *);
  * This flag may be requested in constructor functions.
  */
 #define NPY_ARRAY_ENSUREARRAY     0x0040
+/*
+ * Dual use that flag, to indicate that this was a converted
+ * python float, int, or complex.
+ * This is just to safe some flag space, an array using this flag must
+ * be a temporary array that can never leave the C internals of NumPy.
+ * Even if it does, ENSUREARRAY is absolutely a safe thing to abuse, since
+ * this is will already be a base class array :).
+ */
+#define _NPY_ARRAY_WAS_PYSCALAR   0x0010
 
 /*
  * Make sure that the strides are in units of the element size Needed

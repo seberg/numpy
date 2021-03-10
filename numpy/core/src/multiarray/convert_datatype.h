@@ -27,7 +27,7 @@ PyArray_LegacyResultType(
 
 NPY_NO_EXPORT PyArray_Descr *
 PyArray_CommonDescriptorFromObjsAndTypes(
-        npy_intp narr, PyArrayObject *arrs[], PyObject *original_values[],
+        npy_intp narr, PyArrayObject *arrs[],
         npy_intp ndtypes, PyArray_Descr *descrs[], int transition);
 
 NPY_NO_EXPORT int
@@ -36,10 +36,20 @@ PyArray_ValidType(int type);
 NPY_NO_EXPORT int
 dtype_kind_to_ordering(char kind);
 
-/* Like PyArray_CanCastArrayTo */
-NPY_NO_EXPORT npy_bool
+/* Used by PyArray_CanCastArrayTo(_Int) */
+NPY_NO_EXPORT int
 can_cast_scalar_to(PyArray_Descr *scal_type, char *scal_data,
-                    PyArray_Descr *to, NPY_CASTING casting);
+                    PyArray_Descr *to, NPY_CASTING casting,
+                    int report_back);
+
+/*
+ * Same as PyArray_CanCastArrayTo but signals an error for the FutureWarning
+ * due to value-based casting.  Is probably better anyway, since it reports
+ * errors, but only need to be used if safe casting is used.
+ */
+NPY_NO_EXPORT int
+PyArray_CanCastArrayTo_Int(PyArrayObject *arr, PyArray_Descr *to,
+        NPY_CASTING casting);
 
 NPY_NO_EXPORT PyArray_Descr *
 ensure_dtype_nbo(PyArray_Descr *type);

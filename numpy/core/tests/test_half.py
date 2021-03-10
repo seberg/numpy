@@ -457,10 +457,15 @@ class TestHalf:
         b16 = float16(1)
         b32 = float32(1)
 
-        assert_equal(np.power(a16, 2).dtype, float16)
-        assert_equal(np.power(a16, 2.0).dtype, float16)
+        with pytest.warns(FutureWarning):
+            assert_equal(np.power(a16, 2).dtype, float16)
+            assert_equal(np.power(a16, 2.0).dtype, float16)
+        assert_equal((a16**2).dtype, float16)
+        assert_equal((a16**2.0).dtype, float16)
+
         assert_equal(np.power(a16, b16).dtype, float16)
-        assert_equal(np.power(a16, b32).dtype, float16)
+        with pytest.warns(FutureWarning):
+            assert_equal(np.power(a16, b32).dtype, float16)
         assert_equal(np.power(a16, a16).dtype, float16)
         assert_equal(np.power(a16, a32).dtype, float32)
 
@@ -473,7 +478,8 @@ class TestHalf:
 
         assert_equal(np.power(a32, a16).dtype, float32)
         assert_equal(np.power(a32, b16).dtype, float32)
-        assert_equal(np.power(b32, a16).dtype, float16)
+        with pytest.warns(FutureWarning):
+            assert_equal(np.power(b32, a16).dtype, float16)
         assert_equal(np.power(b32, b16).dtype, float32)
 
     @pytest.mark.skipif(platform.machine() == "armv5tel",

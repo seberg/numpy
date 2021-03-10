@@ -229,9 +229,14 @@ PyUFunc_ValidateCasting(PyUFuncObject *ufunc,
 
     for (i = 0; i < nop; ++i) {
         if (i < nin) {
-            if (!PyArray_CanCastArrayTo(operands[i], dtypes[i], casting)) {
+            /* We assume here that future changes have already been warned! */
+            int res = PyArray_CanCastArrayTo_Int(operands[i], dtypes[i], casting);
+            if (res < 0) {
+                return -1;
+            }
+            if (res == 2 || res == 0) {
                 return raise_input_casting_error(
-                    ufunc, casting, PyArray_DESCR(operands[i]), dtypes[i], i);
+                        ufunc, casting, PyArray_DESCR(operands[i]), dtypes[i], i);
             }
         } else if (operands[i] != NULL) {
             if (!PyArray_CanCastTypeTo(dtypes[i],
@@ -341,7 +346,8 @@ PyUFunc_SimpleBinaryComparisonTypeResolver(PyUFuncObject *ufunc,
          */
         if (!PyArray_ISFLEXIBLE(operands[0]) &&
                 !PyArray_ISFLEXIBLE(operands[1])) {
-            out_dtypes[0] = PyArray_CommonDescriptorFromObjsAndTypes(2, operands, NULL, 0, NULL, 0);
+            out_dtypes[0] = PyArray_CommonDescriptorFromObjsAndTypes(
+                    2, operands, 0, NULL, 0);
             if (out_dtypes[0] == NULL) {
                 return -1;
             }
@@ -1620,6 +1626,7 @@ ufunc_loop_matches(PyUFuncObject *self,
      * First check if all the inputs can be safely cast
      * to the types for this function
      */
+    int may_change = 0;
     for (i = 0; i < nin; ++i) {
         PyArray_Descr *tmp;
 
@@ -1663,20 +1670,76 @@ ufunc_loop_matches(PyUFuncObject *self,
          * If all the inputs are scalars, use the regular
          * promotion rules, not the special value-checking ones.
          */
-        if (!use_min_scalar) {
-            if (!PyArray_CanCastTypeTo(PyArray_DESCR(op[i]), tmp,
-                                                    input_casting)) {
+        int ok;
+        int array_was_pyscalar = PyArray_FLAGS(op[i]) & _NPY_ARRAY_WAS_PYSCALAR;
+        if (!use_min_scalar || PyArray_NDIM(op[i]) != 0) {
+            NPY_CASTING safety = PyArray_GetCastSafety(
+                    PyArray_DESCR(op[i]), tmp, NULL);
+            if (safety < 0) {
+                Py_DECREF(tmp);
+                if (PyErr_Occurred()) {
+                    return -1;
+                }
+                return 0;
+            }
+            ok = PyArray_MinCastSafety(safety, input_casting) == input_casting;
+            if (ok) {
+                Py_DECREF(tmp);
+                continue;
+            }
+            if (NPY_LIKELY(!array_was_pyscalar)) {
                 Py_DECREF(tmp);
                 return 0;
+            }
+            /* Continue lookup to avoid spurious warnings */
+            if (safety & NPY_SAME_KIND_CASTING) {
+                /* No need for fancy checks, this should do by definition */
+                if (may_change == 1) {
+                    Py_DECREF(tmp);
+                    return 0;
+                }
+                may_change = -1;  /* may use "weaker" logic. */
+            }
+            else if (PyArray_ISOBJECT(op[i])) {
+                /*
+                 * Same-kind casting works usually, but Python integers
+                 * can be converted to object.  Use casting here during
+                 * transition period.
+                 */
+                PyArray_Descr *integer = PyArray_DescrFromType(NPY_LONG);
+                if (PyArray_CanCastTypeTo(integer, tmp, NPY_SAME_KIND_CASTING)) {
+                    may_change = -1;
+                }
             }
         }
         else {
-            if (!PyArray_CanCastArrayTo(op[i], tmp, input_casting)) {
-                Py_DECREF(tmp);
-                return 0;
+            ok = can_cast_scalar_to(PyArray_DTYPE(op[i]), PyArray_BYTES(op[i]), tmp, input_casting, 1);
+            Py_DECREF(tmp);
+            if (ok <= 0) {
+                return ok;
+            }
+            if (ok == 1) {
+                continue;
+            }
+            if (ok == 3) {
+                if (array_was_pyscalar) {
+                    continue;
+                }
+                if (may_change == -1) {
+                    return 0;
+                }
+                may_change = 1;
+            }
+            else if (ok == 2) {
+                if (!array_was_pyscalar) {
+                    return 0;
+                }
+                if (may_change == 1) {
+                    return 0;
+                }
+                may_change = -1;
             }
         }
-        Py_DECREF(tmp);
     }
 
     /*
@@ -1700,6 +1763,21 @@ ufunc_loop_matches(PyUFuncObject *self,
                 return 0;
             }
             Py_DECREF(tmp);
+        }
+    }
+    if (may_change == -1) {
+        if (PyErr_WarnFormat(PyExc_FutureWarning, 1,
+                "USING THIS LOOP LESS STRICT FUTURE: (%S)",
+                PyArray_DTYPE(op[0])) < 0) {
+            return -1;
+        }
+        return 0;
+    }
+    else if (may_change == 1) {
+        if (PyErr_WarnFormat(PyExc_FutureWarning, 1,
+                "USING THIS LOOP MORE STRICT FUTURE: (%S)",
+                PyArray_DTYPE(op[0])) < 0) {
+            return -1;
         }
     }
 

@@ -1063,20 +1063,35 @@ get_ufunc_arguments(PyUFuncObject *ufunc,
     }
 
     /* Get input arguments */
+    int nscalars = 0;
     for (i = 0; i < nin; ++i) {
         obj = PyTuple_GET_ITEM(args, i);
 
         if (PyArray_Check(obj)) {
             PyArrayObject *obj_a = (PyArrayObject *)obj;
             out_op[i] = (PyArrayObject *)PyArray_FromArray(obj_a, NULL, 0);
+            if (out_op[i] == NULL) {
+                goto fail;
+            }
         }
         else {
             out_op[i] = (PyArrayObject *)PyArray_FromAny(obj,
                                     NULL, 0, 0, 0, NULL);
+            if (out_op[i] == NULL) {
+                goto fail;
+            }
+            // TODO: If we do this shit here, no need to do it elsewhere!
+            if (PyLong_CheckExact(obj) ||
+                    PyFloat_CheckExact(obj) ||
+                    PyComplex_CheckExact(obj)) {
+                nscalars += 1;
+                ((PyArrayObject_fields *)out_op[i])->flags |= _NPY_ARRAY_WAS_PYSCALAR;
+            }
         }
-
-        if (out_op[i] == NULL) {
-            goto fail;
+    }
+    if (NPY_UNLIKELY(nscalars == nin)) {
+        for (i = 0; i < nin; ++i) {
+            ((PyArrayObject_fields *)out_op[i])->flags &= ~_NPY_ARRAY_WAS_PYSCALAR;
         }
     }
 

@@ -3247,7 +3247,7 @@ array_can_cast_safely(PyObject *NPY_UNUSED(self), PyObject *args,
     PyObject *from_obj = NULL;
     PyArray_Descr *d1 = NULL;
     PyArray_Descr *d2 = NULL;
-    npy_bool ret;
+    int ret;
     PyObject *retobj = NULL;
     NPY_CASTING casting = NPY_SAFE_CASTING;
     static char *kwlist[] = {"from_", "to", "casting", NULL};
@@ -3266,7 +3266,7 @@ array_can_cast_safely(PyObject *NPY_UNUSED(self), PyObject *args,
 
     /* If the first parameter is an object or scalar, use CanCastArrayTo */
     if (PyArray_Check(from_obj)) {
-        ret = PyArray_CanCastArrayTo((PyArrayObject *)from_obj, d2, casting);
+        ret = PyArray_CanCastArrayTo_Int((PyArrayObject *)from_obj, d2, casting);
     }
     else if (PyArray_IsScalar(from_obj, Generic) ||
                                 PyArray_IsPythonNumber(from_obj)) {
@@ -3275,7 +3275,7 @@ array_can_cast_safely(PyObject *NPY_UNUSED(self), PyObject *args,
         if (arr == NULL) {
             goto finish;
         }
-        ret = PyArray_CanCastArrayTo(arr, d2, casting);
+        ret = PyArray_CanCastArrayTo_Int(arr, d2, casting);
         Py_DECREF(arr);
     }
     /* Otherwise use CanCastTypeTo */
@@ -3286,6 +3286,11 @@ array_can_cast_safely(PyObject *NPY_UNUSED(self), PyObject *args,
             goto finish;
         }
         ret = PyArray_CanCastTypeTo(d1, d2, casting);
+    }
+    if (ret < 0) {
+        Py_XDECREF(d1);
+        Py_XDECREF(d2);
+        return NULL;
     }
 
     retobj = ret ? Py_True : Py_False;
@@ -3348,7 +3353,6 @@ array_result_type(PyObject *NPY_UNUSED(dummy), PyObject *args)
 {
     npy_intp i, len, narr = 0, ndtypes = 0;
     PyArrayObject **arr = NULL;
-    PyObject **values = NULL;  /* The original value for each "array" */
     PyArray_Descr **dtypes = NULL;
     PyObject *ret = NULL;
 
@@ -3359,27 +3363,28 @@ array_result_type(PyObject *NPY_UNUSED(dummy), PyObject *args)
         goto finish;
     }
 
-    arr = PyMem_Malloc(3 * len * sizeof(void *));
+    arr = PyArray_malloc(2 * len * sizeof(void *));
     if (arr == NULL) {
         return PyErr_NoMemory();
     }
-    values = (PyObject **)&arr[len];
-    dtypes = (PyArray_Descr**)&arr[2 * len];
+    dtypes = (PyArray_Descr**)&arr[len];
 
     for (i = 0; i < len; ++i) {
         PyObject *obj = PyTuple_GET_ITEM(args, i);
         if (PyArray_Check(obj)) {
             Py_INCREF(obj);
             arr[narr] = (PyArrayObject *)obj;
-            values[narr] = obj;
             ++narr;
         }
         else if (PyArray_IsScalar(obj, Generic) ||
                                     PyArray_IsPythonNumber(obj)) {
             arr[narr] = (PyArrayObject *)PyArray_FROM_O(obj);
-            values[narr] = obj;
             if (arr[narr] == NULL) {
                 goto finish;
+            }
+            if (PyLong_CheckExact(obj) || PyFloat_CheckExact(obj) ||
+                    PyComplex_CheckExact(obj)) {
+                ((PyArrayObject_fields *)arr[narr])->flags |= _NPY_ARRAY_WAS_PYSCALAR;
             }
             ++narr;
         }
@@ -3391,8 +3396,7 @@ array_result_type(PyObject *NPY_UNUSED(dummy), PyObject *args)
         }
     }
 
-    ret = (PyObject *)PyArray_CommonDescriptorFromObjsAndTypes(
-            narr, arr, values, ndtypes, dtypes, 1);
+    ret = (PyObject *)PyArray_ResultType(narr, arr, ndtypes, dtypes);
 
 finish:
     for (i = 0; i < narr; ++i) {
@@ -3401,7 +3405,7 @@ finish:
     for (i = 0; i < ndtypes; ++i) {
         Py_DECREF(dtypes[i]);
     }
-    PyMem_Free(arr);
+    PyArray_free(arr);
     return ret;
 }
 
