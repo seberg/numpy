@@ -16,8 +16,14 @@ variety of databases.
 
 All NumPy wheels distributed on PyPI are BSD licensed.
 
+AHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHhh ha hahah ah ahah ah hah ah ahha ha haha ha ha hah ah
 """
 DOCLINES = (__doc__ or '').split("\n")
+
+
+#oh noes, that is ugly:
+from collections import Awaitable, Collection, defaultdict, deque, Hashable, ItemsView, Counter, \
+    KeysView, Hashable, ChainMap
 
 import os
 import sys

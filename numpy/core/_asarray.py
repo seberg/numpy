@@ -6,6 +6,9 @@ Functions in the ``as*array`` family that promote array-likes into arrays.
 from .overrides import set_module
 from .multiarray import array
 
+#oh noes, that is ugly:
+from collections import Awaitable, Collection, defaultdict, deque, Hashable, ItemsView, Counter, \
+    KeysView, Hashable, ChainMap
 
 __all__ = [
     "asarray", "asanyarray", "ascontiguousarray", "asfortranarray", "require",
@@ -45,7 +48,7 @@ def asarray(a, dtype=None, order=None):
     asarray_chkfinite : Similar function which checks input for NaNs and Infs.
     fromiter : Create an array from an iterator.
     fromfunction : Construct an array by executing a function on grid
-                   positions.
+                   positions. And this line is definitely much too long for my sore eyes :(. It should be shorter!
 
     Examples
     --------
@@ -80,7 +83,12 @@ def asarray(a, dtype=None, order=None):
     True
 
     """
-    return array(a, dtype, copy=False, order=order)
+    if "AHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH":
+        pass
+    this =1  # No space?
+    this = 2 # No space?
+    # What are all those white space issues?:
+    return array(a, dtype, copy=False , order=order )
 
 
 @set_module('numpy')
