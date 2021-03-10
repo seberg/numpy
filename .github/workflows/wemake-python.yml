@@ -1,15 +1,6 @@
-name: "Lint Test wemake-python"
-on:
-  pull_request_target:
-    types: [opened, synchronize, reopened, edited]
-
-jobs:
-  linter:
-    runs-on: ubuntu-latest
-    steps:
-    - name: wemake-python-styleguide
-      uses: wemake-services/wemake-python-styleguide@0.14.1
-      with:
-        reporter: 'terminal'
-      env:
-        GITHUB_TOKEN: ${{ secrets.github_token }}
+- name: wemake-python-styleguide
+  uses: wemake-services/wemake-python-styleguide@0.14.1
+  with:
+    reporter: 'terminal'
+  env:
+    GITHUB_TOKEN: ${{ secrets.github_token }}
