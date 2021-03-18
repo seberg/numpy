@@ -360,6 +360,26 @@ fill_arraymethod_from_slots(
 }
 
 
+/*
+ * Public version of `PyArrayMethod_FromSpec_int` (see below).
+ *
+ * TODO: Error paths will probably need to be improved before a release into
+ *       the non-experimental public API.
+ */
+NPY_NO_EXPORT PyObject *
+PyArrayMethod_FromSpec(PyArrayMethod_Spec *spec)
+{
+    for (int i = 0; i < spec->nin + spec->nout; i++) {
+        if (!PyObject_TypeCheck(spec->dtypes, &PyArrayDTypeMeta_Type)) {
+            PyErr_SetString(PyExc_RuntimeError,
+                    "ArrayMethod spec contained a non DType.");
+            return NULL;
+        }
+    }
+    return (PyObject *)PyArrayMethod_FromSpec_int(spec, 0);
+}
+
+
 /**
  * Create a new ArrayMethod (internal version).
  *

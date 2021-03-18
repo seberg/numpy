@@ -159,10 +159,10 @@ npy_default_get_strided_loop(
         NPY_ARRAYMETHOD_FLAGS *flags);
 
 
-/*
- * TODO: This function is the internal version, and its error paths may
- *       need better tests when a public version is exposed.
- */
+NPY_NO_EXPORT PyObject *
+PyArrayMethod_FromSpec(PyArrayMethod_Spec *spec);
+
+
 NPY_NO_EXPORT PyBoundArrayMethodObject *
 PyArrayMethod_FromSpec_int(PyArrayMethod_Spec *spec, int private);
 
