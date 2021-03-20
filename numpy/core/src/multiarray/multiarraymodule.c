@@ -70,6 +70,7 @@ NPY_NO_EXPORT int NPY_NUMUSERTYPES = 0;
 #include "typeinfo.h"
 
 #include "get_attr_string.h"
+#include "experimental_public_dtype_api.h"  /* _get_experimental_dtype_api */
 
 /*
  *****************************************************************************
@@ -4412,7 +4413,9 @@ static struct PyMethodDef array_module_methods[] = {
     {"_discover_array_parameters", (PyCFunction)_discover_array_parameters,
         METH_VARARGS | METH_KEYWORDS, NULL},
     {"_get_castingimpl",  (PyCFunction)_get_castingimpl,
-     METH_VARARGS | METH_KEYWORDS, NULL},
+        METH_VARARGS | METH_KEYWORDS, NULL},
+    {"_get_experimental_dtype_api", (PyCFunction)_get_experimental_dtype_api,
+        METH_O, NULL},
     /* from umath */
     {"frompyfunc",
         (PyCFunction) ufunc_frompyfunc,

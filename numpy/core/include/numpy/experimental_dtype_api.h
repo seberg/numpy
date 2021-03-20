@@ -32,6 +32,13 @@
  * Symbols with a leading underscore are likely to not be included in the
  * first public version, if these are central to your use-case, please let
  * us know, so that we can reconsidered.
+ *
+ * "Array-like" consumer API not yet under considerations
+ * ======================================================
+ *
+ * The new DType API is designed in a way to make it potentially useful for
+ * alternative "array-like" implementations.  This will require careful
+ * exposure of details and functions and is not part of this experimental API.
  */
 
 #ifndef _NPY_EXPERIMENTAL_DTYPE_API_H
@@ -40,7 +47,6 @@
 #include <Python.h>
 #include "ndarraytypes.h"
 
-#define __EXPERIMENTAL_DTYPE_VERSION 0
 
 
 static void *__experimental_dtype_api_table = NULL;
@@ -103,7 +109,7 @@ typedef PyObject *_arraymethod_fromspec_func(PyArrayMethod_Spec *spec);
  * Otherwise must return the "casting safety", for normal functions, this is
  * almost always "safe" (or even "equivalent"?).
  *
- * This method is OPTIONAL if all DTypes are non-parametric.
+ * `resolve_descriptors` is OPTIONAL if all DTypes are non-parametric.
  */
 #define NPY_METH_resolve_descriptors 1
 typedef NPY_CASTING (resolve_descriptors_function)(
@@ -131,7 +137,18 @@ typedef NPY_CASTING (resolve_descriptors_function)(
 #define NPY_METH_unaligned_contiguous_loop 6
 
 
-// TODO: Need to add the loop typedef.
+typedef struct {
+    PyObject *caller;  /* E.g. the original ufunc, may be NULL */
+    PyObject *method;  /* The method "self". Currently an opaque object */
+
+    /* Operand descriptors, filled in by resolve_descriptors */
+    PyArray_Descr **descriptors;
+    /* Structure may grow (this is harmless for DType authors) */
+} PyArrayMethod_Context;
+
+typedef int (PyArrayMethod_StridedLoop)(PyArrayMethod_Context *context,
+        char *const *data, const npy_intp *dimensions, const npy_intp *strides,
+        NpyAuxData *transferdata);
 
 
 
@@ -161,11 +178,17 @@ typedef PyObject* __dtypemeta_fromspec(PyArrayDTypeMeta_Spec *dtype_spec);
 
 
 /*
+ * *************************************************************************
+ *                              Initialization
+ * *************************************************************************
+ *
  * Import the experimental API, the version must match the one defined in
  * the header to ensure changes are taken into account. NumPy will further
  * runtime-check this.
  * You must call this function to use the symbols in this file.
  */
+#define __EXPERIMENTAL_DTYPE_VERSION 0
+
 static int
 import_experimental_dtype_api(int version)
 {
@@ -175,6 +198,11 @@ import_experimental_dtype_api(int version)
                 "update the import statement and check for API changes.");
         return -1;
     }
+    if (__experimental_dtype_api_table != NULL) {
+        /* already imported. */
+        return 0;
+    }
+
     PyObject *multiarray = PyImport_ImportModule("numpy.core._multiarray_umath");
     if (multiarray == NULL) {
         return -1;
