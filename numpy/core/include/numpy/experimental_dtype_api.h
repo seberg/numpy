@@ -48,8 +48,20 @@
 #include "ndarraytypes.h"
 
 
+/*
+ * Just a hack so I don't forget importing as much myself, I spend way too
+ * much time noticing it.  (maybe we should do this for NumPy...)
+ */
+static void
+__not_imported(void)
+{
+    printf("*****\nCritical error, dtype API not imported\n*****\n");
+}
+static void *__uninitialized_table[] = {
+        &__not_imported, &__not_imported, &__not_imported, &__not_imported};
 
-static void *__experimental_dtype_api_table = NULL;
+
+static void **__experimental_dtype_api_table = __uninitialized_table;
 
 /*
  * ******************************************************
@@ -92,7 +104,7 @@ typedef struct {
 
 typedef PyObject *_arraymethod_fromspec_func(PyArrayMethod_Spec *spec);
 #define PyArrayMethod_FromSpec \
-    (&(_fromspec_func *)(__api_table[0]));
+    (*(_arraymethod_fromspec_func *)(__experimental_dtype_api_table[0]))
 
 
 /*
@@ -109,14 +121,14 @@ typedef PyObject *_arraymethod_fromspec_func(PyArrayMethod_Spec *spec);
  * Otherwise must return the "casting safety", for normal functions, this is
  * almost always "safe" (or even "equivalent"?).
  *
- * `resolve_descriptors` is OPTIONAL if all DTypes are non-parametric.
+ * `resolve_descriptors` is optional if all output DTypes are non-parametric.
  */
 #define NPY_METH_resolve_descriptors 1
 typedef NPY_CASTING (resolve_descriptors_function)(
         /* "method" is currently opaque (necessary e.g. to wrap Python) */
         PyObject *method,
         /* DTypes the method was created for */
-        PyArray_DTypeMeta **dtypes,
+        PyObject **dtypes,
         /* Input descriptors (instances).  Outputs may be NULL. */
         PyArray_Descr **given_descrs,
         /* Exact loop descriptors to use, must not hold references on error */
@@ -173,7 +185,7 @@ typedef struct{
 
 typedef PyObject* __dtypemeta_fromspec(PyArrayDTypeMeta_Spec *dtype_spec);
 #define PyArrayDTypeMeta_FromSpec \
-    (&(__dtypemeta_fromspec *)(__api_table[1]));
+    ((__dtypemeta_fromspec *)(__experimental_dtype_api_table[1]))
 
 
 
@@ -198,7 +210,7 @@ import_experimental_dtype_api(int version)
                 "update the import statement and check for API changes.");
         return -1;
     }
-    if (__experimental_dtype_api_table != NULL) {
+    if (__experimental_dtype_api_table != __uninitialized_table) {
         /* already imported. */
         return 0;
     }
@@ -207,8 +219,10 @@ import_experimental_dtype_api(int version)
     if (multiarray == NULL) {
         return -1;
     }
+    printf("fetching table!\n");
     PyObject *api = PyObject_CallMethod(multiarray,
         "_get_experimental_dtype_api", "i", version);
+    printf("fetched table!\n");
     Py_DECREF(multiarray);
     if (api == NULL) {
         return -1;
@@ -216,6 +230,8 @@ import_experimental_dtype_api(int version)
     __experimental_dtype_api_table = PyCapsule_GetPointer(api,
             "experimental_dtype_api_table");
     Py_DECREF(api);
+    printf("exported table: %p\n", __experimental_dtype_api_table);
+    printf("    and func: %p\n", __experimental_dtype_api_table[0]);
     if (__experimental_dtype_api_table == NULL) {
         return -1;
     }

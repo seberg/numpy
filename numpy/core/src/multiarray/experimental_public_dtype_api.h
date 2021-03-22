@@ -14,7 +14,7 @@
 #define _NPY_EXPERIMENTAL_PUBLIC_DTYPE_API_H
 
 
-static PyObject *
+NPY_NO_EXPORT PyObject *
 _get_experimental_dtype_api(PyObject *mod, PyObject *arg);
 
 

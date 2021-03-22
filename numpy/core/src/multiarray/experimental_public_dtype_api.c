@@ -1,15 +1,19 @@
-#include "experimental_public_dtype_api.h"
+#define NPY_NO_DEPRECATED_API NPY_API_VERSION
+#define _MULTIARRAYMODULE
+#include <numpy/npy_common.h>
+#include "numpy/arrayobject.h"
 #include "common.h"
+
+#include "experimental_public_dtype_api.h"
+#include "array_method.h"
 
 
 #define EXPERIMENTAL_DTYPE_API_VERSION 0
 
-static void *experimental_api_table[] = {
-    NULL
-};
+static void *experimental_api_table[2];
 
 
-static PyObject *
+NPY_NO_EXPORT PyObject *
 _get_experimental_dtype_api(PyObject *NPY_UNUSED(mod), PyObject *arg)
 {
     char *env = getenv("NUMPY_EXPERIMENTAL_DTYPE_API");
@@ -17,7 +21,7 @@ _get_experimental_dtype_api(PyObject *NPY_UNUSED(mod), PyObject *arg)
         PyErr_Format(PyExc_RuntimeError,
                 "The new DType API is currently in an exploratory phase and "
                 "should NOT be used for production code.  "
-                "Expected modifications and crashes.  "
+                "Expect modifications and crashes!  "
                 "To experiment with the new API you must set "
                 "`NUMPY_EXPERIMENTAL_DTYPE_API=1` as an environment variable.");
         return NULL;
@@ -35,6 +39,9 @@ _get_experimental_dtype_api(PyObject *NPY_UNUSED(mod), PyObject *arg)
                 version, EXPERIMENTAL_DTYPE_API_VERSION);
         return NULL;
     }
+
+    experimental_api_table[0] = &PyArrayMethod_FromSpec;
+    printf("PyArrayMethod_FromSpec: %p\n", &PyArrayMethod_FromSpec);
 
     return PyCapsule_New(&experimental_api_table,
             "experimental_dtype_api_table", NULL);
