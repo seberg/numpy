@@ -50,7 +50,7 @@
 
 /*
  * Just a hack so I don't forget importing as much myself, I spend way too
- * much time noticing it.  (maybe we should do this for NumPy...)
+ * much time noticing it the first time around :).
  */
 static void
 __not_imported(void)
@@ -170,8 +170,13 @@ typedef int (PyArrayMethod_StridedLoop)(PyArrayMethod_Context *context,
  * *********************************************************************
  */
 
+#define NPY_DTYPE_PARAMETRIC 1
+#define NPY_DTYPE_ABSTRACT 2
+
 // TODO: These slots probably still need some thought, and/or a way to "grow"?
 typedef struct{
+    char *name;
+    char *module;
     PyTypeObject *typeobj;    /* type of python scalar or NULL */
     int flags;                /* flags, including parametric and abstract */
     /* NULL terminated cast definitions. Use NULL for the newly created DType */
@@ -179,7 +184,6 @@ typedef struct{
     PyType_Slot *slots;
     /* Baseclass or NULL (will always subclass `np.dtype`) */
     PyTypeObject *baseclass;
-    int basicsize;  /* If 0, inherited, otherwise extends PyArray_Descr */
 } PyArrayDTypeMeta_Spec;
 
 
@@ -219,10 +223,9 @@ import_experimental_dtype_api(int version)
     if (multiarray == NULL) {
         return -1;
     }
-    printf("fetching table!\n");
+
     PyObject *api = PyObject_CallMethod(multiarray,
         "_get_experimental_dtype_api", "i", version);
-    printf("fetched table!\n");
     Py_DECREF(multiarray);
     if (api == NULL) {
         return -1;
@@ -230,9 +233,9 @@ import_experimental_dtype_api(int version)
     __experimental_dtype_api_table = PyCapsule_GetPointer(api,
             "experimental_dtype_api_table");
     Py_DECREF(api);
-    printf("exported table: %p\n", __experimental_dtype_api_table);
-    printf("    and func: %p\n", __experimental_dtype_api_table[0]);
+
     if (__experimental_dtype_api_table == NULL) {
+        __experimental_dtype_api_table = __uninitialized_table;
         return -1;
     }
     return 0;
