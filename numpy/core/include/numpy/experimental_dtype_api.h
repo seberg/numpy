@@ -173,6 +173,16 @@ typedef int (PyArrayMethod_StridedLoop)(PyArrayMethod_Context *context,
 #define NPY_DTYPE_PARAMETRIC 1
 #define NPY_DTYPE_ABSTRACT 2
 
+
+#define NPY_DT_discover_descr_from_pyobject 1
+#define _NPY_DT_is_known_scalar_type 2
+#define NPY_DT_default_descr 3
+#define NPY_DT_common_dtype 4
+#define NPY_DT_common_instance 5
+#define NPY_DT_setitem 6
+#define NPY_DT_getitem 7
+
+
 // TODO: These slots probably still need some thought, and/or a way to "grow"?
 typedef struct{
     char *name;

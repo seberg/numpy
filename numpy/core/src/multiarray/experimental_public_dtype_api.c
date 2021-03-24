@@ -27,6 +27,15 @@ typedef struct{
 } PyArrayDTypeMeta_Spec;
 
 
+#define NPY_DT_discover_descr_from_pyobject 1
+#define _NPY_DT_is_known_scalar_type 2
+#define NPY_DT_default_descr 3
+#define NPY_DT_common_dtype 4
+#define NPY_DT_common_instance 5
+#define NPY_DT_setitem 6
+#define NPY_DT_getitem 7
+
+
 static PyObject *
 PyArrayDTypeMeta_FromSpec(PyArrayDTypeMeta_Spec *spec)
 {
@@ -45,8 +54,18 @@ PyArrayDTypeMeta_FromSpec(PyArrayDTypeMeta_Spec *spec)
     }
 
     /*
-     * This is somewhat horrible. But use the Python API to create a new
-     * type.
+     * This is somewhat horrible. But use the Python API to create the new
+     * type.  The reason for this is that we are creating a new extension
+     * metaclass... Something that is completely unproblematic in most ways
+     * and completely unsupported in the limited API.
+     * Since, I do not want to expose the DTypeMeta struct, there is a
+     * conundrum, internally, we have to use the full API for defining the
+     * DTypeMeta struct, but at the same time, NumPy has strict ABI
+     * limitations, and it would be nice to not force this on the user.
+     *
+     * (We could expose it to the user, since we could extend the metaclass
+     * by a single pointer, which we then use to store our functionality
+     * while keeping the "slots" behind the pointer fully opaque.)
      */
     PyObject *bases;
     if (spec->baseclass == NULL) {
@@ -78,6 +97,26 @@ PyArrayDTypeMeta_FromSpec(PyArrayDTypeMeta_Spec *spec)
     Py_DECREF(args);
     if (res < 0) {
         return NULL;
+    }
+
+    /*
+     * OK, now that we are done with the horrible, continue with the weird :).
+     */
+    PyType_Slot *spec_slot = spec->slots;
+
+    while (1) {
+        int slot = spec_slot->slot;
+        void *pfunc = spec_slot->pfunc;
+        spec_slot++;
+        if (slot == 0) {
+            break;
+        }
+
+        if (slot == Npy_dt_) {
+
+        }
+        else if (slot == Npy_dt)
+
     }
 
     return (PyObject *)DType;
