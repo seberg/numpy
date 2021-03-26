@@ -20,6 +20,10 @@ PyArray_DTypeFromTypeNum(int typenum)
 
 
 NPY_NO_EXPORT int
+python_builtins_are_known_scalar_types(
+        PyArray_DTypeMeta *cls, PyTypeObject *pytype);
+
+NPY_NO_EXPORT int
 dtypemeta_wrap_legacy_descriptor(PyArray_Descr *dtypem);
 
 #endif  /*_NPY_DTYPEMETA_H */

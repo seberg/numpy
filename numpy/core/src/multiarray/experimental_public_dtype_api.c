@@ -6,6 +6,9 @@
 
 #include "experimental_public_dtype_api.h"
 #include "array_method.h"
+#include "dtypemeta.h"
+#include "array_coercion.h"
+#include "convert_datatype.h"
 
 
 #define EXPERIMENTAL_DTYPE_API_VERSION 0
@@ -27,13 +30,94 @@ typedef struct{
 } PyArrayDTypeMeta_Spec;
 
 
-#define NPY_DT_discover_descr_from_pyobject 1
-#define _NPY_DT_is_known_scalar_type 2
-#define NPY_DT_default_descr 3
-#define NPY_DT_common_dtype 4
-#define NPY_DT_common_instance 5
-#define NPY_DT_setitem 6
-#define NPY_DT_getitem 7
+
+static PyArray_DTypeMeta *
+dtype_does_not_promote(
+        PyArray_DTypeMeta *NPY_UNUSED(self), PyArray_DTypeMeta *NPY_UNUSED(other))
+{
+    /* `other` is guaranteed not to be `self`, so we don't have to do much... */
+    Py_INCREF(Py_NotImplemented);
+    return (PyArray_DTypeMeta *)Py_NotImplemented;
+}
+
+
+static PyArray_Descr *
+discover_as_default(PyArray_DTypeMeta *cls, PyObject *NPY_UNUSED(obj))
+{
+    return cls->default_descr(cls);
+}
+
+
+static PyArray_Descr *
+use_new_as_default(PyArray_DTypeMeta *self)
+{
+    PyObject *res = PyObject_CallNoArgs((PyObject *)self);
+    if (res == NULL) {
+        return NULL;
+    }
+    /*
+     * Lets not trust that the DType is implemented correctly
+     * TODO: Should probably do an exact type-check (at least unless this is
+     *       an abstract DType).
+     */
+    if (!PyArray_DescrCheck(res)) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "Instantiating %S did not return a dtype instance, this is "
+                "invalid (especially without a custom `default_descr()`).");
+        Py_DECREF(res);
+        return NULL;
+    }
+    PyArray_Descr *descr = (PyArray_Descr *)res;
+    /*
+     * Should probably do some more sanity checks here on the descriptor
+     * to ensure the user is not being naughty. But in the end, we have
+     * only limited control anyway.
+     */
+    return descr;
+}
+
+
+typedef int(setitemfunction)(PyArray_Descr *, PyObject *, char *);
+typedef PyObject *(getitemfunction)(PyArray_Descr *, char *);
+
+
+static int
+legacy_setitem_using_DType(PyObject *obj, void *data, void *arr)
+{
+    if (arr == NULL) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "Using legacy SETITEM with NULL array object is only "
+                "supported for basic NumPy DTypes.");
+        return -1;
+    }
+    setitemfunction *setitem = NPY_DTYPE(PyArray_DESCR(arr))->setitem;
+    return setitem(PyArray_DESCR(arr), obj, data);
+}
+
+
+static PyObject *
+legacy_getitem_using_DType(void *data, void *arr)
+{
+    if (arr == NULL) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "Using legacy SETITEM with NULL array object is only "
+                "supported for basic NumPy DTypes.");
+        return NULL;
+    }
+    getitemfunction *getitem = NPY_DTYPE(PyArray_DESCR(arr))->getitem;
+    return getitem(PyArray_DESCR(arr), data);
+}
+
+
+
+PyArray_ArrFuncs default_funcs = {
+        .setitem = &legacy_setitem_using_DType,
+        .getitem = &legacy_getitem_using_DType
+};
+
+
+/* other slots are in order, so keep only last around: */
+#define NUM_DTYPE_SLOTS 7
 
 
 static PyObject *
@@ -44,7 +128,7 @@ PyArrayDTypeMeta_FromSpec(PyArrayDTypeMeta_Spec *spec)
                 "unknown DType flags passed.");
         return NULL;
     }
-    if (spec->typeobj == NULL) {
+    if (spec->typeobj == NULL || !PyType_Check(spec->typeobj)) {
         PyErr_SetString(PyExc_TypeError,
                 "Not giving a type object is currently not supported, but "
                 "is expected to be supported eventually.  This would mean "
@@ -96,14 +180,23 @@ PyArrayDTypeMeta_FromSpec(PyArrayDTypeMeta_Spec *spec)
     int res = PyType_Type.tp_init((PyObject *)DType, args, NULL);
     Py_DECREF(args);
     if (res < 0) {
+        Py_DECREF(DType);
         return NULL;
     }
 
     /*
-     * OK, now that we are done with the horrible, continue with the weird :).
+     * OK, now that we dealt with the horrible, continue with the slots :).
      */
-    PyType_Slot *spec_slot = spec->slots;
+    /* Set default values (where applicable) */
+    DType->discover_descr_from_pyobject = &discover_as_default;
+    DType->is_known_scalar_type = &python_builtins_are_known_scalar_types;
+    DType->default_descr = use_new_as_default;
+    DType->common_dtype = dtype_does_not_promote;
+    DType->common_instance = NULL;  /* May need a default for non-parametric? */
+    DType->setitem = NULL;
+    DType->getitem = NULL;
 
+    PyType_Slot *spec_slot = spec->slots;
     while (1) {
         int slot = spec_slot->slot;
         void *pfunc = spec_slot->pfunc;
@@ -111,24 +204,125 @@ PyArrayDTypeMeta_FromSpec(PyArrayDTypeMeta_Spec *spec)
         if (slot == 0) {
             break;
         }
-
-        if (slot == Npy_dt_) {
-
+        if (slot > NUM_DTYPE_SLOTS || slot < 0) {
+            PyErr_Format(PyExc_RuntimeError,
+                    "Invalid slot with value %d passed in.", slot);
+            Py_DECREF(DType);
+            return NULL;
         }
-        else if (slot == Npy_dt)
-
+        /*
+         * It is up to the user to get this right, and slots are sorted
+         * exactly like they are stored right now:
+         */
+        void **current = (void **)(&(DType->discover_descr_from_pyobject));
+        current += slot - 1;
+        *current = pfunc;
+    }
+    if (DType->setitem == NULL || DType->getitem == NULL) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "A DType must provide a getitem/setitem (there may be an "
+                "exception here in the future if no scalar type is provided)");
+        Py_DECREF(DType);
+        return NULL;
     }
 
+    if (spec->flags & NPY_DTYPE_ABSTRACT) {
+        DType->abstract = 1;
+    }
+    if (spec->flags & NPY_DTYPE_PARAMETRIC) {
+        DType->parametric = 1;
+        if (DType->common_instance == NULL ||
+                DType->discover_descr_from_pyobject == &discover_as_default) {
+            PyErr_SetString(PyExc_RuntimeError,
+                    "Parametric DType must define a common-instance and "
+                    "descriptor discovery function!");
+            return NULL;
+        }
+    }
+    if (spec->flags & ~(NPY_DTYPE_ABSTRACT | NPY_DTYPE_PARAMETRIC)) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "Invalid DType flag set.");
+        Py_DECREF(DType);
+        return NULL;
+    }
+    DType->f = &default_funcs;
+    /* invalid type num. Ideally, we get away with it! */
+    DType->type_num = -1;
+
+    /*
+     * Handle the scalar type mapping.
+     */
+    Py_INCREF(spec->typeobj);
+    DType->scalar_type = spec->typeobj;
+    if (PyType_GetFlags(spec->typeobj) & Py_TPFLAGS_HEAPTYPE) {
+        if (PyObject_SetAttrString((PyObject *)DType->scalar_type,
+                "__associated_array_dtype__", (PyObject *)DType) < 0) {
+            Py_DECREF(DType);
+            return NULL;
+        }
+    }
+    if (_PyArray_MapPyTypeToDType(DType, DType->scalar_type, 0) < 0) {
+        Py_DECREF(DType);
+        return NULL;
+    }
+
+    /* Ensure cast dict is defined (not sure we have to do it here) */
+    DType->castingimpls = PyDict_New();
+    if (DType->castingimpls == NULL) {
+        Py_DECREF(DType);
+        return NULL;
+    }
+    /*
+     * And now, register all the casts that are currently defined!
+     */
+    PyArrayMethod_Spec **next_meth_spec = spec->casts;
+    while (1) {
+        PyArrayMethod_Spec *meth_spec = *next_meth_spec;
+        next_meth_spec++;
+        if (meth_spec == NULL) {
+            break;
+        }
+        /*
+         * The user doesn't know the name of DType yet, so we have to fill it
+         * in for them!
+         */
+        for (int i=0; i < meth_spec->nin + meth_spec->nout; i++) {
+            if (meth_spec->dtypes[i] == NULL) {
+                meth_spec->dtypes[i] = DType;
+            }
+        }
+        /* Register the cast! */
+        res = PyArray_AddCastingImplementation_FromSpec(meth_spec, 0);
+
+        /* Also clean up again, so nobody can get bad ideas... */
+        for (int i=0; i < meth_spec->nin + meth_spec->nout; i++) {
+            if (meth_spec->dtypes[i] == DType) {
+                meth_spec->dtypes[i] = NULL;
+            }
+        }
+
+        if (res < 0) {
+            Py_DECREF(DType);
+            return NULL;
+        }
+    }
+
+    if (DType->within_dtype_castingimpl == NULL) {
+        /*
+         * We expect this for now. We should have a default for DType that
+         * only support simple copy (and possibly byte-order when assuming that
+         * they swap the full itemsize).
+         */
+        PyErr_SetString(PyExc_RuntimeError,
+                "DType must provide a function to cast (or just copy) between "
+                "its own instances!");
+        Py_DECREF(DType);
+        return NULL;
+    }
+
+    /* And finally, we have to register all the casts! */
     return (PyObject *)DType;
 }
-
-
-
-
-
-
-
-
 
 
 

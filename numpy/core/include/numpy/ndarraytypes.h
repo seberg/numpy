@@ -1927,6 +1927,12 @@ typedef void (PyDataMem_EventHookFunc)(void *inp, void *outp, size_t size,
         common_dtype_function *common_dtype;
         common_instance_function *common_instance;
         /*
+         * Currently only used for experimental user DTypes.
+         * Typing as `void *` until NumPy itself uses these (directly).
+         */
+        void *setitem;
+        void *getitem;
+        /*
          * The casting implementation (ArrayMethod) to convert between two
          * instances of this DType, stored explicitly for fast access:
          */

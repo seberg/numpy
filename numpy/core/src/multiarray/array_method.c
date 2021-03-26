@@ -204,7 +204,7 @@ validate_spec(PyArrayMethod_Spec *spec)
         if (spec->dtypes[i]->abstract) {
             PyErr_Format(PyExc_TypeError,
                     "abstract DType %S are currently not supported."
-                    "(method: %s defined at %s)", spec->dtypes[i], spec->name);
+                    "(method: %s)", spec->dtypes[i], spec->name);
             return -1;
         }
     }
@@ -286,7 +286,7 @@ fill_arraymethod_from_slots(
                     PyErr_Format(PyExc_TypeError,
                             "Must specify output DTypes or use custom "
                             "`resolve_descriptors` when there are no inputs. "
-                            "(method: %s defined at %s)", spec->name);
+                            "(method: %s)", spec->name);
                     return -1;
                 }
             }

@@ -70,19 +70,19 @@ static void **__experimental_dtype_api_table = __uninitialized_table;
  */
 typedef enum {
     /* Flag for whether the GIL is required */
-            NPY_METH_REQUIRES_PYAPI = 1 << 1,
+    NPY_METH_REQUIRES_PYAPI = 1 << 1,
     /*
      * Some functions cannot set floating point error flags, this flag
      * gives us the option (not requirement) to skip floating point error
      * setup/check. No function should set error flags and ignore them
      * since it would interfere with chaining operations (e.g. casting).
      */
-            NPY_METH_NO_FLOATINGPOINT_ERRORS = 1 << 2,
+    NPY_METH_NO_FLOATINGPOINT_ERRORS = 1 << 2,
     /* Whether the method supports unaligned access (not runtime) */
-            NPY_METH_SUPPORTS_UNALIGNED = 1 << 3,
+    NPY_METH_SUPPORTS_UNALIGNED = 1 << 3,
 
     /* All flags which can change at runtime */
-            NPY_METH_RUNTIME_FLAGS = (
+    NPY_METH_RUNTIME_FLAGS = (
             NPY_METH_REQUIRES_PYAPI |
             NPY_METH_NO_FLOATINGPOINT_ERRORS),
 } NPY_ARRAYMETHOD_FLAGS;
@@ -172,7 +172,6 @@ typedef int (PyArrayMethod_StridedLoop)(PyArrayMethod_Context *context,
 
 #define NPY_DTYPE_PARAMETRIC 1
 #define NPY_DTYPE_ABSTRACT 2
-
 
 #define NPY_DT_discover_descr_from_pyobject 1
 #define _NPY_DT_is_known_scalar_type 2
