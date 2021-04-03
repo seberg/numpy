@@ -218,9 +218,10 @@ static int
 import_experimental_dtype_api(int version)
 {
     if (version != __EXPERIMENTAL_DTYPE_VERSION) {
-        PyErr_SetString(PyExc_RuntimeError,
+        PyErr_Format(PyExc_RuntimeError,
                 "DType API version %d did not match header version %d. Please "
-                "update the import statement and check for API changes.");
+                "update the import statement and check for API changes.",
+                version, __EXPERIMENTAL_DTYPE_VERSION);
         return -1;
     }
     if (__experimental_dtype_api_table != __uninitialized_table) {
