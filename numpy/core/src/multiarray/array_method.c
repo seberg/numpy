@@ -417,6 +417,8 @@ PyArrayMethod_FromSpec_int(PyArrayMethod_Spec *spec, int private)
     res->method->nout = spec->nout;
     res->method->flags = spec->flags;
     res->method->casting = spec->casting;
+    /* Ufunc is set manually for some ArrayMethods for legacy support: */
+    res->method->ufunc_for_resolution = NULL;
     if (fill_arraymethod_from_slots(res, spec, private) < 0) {
         Py_DECREF(res);
         return NULL;
@@ -441,6 +443,7 @@ arraymethod_dealloc(PyObject *self)
     PyArrayMethodObject *meth;
     meth = ((PyArrayMethodObject *)self);
 
+    Py_CLEAR(meth->ufunc_for_resolution);
     PyMem_Free(meth->name);
 
     Py_TYPE(self)->tp_free(self);

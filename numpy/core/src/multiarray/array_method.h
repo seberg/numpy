@@ -112,6 +112,15 @@ typedef struct PyArrayMethodObject_tag {
     PyArrayMethod_StridedLoop *contiguous_loop;
     PyArrayMethod_StridedLoop *unaligned_strided_loop;
     PyArrayMethod_StridedLoop *unaligned_contiguous_loop;
+    /*
+     * Private slot for the legacy ufunc wrapper, only necessary for
+     * datetime/timedelta support (due to metadata) and ufuncs with custom
+     * resolvers (in which case a dtype will also flexible, e.g. a void
+     * as used by `pyerfa`).
+     * (creates a reference cylce, but only after use and only for rare cases,
+     * e.g. numba will not notice this.)
+     */
+    PyObject *ufunc_for_resolution;
 } PyArrayMethodObject;
 
 

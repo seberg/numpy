@@ -4522,40 +4522,29 @@ _make_new_typetup(
 
 
 /*
- * Finish conversion parsing of the type tuple.  NumPy always only honored
+ * Finish conversion parsing of the signature.  NumPy always only honored
  * the type number for passed in descriptors/dtypes.
  * The `dtype` argument is interpreted as the first output DType (not
  * descriptor).
  * Unlike the dtype of an `out` array, it influences loop selection!
  *
- * NOTE: This function replaces the type tuple if passed in (it steals
- *       the original reference and returns a new object and reference)!
- *       The caller must XDECREF the type tuple both on error or success.
- *
- * The function returns a new, normalized type-tuple.
+ * It is the callers responsibility to clean `signature` and NULL it before
+ * calling.
  */
 static int
-_get_normalized_typetup(PyUFuncObject *ufunc,
-        PyObject *dtype_obj, PyObject *signature_obj, PyObject **out_typetup)
+_get_fixed_signature(PyUFuncObject *ufunc,
+        PyObject *dtype_obj, PyObject *signature_obj,
+        PyArray_DTypeMeta **signature)
 {
     if (dtype_obj == NULL && signature_obj == NULL) {
         return 0;
     }
 
-    int res = -1;
     int nin = ufunc->nin, nout = ufunc->nout, nop = nin + nout;
-    /*
-     * TODO: `signature` will be the main result in the future and
-     *       not the typetup. (Type tuple construction can be deffered to when
-     *       the legacy fallback is used).
-     */
-    PyArray_DTypeMeta *signature[NPY_MAXARGS];
-    memset(signature, '\0', sizeof(*signature) * nop);
 
     if (dtype_obj != NULL) {
         if (dtype_obj == Py_None) {
             /* If `dtype=None` is passed, no need to do anything */
-            assert(*out_typetup == NULL);
             return 0;
         }
         if (nout == 0) {
@@ -4568,8 +4557,7 @@ _get_normalized_typetup(PyUFuncObject *ufunc,
         if (signature[nin] == NULL) {
             return -1;
         }
-        res = _make_new_typetup(nop, signature, out_typetup);
-        goto finish;
+        return 0;
     }
 
     assert(signature_obj != NULL);
@@ -4585,32 +4573,33 @@ _get_normalized_typetup(PyUFuncObject *ufunc,
             if (PyTuple_GET_ITEM(signature_obj, 0) == Py_None) {
                 PyErr_SetString(PyExc_TypeError,
                         "a single item type tuple cannot contain None.");
-                goto finish;
+                return -1;
             }
             if (DEPRECATE("The use of a length 1 tuple for the ufunc "
                           "`signature` is deprecated. Use `dtype` or  fill the"
                           "tuple with `None`s.") < 0) {
-                goto finish;
+                return -1;
             }
             /* Use the same logic as for `dtype=` */
-            res = _get_normalized_typetup(ufunc,
-                    PyTuple_GET_ITEM(signature_obj, 0), NULL, out_typetup);
-            goto finish;
+            return _get_fixed_signature(ufunc,
+                    PyTuple_GET_ITEM(signature_obj, 0), NULL, signature);
         }
         if (n != nop) {
             PyErr_Format(PyExc_ValueError,
                     "a type-tuple must be specified of length %d for ufunc '%s'",
                     nop, ufunc_get_name_cstr(ufunc));
-            goto finish;
+            return -1;
         }
         for (int i = 0; i < nop; ++i) {
             PyObject *item = PyTuple_GET_ITEM(signature_obj, i);
             if (item == Py_None) {
                 continue;
             }
-            signature[i] = _get_dtype(item);
-            if (signature[i] == NULL) {
-                goto finish;
+            else {
+                signature[i] = _get_dtype(item);
+                if (signature[i] == NULL) {
+                    return -1;
+                }
             }
         }
     }
@@ -4620,7 +4609,7 @@ _get_normalized_typetup(PyUFuncObject *ufunc,
         if (PyBytes_Check(signature_obj)) {
             str_object = PyUnicode_FromEncodedObject(signature_obj, NULL, NULL);
             if (str_object == NULL) {
-                goto finish;
+                return -1;
             }
         }
         else {
@@ -4632,7 +4621,7 @@ _get_normalized_typetup(PyUFuncObject *ufunc,
         const char *str = PyUnicode_AsUTF8AndSize(str_object, &length);
         if (str == NULL) {
             Py_DECREF(str_object);
-            goto finish;
+            return -1;
         }
 
         if (length != 1 && (length != nin+nout + 2 ||
@@ -4641,18 +4630,17 @@ _get_normalized_typetup(PyUFuncObject *ufunc,
                     "a type-string for %s, %d typecode(s) before and %d after "
                     "the -> sign", ufunc_get_name_cstr(ufunc), nin, nout);
             Py_DECREF(str_object);
-            goto finish;
+            return -1;
         }
         if (length == 1 && nin+nout != 1) {
             Py_DECREF(str_object);
             if (DEPRECATE("The use of a length 1 string for the ufunc "
                           "`signature` is deprecated. Use `dtype` attribute or "
                           "pass a tuple with `None`s.") < 0) {
-                goto finish;
+                return -1;
             }
             /* `signature="l"` is the same as `dtype="l"` */
-            res = _get_normalized_typetup(ufunc, str_object, NULL, out_typetup);
-            goto finish;
+            return _get_fixed_signature(ufunc, str_object, NULL, signature);
         }
         else {
             for (int i = 0; i < nin+nout; ++i) {
@@ -4660,7 +4648,7 @@ _get_normalized_typetup(PyUFuncObject *ufunc,
                 PyArray_Descr *descr = PyArray_DescrFromType(str[istr]);
                 if (descr == NULL) {
                     Py_DECREF(str_object);
-                    goto finish;
+                    return -1;
                 }
                 signature[i] = NPY_DTYPE(descr);
                 Py_INCREF(signature[i]);
@@ -4671,16 +4659,10 @@ _get_normalized_typetup(PyUFuncObject *ufunc,
     }
     else {
         PyErr_SetString(PyExc_TypeError,
-                "the signature object to ufunc must be a string or a tuple.");
-        goto finish;
+                "The signature object to ufunc must be a string or a tuple.");
+        return -1;
     }
-    res = _make_new_typetup(nop, signature, out_typetup);
-
-  finish:
-    for (int i =0; i < nop; i++) {
-        Py_XDECREF(signature[i]);
-    }
-    return res;
+    return 0;
 }
 
 
@@ -4699,6 +4681,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         npy_bool outer)
 {
     PyArrayObject *operands[NPY_MAXARGS] = {NULL};
+    PyArray_DTypeMeta *signature[NPY_MAXARGS] = {NULL};
     PyObject *retobj[NPY_MAXARGS];
     PyObject *wraparr[NPY_MAXARGS];
     PyObject *override = NULL;
@@ -4880,7 +4863,8 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
      * Parse the passed `dtype` or `signature` into an array containing
      * PyArray_DTypeMeta and/or None.
      */
-    if (_get_normalized_typetup(ufunc, dtype_obj, signature_obj, &typetup) < 0) {
+    if (_get_fixed_signature(ufunc,
+            dtype_obj, signature_obj, signature) < 0) {
         goto fail;
     }
 
@@ -4898,15 +4882,21 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         goto fail;
     }
 
+    PyArrayMethodObject *ufuncimpl = promote_and_get_ufuncimpl(ufunc,
+            operands, signature);
+    if (ufuncimpl == NULL) {
+        goto fail;
+    }
+
     if (!ufunc->core_enabled) {
         errval = PyUFunc_GenericFunctionInternal(ufunc, operands,
-                full_args, typetup, extobj, casting, order, subok,
+                full_args, signature, extobj, casting, order, subok,
                 wheremask);
         Py_XDECREF(wheremask);
     }
     else {
         errval = PyUFunc_GeneralizedFunctionInternal(ufunc, operands,
-                full_args, typetup, extobj, casting, order, subok,
+                full_args, signature, extobj, casting, order, subok,
                 axis_obj, axes_obj, keepdims);
     }
 
