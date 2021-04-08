@@ -49,6 +49,7 @@
 #include "common.h"
 #include "dtypemeta.h"
 #include "numpyos.h"
+#include "dispatching.h"
 
 /********** PRINTF DEBUG TRACING **************/
 #define NPY_UF_DBG_TRACING 0
@@ -4882,6 +4883,10 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         goto fail;
     }
 
+    /*
+     * Note that part of the promotion is to the complete the signature
+     * (until here it only represents the fixed part and is usually NULLs)
+     */
     PyArrayMethodObject *ufuncimpl = promote_and_get_ufuncimpl(ufunc,
             operands, signature);
     if (ufuncimpl == NULL) {
