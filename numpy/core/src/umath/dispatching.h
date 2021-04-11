@@ -1,6 +1,7 @@
 #ifndef _NPY_DISPATCHING_H
 #define _NPY_DISPATCHING_H
 
+#include "numpy/ndarraytypes.h"
 #include "numpy/ufuncobject.h"
 #include "array_method.h"
 

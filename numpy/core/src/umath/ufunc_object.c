@@ -4480,47 +4480,6 @@ _get_dtype(PyObject *dtype_obj) {
 }
 
 
-static int
-_make_new_typetup(
-        int nop, PyArray_DTypeMeta *signature[], PyObject **out_typetup) {
-    *out_typetup = PyTuple_New(nop);
-    if (*out_typetup == NULL) {
-        return -1;
-    }
-
-    int noncount = 0;
-    for (int i = 0; i < nop; i++) {
-        PyObject *item;
-        if (signature[i] == NULL) {
-            item = Py_None;
-            noncount++;
-        }
-        else {
-            if (!signature[i]->legacy || signature[i]->abstract) {
-                /*
-                 * The legacy type resolution can't deal with these.
-                 * This path will return `None` or so in the future to
-                 * set an error later if the legacy type resolution is used.
-                 */
-                PyErr_SetString(PyExc_RuntimeError,
-                        "Internal NumPy error: new DType in signature not yet "
-                        "supported. (This should be unreachable code!)");
-                Py_SETREF(*out_typetup, NULL);
-                return -1;
-            }
-            item = (PyObject *)signature[i]->singleton;
-        }
-        Py_INCREF(item);
-        PyTuple_SET_ITEM(*out_typetup, i, item);
-    }
-    if (noncount == nop) {
-        /* The whole signature was None, simply ignore type tuple */
-        Py_DECREF(*out_typetup);
-        *out_typetup = NULL;
-    }
-    return 0;
-}
-
 
 /*
  * Finish conversion parsing of the signature.  NumPy always only honored

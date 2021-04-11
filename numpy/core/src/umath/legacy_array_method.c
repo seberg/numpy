@@ -5,7 +5,6 @@
 
 #include <numpy/ndarraytypes.h>
 #include <array_method.h>
-#include <numpy/ufuncobject.h>
 #include <dtype_transfer.h>
 #include "umathmodule.h"
 #include "legacy_array_method.h"
@@ -158,7 +157,7 @@ get_wrapped_legacy_ufunc_loop(PyArrayMethod_Context *context,
  * Note that this function stores the result on the ufunc and then only
  * returns the same one.
  */
-PyArrayMethodObject *
+NPY_NO_EXPORT PyArrayMethodObject *
 PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
         PyArray_DTypeMeta *signature[])
 {

@@ -9,8 +9,6 @@
 #include "npy_hashtable.h"
 
 
-
-
 /**
  * Resolves the implementation to use, this uses typical multiple dispatching
  * methods of finding the best matching implementation or resolver.
@@ -288,29 +286,103 @@ resolve_implementation_info(PyUFuncObject *ufunc,
         return -1;
     }
 
-    /* Make an exact check to make abuse hard for now */
-    if (Py_TYPE(PyTuple_GET_ITEM(best_resolver_info, 1)) !=
-            &PyArrayMethod_Type) {
-        PyErr_SetString(PyExc_NotImplementedError,
-                "Promoters are not implementered yet, this branch "
-                "would have to call it, then store the result (or the promoter "
-                "itself)");
-        /*
-         * int res = call_ufuncimpl_resolver(
-         *        best_resolver, ufunc, signature, ufunc_impl);
-         * if (res < 0) {
-         *     return -1;
-         * }
-         * if (!is_any_dtype_abstract) {
-         *     // No abstract dtype, so store ufunc_impl and not function
-         *     best_resolver = (PyObject *)*ufunc_impl;
-         * }
-         */
-    }
-
     *out_info = best_resolver_info;
     return 0;
 }
+
+
+/*
+ * Used for the legacy fallback promotion when `signature` or `dtype` is
+ * provided.
+ * We do not need to pass the type tuple when we use the legacy path
+ * for type resolution rather than promotion; the old system did not
+ * differentiate between these two concepts.
+ */
+static int
+_make_new_typetup(
+        int nop, PyArray_DTypeMeta *signature[], PyObject **out_typetup) {
+    *out_typetup = PyTuple_New(nop);
+    if (*out_typetup == NULL) {
+        return -1;
+    }
+    for (int i = 0; i < nop; i++) {
+        PyObject *item;
+        if (signature[i] == NULL) {
+            item = Py_None;
+        }
+        else {
+            if (!signature[i]->legacy || signature[i]->abstract) {
+                /*
+                 * The legacy type resolution can't deal with these.
+                 * This path will return `None` or so in the future to
+                 * set an error later if the legacy type resolution is used.
+                 */
+                PyErr_SetString(PyExc_RuntimeError,
+                        "Internal NumPy error: new DType in signature not yet "
+                        "supported. (This should be unreachable code!)");
+                Py_SETREF(*out_typetup, NULL);
+                return -1;
+            }
+            item = (PyObject *)signature[i]->singleton;
+        }
+        Py_INCREF(item);
+        PyTuple_SET_ITEM(*out_typetup, i, item);
+    }
+    return 0;
+}
+
+
+/*
+ * Legacy type resolution unfortunately works on the original array objects
+ * and we have no choice but to pass them in.
+ */
+static int
+legacy_resolve_implementation_info(PyUFuncObject *ufunc,
+        PyArrayObject *const *ops, PyArray_DTypeMeta *signature[],
+        PyObject **out_info)
+{
+    int nargs = ufunc->nargs;
+    PyArray_Descr *out_descrs[NPY_MAXARGS] = {NULL};
+    PyObject *type_tuple = NULL;
+    if (_make_new_typetup(nargs, signature, &type_tuple) < 0) {
+        return NULL;
+    }
+
+    /*
+     * We use unsafe casting. This is of course not accurate, but that is OK
+     * here, because for promotion/dispatching the casting safety makes no
+     * difference.  Whether the actual operands can be casts must be checked
+     * during the type resolution step (which may _also_ calls this!).
+     */
+    if (ufunc->type_resolver(ufunc,
+            NPY_UNSAFE_CASTING, (PyArrayObject **)ops, type_tuple,
+            out_descrs) < 0) {
+        goto error;
+    }
+    PyObject *DType_tuple = PyTuple_New(nargs);
+    if (DType_tuple == NULL) {
+        goto error;
+    }
+    Py_XDECREF(type_tuple);
+    for (int i = 0; i < nargs; i++) {
+        PyObject *DType = (PyObject *)NPY_DTYPE(out_descrs[i]);
+        Py_INCREF(DType);
+        PyTuple_SET_ITEM(DType_tuple, i, DType);
+    }
+    /* no need for goto error anymore */
+
+    PyArray_NewLegacyWrappingArrayMethod()
+
+    return 0;
+
+  error:
+    Py_XDECREF(type_tuple);
+    for (int i = 0; i < nargs; i++) {
+        Py_XDECREF(out_descrs[i]);
+    }
+    return -1;
+}
+
 
 /*
  * The central entrypoint for the promotion and dispatching machinery.
@@ -349,10 +421,17 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
         }
     }
 
+    /*
+     * Fetch the dispatching info which consists of the implementation and
+     * the DType signature tuple.  There are three steps:
+     *
+     * 1. Check the cache.
+     * 2. Check all registered loops/promoters to find the best match.
+     * 3. Fall back to the legacy implementation if no match was found.
+     */
     PyObject *info = PyArrayIdentityHash_GetItem(
             (PyArrayIdentityHash *)ufunc->_dispatch_cache, (PyObject **)op_dtypes);
 
-    PyArrayMethodObject *ufunc_impl;
     if (NPY_UNLIKELY(info == NULL)) {
         if (resolve_implementation_info(ufunc, op_dtypes, &info) < 0) {
             return NULL;
@@ -363,8 +442,30 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
              * succeed even if the final resolution is invalid because there
              * is no matching loop.
              */
-
+            if (legacy_resolve_implementation_info(ufunc,
+                    ops, signature, &info) < 0) {
+                return NULL;
+            }
         }
+    }
+    assert(PyTuple_CheckExact(info) && PyTuple_GET_SIZE(info) == 2);
+
+    /* Make an exact check to make abuse hard for now */
+    if (Py_TYPE(PyTuple_GET_ITEM(info, 1)) != &PyArrayMethod_Type) {
+        PyErr_SetString(PyExc_NotImplementedError,
+                "Promoters are not implemented yet, they will be called here "
+                "and then store the result (or the promoter itself)");
+        /*
+         * int res = call_ufuncimpl_resolver(
+         *        best_resolver, ufunc, signature, ufunc_impl);
+         * if (res < 0) {
+         *     return -1;
+         * }
+         * if (!is_any_dtype_abstract) {
+         *     // No abstract dtype, so store ufunc_impl and not function
+         *     best_resolver = (PyObject *)*ufunc_impl;
+         * }
+         */
     }
 
 
