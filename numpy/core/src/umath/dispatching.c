@@ -7,6 +7,7 @@
 #include "dispatching.h"
 #include "dtypemeta.h"
 #include "npy_hashtable.h"
+#include "legacy_array_method.h"
 
 
 /**
@@ -376,10 +377,28 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
         PyObject *DType = (PyObject *)NPY_DTYPE(out_descrs[i]);
         Py_INCREF(DType);
         PyTuple_SET_ITEM(DType_tuple, i, DType);
+        Py_CLEAR(out_descrs[i]);
+
+        if (signature[i] != NULL && (PyObject *)signature[i] != DType) {
+            Py_DECREF(DType_tuple);
+            goto error;
+        }
+        signature[i] = (PyArray_DTypeMeta *)DType;
     }
     /* no need for goto error anymore */
 
-    PyArray_NewLegacyWrappingArrayMethod()
+    PyArrayMethodObject *method = PyArray_NewLegacyWrappingArrayMethod(ufunc,
+            (PyArray_DTypeMeta **)PySequence_Fast_ITEMS(DType_tuple));
+    if (method == NULL) {
+        Py_DECREF(DType_tuple);
+        return -1;
+    }
+    *out_info = PyTuple_Pack(2, DType_tuple, method);
+    Py_DECREF(DType_tuple);
+    Py_DECREF(method);
+    if (*out_info == NULL) {
+        return -1;
+    }
 
     return 0;
 
@@ -393,11 +412,11 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
 
 
 /*
- * The central entrypoint for the promotion and dispatching machinery.
+ * The central entry-point for the promotion and dispatching machinery.
  * It currently works with the operands (although it would be possible to
  * only work with DType (classes/types).
  */
-NPY_NO_EXPORT PyArrayMethodObject *
+NPY_NO_EXPORT PyObject *
 promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
         PyArrayObject *const ops[], PyArray_DTypeMeta *signature[])
 {
@@ -476,5 +495,5 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
          */
     }
 
-
+    return info;
 }
