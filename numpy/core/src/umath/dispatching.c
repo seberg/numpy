@@ -305,10 +305,13 @@ _make_new_typetup(
     if (*out_typetup == NULL) {
         return -1;
     }
+
+    int none_count = 0;
     for (int i = 0; i < nop; i++) {
         PyObject *item;
         if (signature[i] == NULL) {
             item = Py_None;
+            none_count++;
         }
         else {
             if (!signature[i]->legacy || signature[i]->abstract) {
@@ -327,6 +330,11 @@ _make_new_typetup(
         }
         Py_INCREF(item);
         PyTuple_SET_ITEM(*out_typetup, i, item);
+    }
+    if (none_count == nop) {
+        /* The whole signature was None, simply ignore type tuple */
+        Py_DECREF(*out_typetup);
+        *out_typetup = NULL;
     }
     return 0;
 }

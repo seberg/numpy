@@ -4480,7 +4480,6 @@ _get_dtype(PyObject *dtype_obj) {
 }
 
 
-
 /*
  * Finish conversion parsing of the signature.  NumPy always only honored
  * the type number for passed in descriptors/dtypes.
