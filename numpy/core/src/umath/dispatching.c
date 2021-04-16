@@ -10,6 +10,47 @@
 #include "legacy_array_method.h"
 
 
+static int
+add_ufunc_loop(PyUFuncObject *ufunc, PyObject *info, int ignore_duplicate)
+{
+    assert(PyTuple_CheckExact(info) && PyTuple_GET_SIZE(info) == 2);
+
+    if (ufunc->_loops == NULL) {
+        ufunc->_loops = PyList_New(0);
+        if (ufunc->_loops == NULL) {
+            return -1;
+        }
+    }
+
+    PyObject *DType_tuple = PyTuple_GetItem(info, 0);
+
+    PyObject *loops = ufunc->_loops;
+    Py_ssize_t length = PyList_Size(loops);
+    for (Py_ssize_t i = 0; i < length; i++) {
+        PyObject *item = PyList_GetItem(loops, i);
+        PyObject *cur_DType_tuple = PyTuple_GetItem(item, 0);
+        int cmp = PyObject_RichCompareBool(cur_DType_tuple, DType_tuple, Py_EQ);
+        if (cmp < 0) {
+            return -1;
+        }
+        if (cmp == 0) {
+            continue;
+        }
+        if (ignore_duplicate) {
+            /* The loop already exists, just ignore it. */
+            return 0;
+        }
+        PyErr_Format(PyExc_TypeError,
+                "A loop/promoter has already been registered for %R",
+                DType_tuple);
+        return -1;
+    }
+
+    PyList_Append(loops, info);
+    return 0;
+}
+
+
 /**
  * Resolves the implementation to use, this uses typical multiple dispatching
  * methods of finding the best matching implementation or resolver.
@@ -473,15 +514,19 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
                     ops, signature, &info) < 0) {
                 return NULL;
             }
+            if (add_ufunc_loop(ufunc, info, 1) < 0) {
+                return NULL;
+            }
         }
+        // TODO: Here is the point where I can add the info to the cache.
     }
     assert(PyTuple_CheckExact(info) && PyTuple_GET_SIZE(info) == 2);
+
 
     /* Make an exact check to make abuse hard for now */
     if (Py_TYPE(PyTuple_GET_ITEM(info, 1)) != &PyArrayMethod_Type) {
         PyErr_SetString(PyExc_NotImplementedError,
-                "Promoters are not implemented yet, they will be called here "
-                "and then store the result (or the promoter itself)");
+                "Promoters are not implemented yet, they will be called here.");
         /*
          * int res = call_ufuncimpl_resolver(
          *        best_resolver, ufunc, signature, ufunc_impl);
