@@ -457,7 +457,7 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
  * It currently works with the operands (although it would be possible to
  * only work with DType (classes/types).
  */
-NPY_NO_EXPORT PyObject *
+NPY_NO_EXPORT PyArrayMethodObject *
 promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
         PyArrayObject *const ops[], PyArray_DTypeMeta *signature[])
 {
@@ -522,23 +522,24 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
     }
     assert(PyTuple_CheckExact(info) && PyTuple_GET_SIZE(info) == 2);
 
-
     /* Make an exact check to make abuse hard for now */
-    if (Py_TYPE(PyTuple_GET_ITEM(info, 1)) != &PyArrayMethod_Type) {
-        PyErr_SetString(PyExc_NotImplementedError,
-                "Promoters are not implemented yet, they will be called here.");
-        /*
-         * int res = call_ufuncimpl_resolver(
-         *        best_resolver, ufunc, signature, ufunc_impl);
-         * if (res < 0) {
-         *     return -1;
-         * }
-         * if (!is_any_dtype_abstract) {
-         *     // No abstract dtype, so store ufunc_impl and not function
-         *     best_resolver = (PyObject *)*ufunc_impl;
-         * }
-         */
+    if (Py_TYPE(PyTuple_GET_ITEM(info, 1)) == &PyArrayMethod_Type) {
+        return (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
     }
 
-    return info;
+    PyErr_SetString(PyExc_NotImplementedError,
+            "Promoters are not implemented yet, they will be called here.");
+    /*
+     * int res = call_ufuncimpl_resolver(
+     *        best_resolver, ufunc, signature, ufunc_impl);
+     * if (res < 0) {
+     *     return -1;
+     * }
+     * if (!is_any_dtype_abstract) {
+     *     // No abstract dtype, so store ufunc_impl and not function
+     *     best_resolver = (PyObject *)*ufunc_impl;
+     * }
+     */
+
+    return (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
 }
