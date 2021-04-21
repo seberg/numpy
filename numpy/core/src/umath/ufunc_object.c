@@ -50,6 +50,7 @@
 #include "dtypemeta.h"
 #include "numpyos.h"
 #include "dispatching.h"
+#include "legacy_array_method.h"
 
 /********** PRINTF DEBUG TRACING **************/
 #define NPY_UF_DBG_TRACING 0
@@ -2100,7 +2101,8 @@ _initialize_variable_parts(PyUFuncObject *ufunc,
 }
 
 static int
-PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc, PyArrayObject **op,
+PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
+        PyArrayMethodObject *ufuncimpl, PyArrayObject **op,
         ufunc_full_args full_args, PyObject *type_tup, PyObject *extobj,
         NPY_CASTING casting, NPY_ORDER order, npy_bool subok,
         PyObject *axis, PyObject *axes, int keepdims)
@@ -2639,7 +2641,8 @@ fail:
 
 
 static int
-PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc, PyArrayObject **op,
+PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
+        PyArrayMethodObject *ufuncimpl, PyArrayObject **op,
         ufunc_full_args full_args, PyObject *type_tup, PyObject *extobj,
         NPY_CASTING casting, NPY_ORDER order, npy_bool subok,
         PyArrayObject *wheremask)
@@ -2651,6 +2654,7 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc, PyArrayObject **op,
     npy_uint32 op_flags[NPY_MAXARGS];
     npy_intp default_op_out_flags;
 
+    PyArray_Descr *original_dtypes[NPY_MAXARGS];
     PyArray_Descr *dtypes[NPY_MAXARGS];
 
     /* These parameters come from extobj= or from a TLS global */
@@ -2671,6 +2675,12 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc, PyArrayObject **op,
 
     /* Initialize all the dtypes and __array_prepare__ callbacks to NULL */
     for (i = 0; i < nop; ++i) {
+        if (op != NULL) {
+            original_dtypes[i] = PyArray_DTYPE(op[i]);
+        }
+        else {
+            original_dtypes[i] = NULL;
+        }
         dtypes[i] = NULL;
         arr_prep[i] = NULL;
     }
@@ -2683,8 +2693,16 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc, PyArrayObject **op,
 
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
-    retval = ufunc->type_resolver(ufunc, casting,
-                            op, type_tup, dtypes);
+    if (ufuncimpl->resolve_descriptors != &wrapped_legacy_resolve_descriptors) {
+        /* the default pass using the `ufuncimpl` as nature intended it */
+        retval = ufuncimpl->resolve_descriptors(ufuncimpl,
+                signature, original_dtypes, dtypes);
+    }
+    else {
+        /* In this (rare) case fall back to the legacy resolver to pass `op` */
+        retval = ufunc->type_resolver(ufunc, casting, op, NULL, dtypes);
+    }
+
     if (retval < 0) {
         goto fail;
     }
@@ -2739,9 +2757,10 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc, PyArrayObject **op,
         op[nop] = wheremask;
         dtypes[nop] = NULL;
 
-        /* Set up the flags */
-
-        npy_clear_floatstatus_barrier((char*)&ufunc);
+        /* Set up the floating point error flag handling */
+        if (!(ufuncimpl->flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+            npy_clear_floatstatus_barrier((char *) &ufunc);
+        }
         retval = execute_fancy_ufunc_loop(ufunc, wheremask,
                             op, dtypes, order,
                             buffersize, arr_prep, full_args, op_flags);
@@ -4852,13 +4871,13 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     }
 
     if (!ufunc->core_enabled) {
-        errval = PyUFunc_GenericFunctionInternal(ufunc, operands,
+        errval = PyUFunc_GenericFunctionInternal(ufunc, ufuncimpl, operands,
                 full_args, signature, extobj, casting, order, subok,
                 wheremask);
         Py_XDECREF(wheremask);
     }
     else {
-        errval = PyUFunc_GeneralizedFunctionInternal(ufunc, operands,
+        errval = PyUFunc_GeneralizedFunctionInternal(ufunc, ufuncimpl, operands,
                 full_args, signature, extobj, casting, order, subok,
                 axis_obj, axes_obj, keepdims);
     }
