@@ -1398,6 +1398,7 @@ iterator_loop(PyUFuncObject *ufunc,
  */
 static int
 execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
+                    PyArrayMethodObject *ufuncimpl,
                     int trivial_loop_ok,
                     PyArrayObject **op,
                     PyArray_Descr **dtypes,
@@ -1408,13 +1409,17 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
                     npy_uint32 *op_flags)
 {
     PyUFuncGenericFunction innerloop;
-    void *innerloopdata;
-    int needs_api = 0;
+    NpyAuxData *innerloopdata = NULL;
+    npy_intp fixed_strides[NPY_MAXARGS];
 
-    if (ufunc->legacy_inner_loop_selector(ufunc, dtypes,
-                    &innerloop, &innerloopdata, &needs_api) < 0) {
-        return -1;
-    }
+    PyArrayMethod_Context context = {
+        .method = ufuncimpl,
+        .descriptors = dtypes,
+        .caller = (PyObject *)ufunc,
+    };
+    NPY_ARRAYMETHOD_FLAGS method_flags = 0;
+    ufuncimpl->get_strided_loop(&context,
+            1, 0, fixed_strides, &innerloop, &innerloopdata, &method_flags);
 
     /* First check for the trivial cases that don't need an iterator */
     if (trivial_loop_ok && ufunc->nout == 1) {
@@ -2694,7 +2699,7 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
     if (ufuncimpl->resolve_descriptors != &wrapped_legacy_resolve_descriptors) {
-        /* the default pass using the `ufuncimpl` as nature intended it */
+        /* The default: use the `ufuncimpl` as nature intended it */
         retval = ufuncimpl->resolve_descriptors(ufuncimpl,
                 signature, original_dtypes, dtypes);
     }
