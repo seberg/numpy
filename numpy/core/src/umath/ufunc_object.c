@@ -1420,6 +1420,10 @@ execute_legacy_ufunc_loop(PyUFuncObject *ufunc,
     NPY_ARRAYMETHOD_FLAGS method_flags = 0;
     ufuncimpl->get_strided_loop(&context,
             1, 0, fixed_strides, &innerloop, &innerloopdata, &method_flags);
+    /* Set up the floating point error flag handling */
+    if (!(method_flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+        npy_clear_floatstatus_barrier((char *) &ufunc);
+    }
 
     /* First check for the trivial cases that don't need an iterator */
     if (trivial_loop_ok && ufunc->nout == 1) {
@@ -1479,6 +1483,18 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
 
     PyArrayObject **op_it;
     npy_uint32 iter_flags;
+
+    if (ufunc->masked_inner_loop_selector != NULL) {
+        if (PyErr_WarnFormat(PyExc_UserWarning, 1,
+                "The ufunc %s has a custom masked-inner-loop-selector. NumPy "
+                "assumes that this is NEVER used.  If you do make use of this "
+                "please notify the NumPy developers to discuss future "
+                "solutions. (See NEP 41 and 43)\n"
+                "NumPy will continue, but ignore the custom loop selector.",
+                ufunc_get_name_cstr(ufunc)) < 0) {
+            return -1;
+        }
+    }
 
     for (i = nin; i < nop; ++i) {
         op_flags[i] |= (op[i] != NULL ? NPY_ITER_READWRITE : NPY_ITER_WRITEONLY);
@@ -2762,10 +2778,6 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
         op[nop] = wheremask;
         dtypes[nop] = NULL;
 
-        /* Set up the floating point error flag handling */
-        if (!(ufuncimpl->flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
-            npy_clear_floatstatus_barrier((char *) &ufunc);
-        }
         retval = execute_fancy_ufunc_loop(ufunc, wheremask,
                             op, dtypes, order,
                             buffersize, arr_prep, full_args, op_flags);
@@ -5228,7 +5240,7 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
     /* Type resolution and inner loop selection functions */
     ufunc->type_resolver = &PyUFunc_DefaultTypeResolver;
     ufunc->legacy_inner_loop_selector = &PyUFunc_DefaultLegacyInnerLoopSelector;
-    ufunc->masked_inner_loop_selector = &PyUFunc_DefaultMaskedInnerLoopSelector;
+    ufunc->masked_inner_loop_selector = NULL;
 
     if (name == NULL) {
         ufunc->name = "?";
