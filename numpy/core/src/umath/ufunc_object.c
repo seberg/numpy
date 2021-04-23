@@ -1490,7 +1490,8 @@ execute_fancy_ufunc_loop(PyUFuncObject *ufunc,
                 "assumes that this is NEVER used.  If you do make use of this "
                 "please notify the NumPy developers to discuss future "
                 "solutions. (See NEP 41 and 43)\n"
-                "NumPy will continue, but ignore the custom loop selector.",
+                "NumPy will continue, but ignore the custom loop selector. "
+                "This should only affect performance.",
                 ufunc_get_name_cstr(ufunc)) < 0) {
             return -1;
         }
