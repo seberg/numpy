@@ -1,6 +1,9 @@
 #ifndef _NPY_NPY_HASHTABLE_H
 #define _NPY_NPY_HASHTABLE_H
 
+#include <Python.h>
+
+#define NPY_NO_DEPRECATED_API NPY_API_VERSION
 #include "numpy/ndarraytypes.h"
 
 

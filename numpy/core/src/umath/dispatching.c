@@ -3,6 +3,11 @@
  * is necessary to happen before dispatching).
  * As such it works on the UFunc object.
  */
+#define _UMATHMODULE
+#define _MULTIARRAYMODULE
+#define NPY_NO_DEPRECATED_API NPY_API_VERSION
+
+#include <numpy/ndarraytypes.h>
 
 #include "dispatching.h"
 #include "dtypemeta.h"
@@ -395,7 +400,7 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
     PyArray_Descr *out_descrs[NPY_MAXARGS] = {NULL};
     PyObject *type_tuple = NULL;
     if (_make_new_typetup(nargs, signature, &type_tuple) < 0) {
-        return NULL;
+        return -1;
     }
 
     /*
@@ -504,7 +509,7 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
         if (resolve_implementation_info(ufunc, op_dtypes, &info) < 0) {
             return NULL;
         }
-        if NPY_UNLIKELY(info == NULL) {
+        if (NPY_UNLIKELY(info == NULL)) {
             /*
              * One last try by using the legacy type resolver (this may
              * succeed even if the final resolution is invalid because there
@@ -518,28 +523,36 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
                 return NULL;
             }
         }
-        // TODO: Here is the point where I can add the info to the cache.
+        PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
+                (PyObject **)op_dtypes, info);
     }
     assert(PyTuple_CheckExact(info) && PyTuple_GET_SIZE(info) == 2);
 
     /* Make an exact check to make abuse hard for now */
-    if (Py_TYPE(PyTuple_GET_ITEM(info, 1)) == &PyArrayMethod_Type) {
-        return (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
+    if (Py_TYPE(PyTuple_GET_ITEM(info, 1)) != &PyArrayMethod_Type) {
+        PyErr_SetString(PyExc_NotImplementedError,
+                "Promoters are not implemented yet, they will be called here.");
+        /*
+         * int res = call_ufuncimpl_resolver(
+         *        best_resolver, ufunc, signature, ufunc_impl);
+         * if (res < 0) {
+         *     return -1;
+         * }
+         * if (!is_any_dtype_abstract) {
+         *     // No abstract dtype, so store ufunc_impl and not function
+         *     best_resolver = (PyObject *)*ufunc_impl;
+         * }
+         */
     }
 
-    PyErr_SetString(PyExc_NotImplementedError,
-            "Promoters are not implemented yet, they will be called here.");
-    /*
-     * int res = call_ufuncimpl_resolver(
-     *        best_resolver, ufunc, signature, ufunc_impl);
-     * if (res < 0) {
-     *     return -1;
-     * }
-     * if (!is_any_dtype_abstract) {
-     *     // No abstract dtype, so store ufunc_impl and not function
-     *     best_resolver = (PyObject *)*ufunc_impl;
-     * }
-     */
-
+    /* FIll in the signature with the actual signature we are working on */
+    PyObject *all_dtypes = PyTuple_GET_ITEM(info, 0);
+    for (int i = 0; i < nargs; i++) {
+        if (signature[i] == NULL) {
+            signature[i] = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(all_dtypes, i);
+            Py_INCREF(signature[i]);
+        }
+        assert((PyObject *)signature[i] == PyTuple_GET_ITEM(all_dtypes, i));
+    }
     return (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
 }

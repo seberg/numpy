@@ -178,10 +178,8 @@ typedef struct _tagPyUFuncObject {
     #else
         void *reserved2;
     #endif
-        /*
-         * A function which returns a masked inner loop for the ufunc.
-         */
-        void *masked_inner_loop_selector;
+        /* Was previously the `PyUFunc_MaskedInnerLoopSelectionFunc` */
+        void *_always_null_previously_masked_innerloop_selector;
 
         /*
          * List of flags for each operand when ufunc is called by nditer object.

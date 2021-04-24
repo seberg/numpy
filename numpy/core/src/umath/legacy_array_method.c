@@ -3,10 +3,16 @@
  * ufunc loops into new style arraymethods.
  */
 
-#include <numpy/ndarraytypes.h>
-#include <array_method.h>
-#include <dtype_transfer.h>
-#include "umathmodule.h"
+#include <Python.h>
+
+#define _UMATHMODULE
+#define _MULTIARRAYMODULE
+#define NPY_NO_DEPRECATED_API NPY_API_VERSION
+#include "numpy/ndarraytypes.h"
+
+#include "convert_datatype.h"
+#include "array_method.h"
+#include "dtype_transfer.h"
 #include "legacy_array_method.h"
 
 
@@ -107,6 +113,46 @@ wrapped_legacy_resolve_descriptors(PyArrayMethodObject *NPY_UNUSED(self),
     return -1;
 }
 
+/*
+ * Much the same as the default type resolver, but tries a bit harder to
+ * preserve metadata.
+ */
+static NPY_CASTING
+simple_legacy_resolve_descriptors(
+        PyArrayMethodObject *method,
+        PyArray_DTypeMeta **dtypes,
+        PyArray_Descr **given_descrs,
+        PyArray_Descr **output_descrs)
+{
+    int nin = method->nin;
+    int nout = method->nout;
+
+    for (int i = 0; i < nin + nout; i++) {
+        if (given_descrs[i] != NULL) {
+            output_descrs[i] = ensure_dtype_nbo(given_descrs[i]);
+        }
+        else if (dtypes[i] == dtypes[0] && i > 0) {
+            /* Preserve metadata from the first operand if same dtype */
+            Py_INCREF(given_descrs[0]);
+            output_descrs[i] = output_descrs[0];
+        }
+        else {
+            output_descrs[i] = dtypes[i]->default_descr(dtypes[i]);
+        }
+        if (output_descrs[i] == NULL) {
+            goto fail;
+        }
+    }
+
+    return NPY_SAFE_CASTING;
+
+  fail:
+    for (int i = 0; i < nin + nout; i++) {
+        Py_CLEAR(output_descrs[i]);
+    }
+    return -1;
+}
+
 
 /*
  * This function grabs the legacy inner-loop.  If this turns out to be slow
@@ -123,13 +169,14 @@ get_wrapped_legacy_ufunc_loop(PyArrayMethod_Context *context,
     assert(aligned);
     assert(!move_references);
 
-    if (NPY_UNLIKELY(context->caller == NULL ||
-            PyObject_TypeCheck(context->caller, &PyUFunc_Type))) {
+    if (context->caller == NULL ||
+            !PyObject_TypeCheck(context->caller, &PyUFunc_Type)) {
         PyErr_Format(PyExc_RuntimeError,
                 "cannot call %s without its ufunc as caller context.",
                 context->method->name);
         return -1;
     }
+
     PyUFuncObject *ufunc = (PyUFuncObject *)context->caller;
     void *user_data;
     int needs_api = 0;
@@ -174,18 +221,26 @@ PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
      * Assume that we require the Python API when any of the (legacy) dtypes
      * flags it.
      */
+    int any_output_flexible = 0;
     NPY_ARRAYMETHOD_FLAGS flags = 0;
     for (int i = 0; i < ufunc->nin+ufunc->nout; i++) {
         if (signature[i]->singleton->flags & NPY_NEEDS_PYAPI) {
             flags &= NPY_METH_REQUIRES_PYAPI;
         }
+        if (i >= ufunc->nin && signature[i]->parametric) {
+            any_output_flexible = 1;
+        }
     }
 
-    PyType_Slot slots[] = {
-        {NPY_METH_resolve_descriptors, &wrapped_legacy_resolve_descriptors},
+    PyType_Slot slots[3] = {
         {NPY_METH_get_loop, &get_wrapped_legacy_ufunc_loop},
+        {NPY_METH_resolve_descriptors, &simple_legacy_resolve_descriptors},
         {0, NULL},
     };
+    if (any_output_flexible) {
+        /* We cannot use the default descriptor resolver. */
+        slots[1].pfunc = &wrapped_legacy_resolve_descriptors;
+    }
 
     PyArrayMethod_Spec spec = {
         .name = method_name,
@@ -194,6 +249,7 @@ PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
         .dtypes = signature,
         .flags = flags,
         .slots = slots,
+        .casting = NPY_SAFE_CASTING,
     };
 
     PyBoundArrayMethodObject *bound_res = PyArrayMethod_FromSpec_int(&spec, 1);
@@ -203,5 +259,6 @@ PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
     PyArrayMethodObject *res = bound_res->method;
     Py_INCREF(res);
     Py_DECREF(bound_res);
+    ufunc->_legacy_array_method = (PyObject *)res;
     return res;
 }

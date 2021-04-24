@@ -774,9 +774,9 @@ _masked_stridedloop_data_free(NpyAuxData *auxdata)
 }
 
 static int
-generic_masked_stridedloop(PyArrayMethod_Context *context,
-        char *const data[], const npy_intp dimensions[],
-        const npy_intp strides[], NpyAuxData *_auxdata)
+generic_masked_strided_loop(PyArrayMethod_Context *context,
+        char *const *data, const npy_intp *dimensions,
+        const npy_intp *strides, NpyAuxData *_auxdata)
 {
     _masked_stridedloop_data *auxdata = (_masked_stridedloop_data *)_auxdata;
     int nargs = auxdata->nargs;
@@ -811,6 +811,8 @@ generic_masked_stridedloop(PyArrayMethod_Context *context,
         }
         N -= subloopsize;
     } while (N > 0);
+
+    return 0;
 }
 
 
@@ -849,7 +851,7 @@ PyArrayMethod_GetMaskedStridedLoop(
         PyMem_Free(data);
     }
     *out_transferdata = (NpyAuxData *)data;
-    *out_loop = generic_masked_stridedloop;
+    *out_loop = generic_masked_strided_loop;
     return 0;
 }
 

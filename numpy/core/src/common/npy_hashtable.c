@@ -150,6 +150,7 @@ _resize_if_necessary(PyArrayIdentityHash *tb)
         }
     }
     PyObject_Free(old_table);
+    return 0;
 }
 
 

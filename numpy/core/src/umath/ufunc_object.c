@@ -41,6 +41,7 @@
 #include "ufunc_type_resolution.h"
 #include "reduction.h"
 #include "mem_overlap.h"
+#include "npy_hashtable.h"
 
 #include "ufunc_object.h"
 #include "override.h"
@@ -50,6 +51,7 @@
 #include "dtypemeta.h"
 #include "numpyos.h"
 #include "dispatching.h"
+#include "convert_datatype.h"
 #include "legacy_array_method.h"
 
 /********** PRINTF DEBUG TRACING **************/
@@ -1232,11 +1234,14 @@ try_trivial_single_output_loop(PyArrayMethod_Context *context,
 
     PyArrayMethod_StridedLoop *strided_loop;
     NpyAuxData *auxdata = NULL;
-    NPY_ARRAYMETHOD_FLAGS flags;
+    NPY_ARRAYMETHOD_FLAGS flags = 0;
     if (context->method->get_strided_loop(context,
             1, 0, fixed_strides,
             &strided_loop, &auxdata, &flags) < 0) {
         return -1;
+    }
+    for (int iop=0; iop < nop; iop++) {
+        data[iop] = PyArray_BYTES(op[iop]);
     }
 
     if (!(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
@@ -1279,7 +1284,7 @@ execute_ufunc_loop(PyArrayMethod_Context *context, int masked,
 
     if (masked) {
         assert(PyArray_TYPE(op[nop]) == NPY_BOOL);
-        if (ufunc->masked_inner_loop_selector != NULL) {
+        if (ufunc->_always_null_previously_masked_innerloop_selector != NULL) {
             if (PyErr_WarnFormat(PyExc_UserWarning, 1,
                     "The ufunc %s has a custom masked-inner-loop-selector."
                     "NumPy assumes that this is NEVER used. If you do make "
@@ -2503,7 +2508,7 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
         PyArrayObject *wheremask)
 {
     int nin, nout;
-    int i, nop;
+    int nop;
     const char *ufunc_name;
     int retval = -1;
     npy_uint32 op_flags[NPY_MAXARGS];
@@ -2526,37 +2531,57 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
 
     NPY_UF_DBG_PRINT1("\nEvaluating ufunc %s\n", ufunc_name);
 
-    /* Initialize all the dtypes and __array_prepare__ callbacks to NULL */
-    for (i = 0; i < nop; ++i) {
-        if (op != NULL) {
-            original_dtypes[i] = PyArray_DTYPE(op[i]);
-        }
-        else {
-            original_dtypes[i] = NULL;
-        }
+    for (int i = 0; i < nop; ++i) {
         dtypes[i] = NULL;
         arr_prep[i] = NULL;
+        if (op[i] == NULL) {
+            original_dtypes[i] = NULL;
+        }
+        else {
+            /*
+             * The dtype may mismatch the signature, in which case we need
+             * to make it fit before calling the resolution.
+             */
+            PyArray_Descr *descr = PyArray_DTYPE(op[i]);
+            original_dtypes[i] = PyArray_CastDescrToDType(descr, signature[i]);
+            if (original_dtypes[i] == NULL) {
+                nop = i;  /* only this much is initialized */
+                goto finish;
+            }
+        }
+    }
+
+    NPY_UF_DBG_PRINT("Resolving the descriptors\n");
+
+    if (ufuncimpl->resolve_descriptors != &wrapped_legacy_resolve_descriptors) {
+        /* The default: use the `ufuncimpl` as nature intended it */
+        NPY_CASTING safety = ufuncimpl->resolve_descriptors(ufuncimpl,
+                signature, original_dtypes, dtypes);
+        if (safety < 0) {
+            retval = -1;
+            goto finish;
+        }
+        if (PyArray_MinCastSafety(safety, casting) != casting) {
+            /* TODO: Currently impossible to reach (specialized unsafe loop) */
+            retval = -1;
+            PyErr_Format(PyExc_TypeError,
+                    "The ufunc implementation for %s with the given dtype "
+                    "signature is not possible under the casting rule %s",
+                    ufunc_name, npy_casting_to_string(casting));
+            goto finish;
+        }
+    }
+    else {
+        /* In this (rare) case fall back to the legacy resolver to pass `op` */
+        retval = ufunc->type_resolver(ufunc, casting, op, NULL, dtypes);
+        if (retval < 0) {
+            goto finish;
+        }
     }
 
     /* Get the buffersize and errormask */
     if (_get_bufsize_errmask(extobj, ufunc_name, &buffersize, &errormask) < 0) {
         retval = -1;
-        goto finish;
-    }
-
-    NPY_UF_DBG_PRINT("Finding inner loop\n");
-
-    if (ufuncimpl->resolve_descriptors != &wrapped_legacy_resolve_descriptors) {
-        /* The default: use the `ufuncimpl` as nature intended it */
-        retval = ufuncimpl->resolve_descriptors(ufuncimpl,
-                signature, original_dtypes, dtypes);
-    }
-    else {
-        /* In this (rare) case fall back to the legacy resolver to pass `op` */
-        retval = ufunc->type_resolver(ufunc, casting, op, NULL, dtypes);
-    }
-
-    if (retval < 0) {
         goto finish;
     }
 
@@ -2654,7 +2679,8 @@ finish:
     NPY_UF_DBG_PRINT1("Returning failure code %d\n", retval);
 
     /* The caller takes ownership of all the references in op */
-    for (i = 0; i < nop; ++i) {
+    for (int i = 0; i < nop; ++i) {
+        Py_XDECREF(original_dtypes[i]);
         Py_XDECREF(dtypes[i]);
         Py_XDECREF(arr_prep[i]);
     }
@@ -5063,7 +5089,21 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
     /* Type resolution and inner loop selection functions */
     ufunc->type_resolver = &PyUFunc_DefaultTypeResolver;
     ufunc->legacy_inner_loop_selector = &PyUFunc_DefaultLegacyInnerLoopSelector;
-    ufunc->masked_inner_loop_selector = NULL;
+    ufunc->_always_null_previously_masked_innerloop_selector = NULL;
+
+    ufunc->_legacy_array_method = NULL;
+    ufunc->op_flags = NULL;
+    ufunc->_loops = NULL;
+    ufunc->_dispatch_cache = PyArrayIdentityHash_New(nin+nout);
+    if (ufunc->_dispatch_cache == NULL) {
+        Py_DECREF(ufunc);
+        return NULL;
+    }
+    ufunc->_loops = PyList_New(0);
+    if (ufunc->_loops == NULL) {
+        Py_DECREF(ufunc);
+        return NULL;
+    }
 
     if (name == NULL) {
         ufunc->name = "?";
