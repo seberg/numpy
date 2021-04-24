@@ -17,6 +17,7 @@ typedef enum {
      * setup/check. No function should set error flags and ignore them
      * since it would interfere with chaining operations (e.g. casting).
      */
+    /* TODO: Change this into a positive flag */
     NPY_METH_NO_FLOATINGPOINT_ERRORS = 1 << 2,
     /* Whether the method supports unaligned access (not runtime) */
     NPY_METH_SUPPORTS_UNALIGNED = 1 << 3,
@@ -170,8 +171,8 @@ npy_default_get_strided_loop(
 NPY_NO_EXPORT int
 PyArrayMethod_GetMaskedStridedLoop(
         PyArrayMethod_Context *context,
-        int aligned, int move_references,
-        npy_intp *strides,
+        int aligned,
+        npy_intp *fixed_strides,
         PyArrayMethod_StridedLoop **out_loop,
         NpyAuxData **out_transferdata,
         NPY_ARRAYMETHOD_FLAGS *flags);

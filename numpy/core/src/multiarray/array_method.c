@@ -818,14 +818,12 @@ generic_masked_stridedloop(PyArrayMethod_Context *context,
  * Identical to the `get_loop` functions and wraps it.  This adds support
  * to a boolean mask being passed in as a last, additional, operand.
  * The wrapped loop will only be called for unmasked elements.
- *
- * WARNING: This currently cannot properly support inner dimensions.
+ * (Does not support `move_references` or inner dimensions!)
  */
 NPY_NO_EXPORT int
 PyArrayMethod_GetMaskedStridedLoop(
         PyArrayMethod_Context *context,
-        int aligned, int move_references,
-        npy_intp *strides,
+        int aligned, npy_intp *fixed_strides,
         PyArrayMethod_StridedLoop **out_loop,
         NpyAuxData **out_transferdata,
         NPY_ARRAYMETHOD_FLAGS *flags)
@@ -846,7 +844,7 @@ PyArrayMethod_GetMaskedStridedLoop(
     data->nargs = nargs;
 
     if (context->method->get_strided_loop(context,
-            aligned, move_references, strides,
+            aligned, 0, fixed_strides,
             &data->unmasked_stridedloop, &data->unmasked_auxdata, flags) < 0) {
         PyMem_Free(data);
     }
