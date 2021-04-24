@@ -75,7 +75,7 @@ find_item(PyArrayIdentityHash const *tb, PyObject *const *key)
 NPY_NO_EXPORT PyArrayIdentityHash *
 PyArrayIdentityHash_New(int key_len)
 {
-    PyArrayIdentityHash *res = PyObject_Malloc(sizeof(PyArrayIdentityHash));
+    PyArrayIdentityHash *res = PyMem_Malloc(sizeof(PyArrayIdentityHash));
     if (res == NULL) {
         PyErr_NoMemory();
         return NULL;
@@ -86,10 +86,10 @@ PyArrayIdentityHash_New(int key_len)
     res->size = 4;  /* Start with a size of 4 */
     res->nelem = 0;
 
-    res->buckets = PyObject_Calloc(4 * (key_len + 1), sizeof(PyObject *));
+    res->buckets = PyMem_Calloc(4 * (key_len + 1), sizeof(PyObject *));
     if (res->buckets == NULL) {
         PyErr_NoMemory();
-        PyObject_Free(res);
+        PyMem_Free(res);
         return NULL;
     }
     return res;
@@ -99,8 +99,8 @@ PyArrayIdentityHash_New(int key_len)
 void
 PyArrayIdentityHash_Dealloc(PyArrayIdentityHash *tb)
 {
-    PyObject_Free(tb->buckets);
-    PyObject_Free(tb);
+    PyMem_Free(tb->buckets);
+    PyMem_Free(tb);
 }
 
 
@@ -112,12 +112,12 @@ _resize_if_necessary(PyArrayIdentityHash *tb)
     assert(prev_size > 0);
 
     if ((tb->nelem + 1) * 2 > prev_size) {
-        /* We have at least */
+        /* Double in size */
         new_size = prev_size * 2;
     }
     else {
         new_size = prev_size;
-        while ((tb->nelem + 8) < new_size / 2) {
+        while ((tb->nelem + 8) * 2 < new_size / 2) {
             /*
              * Should possibly be improved.  However, we assume that we
              * almost never shrink.  Still if we do, do not shrink as much
@@ -131,10 +131,11 @@ _resize_if_necessary(PyArrayIdentityHash *tb)
         return 0;
     }
 
-    if (npy_mul_with_overflow_intp(&new_size, new_size, tb->key_len + 1)) {
+    npy_intp alloc_size;
+    if (npy_mul_with_overflow_intp(&alloc_size, new_size, tb->key_len + 1)) {
         return -1;
     }
-    tb->buckets = PyObject_Calloc(new_size * (tb->key_len + 1), sizeof(PyObject *));
+    tb->buckets = PyMem_Calloc(alloc_size, sizeof(PyObject *));
     if (tb->buckets == NULL) {
         tb->buckets = old_table;
         PyErr_NoMemory();
@@ -149,7 +150,7 @@ _resize_if_necessary(PyArrayIdentityHash *tb)
             PyArrayIdentityHash_SetItem(tb, item+1, item[0]);
         }
     }
-    PyObject_Free(old_table);
+    PyMem_Free(old_table);
     return 0;
 }
 

@@ -133,7 +133,7 @@ simple_legacy_resolve_descriptors(
         }
         else if (dtypes[i] == dtypes[0] && i > 0) {
             /* Preserve metadata from the first operand if same dtype */
-            Py_INCREF(given_descrs[0]);
+            Py_INCREF(output_descrs[0]);
             output_descrs[i] = output_descrs[0];
         }
         else {
