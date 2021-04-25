@@ -398,6 +398,7 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
 {
     int nargs = ufunc->nargs;
     PyArray_Descr *out_descrs[NPY_MAXARGS] = {NULL};
+
     PyObject *type_tuple = NULL;
     if (_make_new_typetup(nargs, signature, &type_tuple) < 0) {
         return -1;
@@ -412,24 +413,20 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
     if (ufunc->type_resolver(ufunc,
             NPY_UNSAFE_CASTING, (PyArrayObject **)ops, type_tuple,
             out_descrs) < 0) {
-        goto error;
+        Py_XDECREF(type_tuple);
+        return -1;
     }
+    Py_XDECREF(type_tuple);
+
     PyObject *DType_tuple = PyTuple_New(nargs);
     if (DType_tuple == NULL) {
         goto error;
     }
-    Py_XDECREF(type_tuple);
     for (int i = 0; i < nargs; i++) {
         PyObject *DType = (PyObject *)NPY_DTYPE(out_descrs[i]);
         Py_INCREF(DType);
         PyTuple_SET_ITEM(DType_tuple, i, DType);
         Py_CLEAR(out_descrs[i]);
-
-        if (signature[i] != NULL && (PyObject *)signature[i] != DType) {
-            Py_DECREF(DType_tuple);
-            goto error;
-        }
-        signature[i] = (PyArray_DTypeMeta *)DType;
     }
     /* no need for goto error anymore */
 
@@ -449,7 +446,6 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
     return 0;
 
   error:
-    Py_XDECREF(type_tuple);
     for (int i = 0; i < nargs; i++) {
         Py_XDECREF(out_descrs[i]);
     }
@@ -543,16 +539,26 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
          *     best_resolver = (PyObject *)*ufunc_impl;
          * }
          */
+        Py_DECREF(info);
+        return NULL;
     }
 
-    /* FIll in the signature with the actual signature we are working on */
+    /* Fill in the signature with the actual signature we are working on */
     PyObject *all_dtypes = PyTuple_GET_ITEM(info, 0);
     for (int i = 0; i < nargs; i++) {
         if (signature[i] == NULL) {
             signature[i] = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(all_dtypes, i);
             Py_INCREF(signature[i]);
         }
-        assert((PyObject *)signature[i] == PyTuple_GET_ITEM(all_dtypes, i));
+        else if ((PyObject *)signature[i] != PyTuple_GET_ITEM(all_dtypes, i)) {
+            /* Note, this check is only really necessary for promotions! */
+            PyErr_Format(PyExc_TypeError,
+                    "No loop with compatible signature found.  Best loop uses "
+                    "%S for operand %d, but %S was requested.",
+                    PyTuple_GET_ITEM(all_dtypes, i), i, (PyObject *)signature[i]);
+            Py_DECREF(info);
+            return NULL;
+        }
     }
     return (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
 }

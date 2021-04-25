@@ -995,9 +995,8 @@ fail:
  */
 static int
 check_for_trivial_loop(PyUFuncObject *ufunc,
-                        PyArrayObject **op,
-                        PyArray_Descr **dtype,
-                        npy_intp buffersize)
+        PyArrayObject **op, PyArray_Descr **dtypes,
+        NPY_CASTING casting, npy_intp buffersize)
 {
     npy_intp i, nin = ufunc->nin, nop = nin + ufunc->nout;
 
@@ -1006,30 +1005,40 @@ check_for_trivial_loop(PyUFuncObject *ufunc,
          * If the dtype doesn't match, or the array isn't aligned,
          * indicate that the trivial loop can't be done.
          */
-        if (op[i] != NULL &&
-                (!PyArray_ISALIGNED(op[i]) ||
-                !PyArray_EquivTypes(dtype[i], PyArray_DESCR(op[i]))
-                                        )) {
-            /*
-             * If op[j] is a scalar or small one dimensional
-             * array input, make a copy to keep the opportunity
-             * for a trivial loop.
-             */
-            if (i < nin && (PyArray_NDIM(op[i]) == 0 ||
-                    (PyArray_NDIM(op[i]) == 1 &&
-                     PyArray_DIM(op[i],0) <= buffersize))) {
-                PyArrayObject *tmp;
-                Py_INCREF(dtype[i]);
-                tmp = (PyArrayObject *)
-                            PyArray_CastToType(op[i], dtype[i], 0);
-                if (tmp == NULL) {
-                    return -1;
-                }
-                Py_DECREF(op[i]);
-                op[i] = tmp;
+        if (op[i] == NULL) {
+            continue;
+        }
+        if (dtypes[i] != PyArray_DESCR(op[i])) {
+            NPY_CASTING safety = PyArray_GetCastSafety(
+                    PyArray_DESCR(op[i]), dtypes[i], NULL);
+            if (safety < 0) {
+                return -1;
             }
-            else {
-                return 0;
+            if (casting != NPY_NO_CASTING || !PyArray_ISALIGNED(op[i])) {
+                /*
+                 * If op[j] is a scalar or small one dimensional
+                 * array input, make a copy to keep the opportunity
+                 * for a trivial loop.
+                 */
+                if (PyArray_MinCastSafety(safety, casting) != casting) {
+                    return 0;  /* the cast is not safe enough */
+                }
+                if (i < nin && (PyArray_NDIM(op[i]) == 0 || (
+                            PyArray_NDIM(op[i]) == 1 &&
+                            PyArray_DIM(op[i], 0) <= buffersize))) {
+                    PyArrayObject *tmp;
+                    Py_INCREF(dtypes[i]);
+                    tmp = (PyArrayObject *)
+                            PyArray_CastToType(op[i], dtypes[i], 0);
+                    if (tmp == NULL) {
+                        return -1;
+                    }
+                    Py_DECREF(op[i]);
+                    op[i] = tmp;
+                }
+                else {
+                    return 0;
+                }
             }
         }
     }
@@ -1275,12 +1284,21 @@ try_trivial_single_output_loop(PyArrayMethod_Context *context,
 static int
 execute_ufunc_loop(PyArrayMethod_Context *context, int masked,
         PyArrayObject **op, NPY_ORDER order, npy_intp buffersize,
+        NPY_CASTING casting,
         PyObject **arr_prep, ufunc_full_args full_args,
         npy_uint32 *op_flags, int errormask, PyObject *extobj)
 {
     PyUFuncObject *ufunc = (PyUFuncObject *)context->caller;
     int nin = context->method->nin, nout = context->method->nout;
     int nop = nin + nout;
+
+    if (PyUFunc_ValidateCasting(ufunc, casting, op, context->descriptors) < 0) {
+        /*
+         * Would be nice to just move this into the iterator, but this prints
+         * a better error message.
+         */
+        return -1;
+    }
 
     if (masked) {
         assert(PyArray_TYPE(op[nop]) == NPY_BOOL);
@@ -1336,11 +1354,6 @@ execute_ufunc_loop(PyArrayMethod_Context *context, int masked,
         }
     }
 
-    /*
-     * Allocate the iterator.  Because the types of the inputs
-     * were already checked, we use the casting rule 'unsafe' which
-     * is faster to calculate.
-     */
     NpyIter *iter = NpyIter_AdvancedNew(nop + masked, op,
                         iter_flags,
                         order, NPY_UNSAFE_CASTING,
@@ -1396,8 +1409,11 @@ execute_ufunc_loop(PyArrayMethod_Context *context, int masked,
      * Reset the iterator with the base pointers possibly modified by
      * `__array_prepare__`.
      */
-    for (int i = 0; i < nin; ++i) {
+    for (int i = 0; i < nin; i++) {
         baseptrs[i] = PyArray_BYTES(op_it[i]);
+    }
+    if (masked) {
+        baseptrs[nop] = PyArray_BYTES(op_it[nop]);
     }
     if (NpyIter_ResetBasePointers(iter, baseptrs, NULL) != NPY_SUCCEED) {
         NpyIter_Deallocate(iter);
@@ -2643,7 +2659,7 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
         dtypes[nop] = NULL;
 
         retval = execute_ufunc_loop(&context, 1,
-                op, order, buffersize,
+                op, order, buffersize, casting,
                 arr_prep, full_args, op_flags,
                 errormask, extobj);
     }
@@ -2654,7 +2670,8 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
          * This checks whether a trivial loop is ok, making copies of
          * scalar and one dimensional operands if that should help.
          */
-        int trivial_ok = check_for_trivial_loop(ufunc, op, dtypes, buffersize);
+        int trivial_ok = check_for_trivial_loop(ufunc,
+                op, dtypes, casting, buffersize);
         if (trivial_ok < 0) {
             retval = -1;
             goto finish;
@@ -2670,7 +2687,7 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
         }
 
         retval = execute_ufunc_loop(&context, 0,
-                op, order, buffersize,
+                op, order, buffersize, casting,
                 arr_prep, full_args, op_flags,
                 errormask, extobj);
     }
@@ -5094,10 +5111,19 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
     ufunc->_legacy_array_method = NULL;
     ufunc->op_flags = NULL;
     ufunc->_loops = NULL;
-    ufunc->_dispatch_cache = PyArrayIdentityHash_New(nin+nout);
-    if (ufunc->_dispatch_cache == NULL) {
-        Py_DECREF(ufunc);
-        return NULL;
+    if (nin + nout != 0) {
+        ufunc->_dispatch_cache = PyArrayIdentityHash_New(nin + nout);
+        if (ufunc->_dispatch_cache == NULL) {
+            Py_DECREF(ufunc);
+            return NULL;
+        }
+    }
+    else {
+        /*
+         * Work around a test that seems to do this right now, it should not
+         * be a valid ufunc at all though, so. TODO: Remove...
+         */
+        ufunc->_dispatch_cache = NULL;
     }
     ufunc->_loops = PyList_New(0);
     if (ufunc->_loops == NULL) {

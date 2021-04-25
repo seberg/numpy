@@ -249,7 +249,7 @@ PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
         .dtypes = signature,
         .flags = flags,
         .slots = slots,
-        .casting = NPY_SAFE_CASTING,
+        .casting = NPY_EQUIV_CASTING,
     };
 
     PyBoundArrayMethodObject *bound_res = PyArrayMethod_FromSpec_int(&spec, 1);
