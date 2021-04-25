@@ -390,6 +390,11 @@ _make_new_typetup(
 /*
  * Legacy type resolution unfortunately works on the original array objects
  * and we have no choice but to pass them in.
+ *
+ * This is mostly a _promotion_ step, but we just always "add" the loop
+ * (if it already exists, we will just skip adding it again, it will be
+ * cached as the correct promotion in any case).
+ * TODO: Is that above really correct?!
  */
 static int
 legacy_resolve_implementation_info(PyUFuncObject *ufunc,
@@ -420,7 +425,10 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
 
     PyObject *DType_tuple = PyTuple_New(nargs);
     if (DType_tuple == NULL) {
-        goto error;
+        for (int i = 0; i < nargs; i++) {
+            Py_XDECREF(out_descrs[i]);
+        }
+        return -1;
     }
     for (int i = 0; i < nargs; i++) {
         PyObject *DType = (PyObject *)NPY_DTYPE(out_descrs[i]);
@@ -428,7 +436,6 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
         PyTuple_SET_ITEM(DType_tuple, i, DType);
         Py_CLEAR(out_descrs[i]);
     }
-    /* no need for goto error anymore */
 
     PyArrayMethodObject *method = PyArray_NewLegacyWrappingArrayMethod(ufunc,
             (PyArray_DTypeMeta **)PySequence_Fast_ITEMS(DType_tuple));
@@ -444,12 +451,6 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
     }
 
     return 0;
-
-  error:
-    for (int i = 0; i < nargs; i++) {
-        Py_XDECREF(out_descrs[i]);
-    }
-    return -1;
 }
 
 

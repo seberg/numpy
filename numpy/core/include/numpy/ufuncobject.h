@@ -218,7 +218,6 @@ typedef struct _tagPyUFuncObject {
          * elements that may get deleted again are deleted occasionally).
          */
         PyObject *_loops;
-        PyObject *_legacy_array_method;
 } PyUFuncObject;
 
 #include "arrayobject.h"

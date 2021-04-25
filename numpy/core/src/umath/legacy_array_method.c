@@ -208,11 +208,6 @@ NPY_NO_EXPORT PyArrayMethodObject *
 PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
         PyArray_DTypeMeta *signature[])
 {
-    if (ufunc->_legacy_array_method != NULL) {
-        Py_INCREF(ufunc->_legacy_array_method);
-        return (PyArrayMethodObject *)ufunc->_legacy_array_method;
-    }
-
     char method_name[101];
     const char *name = ufunc->name ? ufunc->name : "<unknown>";
     snprintf(method_name, 100, "legacy_ufunc_wrapper_for_%s", name);
@@ -226,7 +221,7 @@ PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
     for (int i = 0; i < ufunc->nin+ufunc->nout; i++) {
         if (signature[i]->singleton->flags & (
                 NPY_ITEM_REFCOUNT | NPY_ITEM_IS_POINTER | NPY_NEEDS_PYAPI)) {
-            flags &= NPY_METH_REQUIRES_PYAPI;
+            flags |= NPY_METH_REQUIRES_PYAPI;
         }
         if (i >= ufunc->nin && signature[i]->parametric) {
             any_output_flexible = 1;
@@ -260,6 +255,5 @@ PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
     PyArrayMethodObject *res = bound_res->method;
     Py_INCREF(res);
     Py_DECREF(bound_res);
-    ufunc->_legacy_array_method = (PyObject *)res;
     return res;
 }

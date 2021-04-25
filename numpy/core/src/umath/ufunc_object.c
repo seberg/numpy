@@ -5108,7 +5108,6 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
     ufunc->legacy_inner_loop_selector = &PyUFunc_DefaultLegacyInnerLoopSelector;
     ufunc->_always_null_previously_masked_innerloop_selector = NULL;
 
-    ufunc->_legacy_array_method = NULL;
     ufunc->op_flags = NULL;
     ufunc->_loops = NULL;
     if (nin + nout != 0) {
