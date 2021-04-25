@@ -224,7 +224,8 @@ PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
     int any_output_flexible = 0;
     NPY_ARRAYMETHOD_FLAGS flags = 0;
     for (int i = 0; i < ufunc->nin+ufunc->nout; i++) {
-        if (signature[i]->singleton->flags & NPY_NEEDS_PYAPI) {
+        if (signature[i]->singleton->flags & (
+                NPY_ITEM_REFCOUNT | NPY_ITEM_IS_POINTER | NPY_NEEDS_PYAPI)) {
             flags &= NPY_METH_REQUIRES_PYAPI;
         }
         if (i >= ufunc->nin && signature[i]->parametric) {

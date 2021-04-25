@@ -521,6 +521,7 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
         }
         PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
                 (PyObject **)op_dtypes, info);
+        Py_INCREF(info);  /* info is borrowed */
     }
     assert(PyTuple_CheckExact(info) && PyTuple_GET_SIZE(info) == 2);
 
@@ -539,7 +540,6 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
          *     best_resolver = (PyObject *)*ufunc_impl;
          * }
          */
-        Py_DECREF(info);
         return NULL;
     }
 
@@ -556,7 +556,6 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
                     "No loop with compatible signature found.  Best loop uses "
                     "%S for operand %d, but %S was requested.",
                     PyTuple_GET_ITEM(all_dtypes, i), i, (PyObject *)signature[i]);
-            Py_DECREF(info);
             return NULL;
         }
     }
