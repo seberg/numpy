@@ -1978,8 +1978,8 @@ _initialize_variable_parts(PyUFuncObject *ufunc,
 
 static int
 PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
-        PyArrayMethodObject *NPY_UNUSED(ufuncimpl), PyArrayObject **op,
-        ufunc_full_args full_args, PyObject *type_tup, PyObject *extobj,
+        PyArrayMethodObject *NPY_UNUSED(ufuncimpl), PyArray_DTypeMeta *NPY_UNUSED(signature[]),
+        PyArrayObject *op[], ufunc_full_args full_args, PyObject *extobj,
         NPY_CASTING casting, NPY_ORDER order, npy_bool subok,
         PyObject *axis, PyObject *axes, int keepdims)
 {
@@ -2244,7 +2244,7 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
 
 
     retval = ufunc->type_resolver(ufunc, casting,
-                            op, type_tup, dtypes);
+                            op, NULL, dtypes);
     if (retval < 0) {
         goto fail;
     }
@@ -4541,16 +4541,18 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         PyObject *const *args, Py_ssize_t len_args, PyObject *kwnames,
         npy_bool outer)
 {
-    PyArrayObject *operands[NPY_MAXARGS] = {NULL};
-    PyArray_DTypeMeta *signature[NPY_MAXARGS] = {NULL};
+    int errval;
+    int nin = ufunc->nin, nout = ufunc->nout, nop = ufunc->nargs;
+
+    PyArrayObject *operands[NPY_MAXARGS];
+    PyArray_DTypeMeta *signature[NPY_MAXARGS];
+    memset(operands, 0, nop * sizeof(*operands));
+    memset(signature, 0, nop * sizeof(*signature));
+
     PyObject *retobj[NPY_MAXARGS];
     PyObject *wraparr[NPY_MAXARGS];
     PyObject *override = NULL;
-    ufunc_full_args full_args = {NULL, NULL};
-    PyObject *typetup = NULL;
-
-    int errval;
-    int nin = ufunc->nin, nout = ufunc->nout, nop = ufunc->nargs;
+    ufunc_full_args full_args;
 
     /*
      * Note that the input (and possibly output) arguments are passed in as
@@ -4561,7 +4563,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
      */
 
     /* Check number of arguments */
-    if ((len_args < nin) || (len_args > nop)) {
+    if (NPY_UNLIKELY((len_args < nin) || (len_args > nop))) {
         PyErr_Format(PyExc_TypeError,
                 "%s() takes from %d to %d positional arguments but "
                 "%zd were given",
@@ -4761,7 +4763,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     }
     else {
         errval = PyUFunc_GeneralizedFunctionInternal(ufunc, ufuncimpl,
-                operands, full_args, typetup, extobj, casting, order, subok,
+                signature, operands, full_args, extobj, casting, order, subok,
                 axis_obj, axes_obj, keepdims);
     }
 
@@ -4815,7 +4817,6 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         retobj[i] = wrapped;
     }
 
-    Py_XDECREF(typetup);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
     if (ufunc->nout == 1) {
@@ -4832,7 +4833,6 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     }
 
 fail:
-    Py_XDECREF(typetup);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
     for (int i = 0; i < ufunc->nargs; i++) {
