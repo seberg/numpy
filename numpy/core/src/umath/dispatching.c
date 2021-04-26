@@ -551,7 +551,8 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
             signature[i] = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(all_dtypes, i);
             Py_INCREF(signature[i]);
         }
-        else if ((PyObject *)signature[i] != PyTuple_GET_ITEM(all_dtypes, i)) {
+        else if (NPY_UNLIKELY(
+                (PyObject *)signature[i] != PyTuple_GET_ITEM(all_dtypes, i))) {
             /* Note, this check is only really necessary for promotions! */
             PyErr_Format(PyExc_TypeError,
                     "No loop with compatible signature found.  Best loop uses "

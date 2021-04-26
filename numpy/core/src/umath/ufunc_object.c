@@ -1978,9 +1978,9 @@ _initialize_variable_parts(PyUFuncObject *ufunc,
 
 static int
 PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
-        PyArrayMethodObject *NPY_UNUSED(ufuncimpl), PyArray_DTypeMeta *NPY_UNUSED(signature[]),
-        PyArrayObject *op[], ufunc_full_args full_args, PyObject *extobj,
-        NPY_CASTING casting, NPY_ORDER order, npy_bool subok,
+        PyArrayMethodObject *NPY_UNUSED(ufuncimpl), PyArray_Descr *operation_descrs[],
+        PyArrayObject *op[], PyObject *extobj,
+        NPY_CASTING casting, NPY_ORDER order,
         PyObject *axis, PyObject *axes, int keepdims)
 {
     int nin, nout;
@@ -1988,8 +1988,6 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
     const char *ufunc_name;
     int retval;
     int needs_api = 0;
-
-    PyArray_Descr *dtypes[NPY_MAXARGS];
 
     /* Use remapped axes for generalized ufunc */
     int broadcast_ndim, iter_ndim;
@@ -2021,8 +2019,6 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
     /* swapping around of axes */
     int *remap_axis_memory = NULL;
     int **remap_axis = NULL;
-    /* The __array_prepare__ function to call for each output */
-    PyObject *arr_prep[NPY_MAXARGS];
 
     nin = ufunc->nin;
     nout = ufunc->nout;
@@ -2032,11 +2028,6 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
 
     NPY_UF_DBG_PRINT1("\nEvaluating ufunc %s\n", ufunc_name);
 
-    /* Initialize all dtypes and __array_prepare__ call-backs to NULL */
-    for (i = 0; i < nop; ++i) {
-        dtypes[i] = NULL;
-        arr_prep[i] = NULL;
-    }
     /* Initialize possibly variable parts to the values from the ufunc */
     retval = _initialize_variable_parts(ufunc, op_core_num_dims,
                                         core_dim_sizes, core_dim_flags);
@@ -2242,12 +2233,6 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
 
     NPY_UF_DBG_PRINT("Finding inner loop\n");
 
-
-    retval = ufunc->type_resolver(ufunc, casting,
-                            op, NULL, dtypes);
-    if (retval < 0) {
-        goto fail;
-    }
     /*
      * We don't write to all elements, and the iterator may make
      * UPDATEIFCOPY temporary copies. The output arrays (unless they are
@@ -2261,7 +2246,7 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
                        NPY_UFUNC_DEFAULT_OUTPUT_FLAGS,
                        op_flags);
     /* For the generalized ufunc, we get the loop right away too */
-    retval = ufunc->legacy_inner_loop_selector(ufunc, dtypes,
+    retval = ufunc->legacy_inner_loop_selector(ufunc, operation_descrs,
                                     &innerloop, &innerloopdata, &needs_api);
     if (retval < 0) {
         goto fail;
@@ -2281,19 +2266,18 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
     printf("\n");
 #endif
 
-    if (subok) {
+    if (PyUFunc_ValidateCasting(ufunc, casting, op, operation_descrs) < 0) {
         /*
-         * Get the appropriate __array_prepare__ function to call
-         * for each output
+         * Would be nice to just move this into the iterator, but this prints
+         * a better error message.
          */
-        _find_array_prepare(full_args, arr_prep, nout);
+        return -1;
     }
 
     /*
      * Set up the iterator per-op flags.  For generalized ufuncs, we
      * can't do buffering, so must COPY or UPDATEIFCOPY.
      */
-
     iter_flags = ufunc->iter_flags |
                  NPY_ITER_MULTI_INDEX |
                  NPY_ITER_REFS_OK |
@@ -2303,7 +2287,7 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
     /* Create the iterator */
     iter = NpyIter_AdvancedNew(nop, op, iter_flags,
                            order, NPY_UNSAFE_CASTING, op_flags,
-                           dtypes, iter_ndim,
+                           operation_descrs, iter_ndim,
                            op_axes, iter_shape, 0);
     if (iter == NULL) {
         retval = -1;
@@ -2491,10 +2475,6 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
     }
 
     /* The caller takes ownership of all the references in op */
-    for (i = 0; i < nop; ++i) {
-        Py_XDECREF(dtypes[i]);
-        Py_XDECREF(arr_prep[i]);
-    }
     PyArray_free(remap_axis_memory);
     PyArray_free(remap_axis);
 
@@ -2506,10 +2486,6 @@ fail:
     NPY_UF_DBG_PRINT1("Returning failure code %d\n", retval);
     PyArray_free(inner_strides);
     NpyIter_Deallocate(iter);
-    for (i = 0; i < nop; ++i) {
-        Py_XDECREF(dtypes[i]);
-        Py_XDECREF(arr_prep[i]);
-    }
     PyArray_free(remap_axis_memory);
     PyArray_free(remap_axis);
     return retval;
@@ -2518,87 +2494,27 @@ fail:
 
 static int
 PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
-        PyArrayMethodObject *ufuncimpl, PyArray_DTypeMeta *signature[],
-        PyArrayObject *op[], ufunc_full_args full_args, PyObject *extobj,
-        NPY_CASTING casting, NPY_ORDER order, npy_bool subok,
+        PyArrayMethodObject *ufuncimpl, PyArray_Descr *operation_descrs[],
+        PyArrayObject *op[], PyObject *extobj,
+        NPY_CASTING casting, NPY_ORDER order,
+        PyObject *output_array_prepare[], ufunc_full_args full_args,
         PyArrayObject *wheremask)
 {
-    int nin, nout;
-    int nop;
-    const char *ufunc_name;
-    int retval = -1;
-    npy_uint32 op_flags[NPY_MAXARGS];
-    npy_intp default_op_out_flags;
+    int nin = ufunc->nin, nout = ufunc->nout, nop = nin + nout;
 
-    PyArray_Descr *original_dtypes[NPY_MAXARGS];
-    PyArray_Descr *dtypes[NPY_MAXARGS];
+    const char *ufunc_name = ufunc_get_name_cstr(ufunc);
+
+    npy_intp default_op_out_flags;
+    npy_uint32 op_flags[NPY_MAXARGS];
 
     /* These parameters come from extobj= or from a TLS global */
     int buffersize = 0, errormask = 0;
 
-    /* The __array_prepare__ function to call for each output */
-    PyObject *arr_prep[NPY_MAXARGS];
-
-    nin = ufunc->nin;
-    nout = ufunc->nout;
-    nop = nin + nout;
-
-    ufunc_name = ufunc_get_name_cstr(ufunc);
-
     NPY_UF_DBG_PRINT1("\nEvaluating ufunc %s\n", ufunc_name);
-
-    for (int i = 0; i < nop; ++i) {
-        dtypes[i] = NULL;
-        arr_prep[i] = NULL;
-        if (op[i] == NULL) {
-            original_dtypes[i] = NULL;
-        }
-        else {
-            /*
-             * The dtype may mismatch the signature, in which case we need
-             * to make it fit before calling the resolution.
-             */
-            PyArray_Descr *descr = PyArray_DTYPE(op[i]);
-            original_dtypes[i] = PyArray_CastDescrToDType(descr, signature[i]);
-            if (original_dtypes[i] == NULL) {
-                nop = i;  /* only this much is initialized */
-                goto finish;
-            }
-        }
-    }
-
-    NPY_UF_DBG_PRINT("Resolving the descriptors\n");
-
-    if (ufuncimpl->resolve_descriptors != &wrapped_legacy_resolve_descriptors) {
-        /* The default: use the `ufuncimpl` as nature intended it */
-        NPY_CASTING safety = ufuncimpl->resolve_descriptors(ufuncimpl,
-                signature, original_dtypes, dtypes);
-        if (safety < 0) {
-            retval = -1;
-            goto finish;
-        }
-        if (PyArray_MinCastSafety(safety, casting) != casting) {
-            /* TODO: Currently impossible to reach (specialized unsafe loop) */
-            retval = -1;
-            PyErr_Format(PyExc_TypeError,
-                    "The ufunc implementation for %s with the given dtype "
-                    "signature is not possible under the casting rule %s",
-                    ufunc_name, npy_casting_to_string(casting));
-            goto finish;
-        }
-    }
-    else {
-        /* In this (rare) case fall back to the legacy resolver to pass `op` */
-        retval = ufunc->type_resolver(ufunc, casting, op, NULL, dtypes);
-        if (retval < 0) {
-            goto finish;
-        }
-    }
 
     /* Get the buffersize and errormask */
     if (_get_bufsize_errmask(extobj, ufunc_name, &buffersize, &errormask) < 0) {
-        retval = -1;
-        goto finish;
+        return -1;
     }
 
     if (wheremask != NULL) {
@@ -2631,19 +2547,11 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
     printf("\n");
 #endif
 
-    if (subok) {
-        /*
-         * Get the appropriate __array_prepare__ function to call
-         * for each output
-         */
-        _find_array_prepare(full_args, arr_prep, nout);
-    }
-
     /* Final preparation of the arraymethod call */
     PyArrayMethod_Context context = {
             .caller = (PyObject *)ufunc,
             .method = ufuncimpl,
-            .descriptors = dtypes,
+            .descriptors = operation_descrs,
     };
 
     /* Do the ufunc loop */
@@ -2656,11 +2564,11 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
             return -1;
         }
         op[nop] = wheremask;
-        dtypes[nop] = NULL;
+        operation_descrs[nop] = NULL;
 
-        retval = execute_ufunc_loop(&context, 1,
+        return execute_ufunc_loop(&context, 1,
                 op, order, buffersize, casting,
-                arr_prep, full_args, op_flags,
+                output_array_prepare, full_args, op_flags,
                 errormask, extobj);
     }
     else {
@@ -2671,38 +2579,25 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
          * scalar and one dimensional operands if that should help.
          */
         int trivial_ok = check_for_trivial_loop(ufunc,
-                op, dtypes, casting, buffersize);
+                op, operation_descrs, casting, buffersize);
         if (trivial_ok < 0) {
-            retval = -1;
-            goto finish;
+            return -1;
         }
         if (trivial_ok && context.method->nout == 1) {
             /* Try to handle everything without using the (heavy) iterator */
-            retval = try_trivial_single_output_loop(&context,
-                    op, order, arr_prep, full_args,
+            int retval = try_trivial_single_output_loop(&context,
+                    op, order, output_array_prepare, full_args,
                     errormask, extobj);
             if (retval != -2) {
-                goto finish;
+                return retval;
             }
         }
 
-        retval = execute_ufunc_loop(&context, 0,
+        return execute_ufunc_loop(&context, 0,
                 op, order, buffersize, casting,
-                arr_prep, full_args, op_flags,
+                output_array_prepare, full_args, op_flags,
                 errormask, extobj);
     }
-
-finish:
-    NPY_UF_DBG_PRINT1("Returning failure code %d\n", retval);
-
-    /* The caller takes ownership of all the references in op */
-    for (int i = 0; i < nop; ++i) {
-        Py_XDECREF(original_dtypes[i]);
-        Py_XDECREF(dtypes[i]);
-        Py_XDECREF(arr_prep[i]);
-    }
-
-    return retval;
 }
 
 
@@ -4528,6 +4423,151 @@ _get_fixed_signature(PyUFuncObject *ufunc,
 
 
 /*
+ * Fill in the actual descriptors used for the operation.  This function
+ * supports falling back tot he legacy `ufunc->type_resolver`.
+ *
+ * We guarantee the array-method that all passed in descriptors are of the
+ * correct DType instance (i.e. a string can just fetch the length, it doesn't
+ * need to "cast" to string first).
+ */
+static int
+resolve_descriptors(int nop,
+        PyUFuncObject *ufunc, PyArrayMethodObject *ufuncimpl,
+        PyArrayObject *operands[], PyArray_Descr *dtypes[],
+        PyArray_DTypeMeta *signature[], NPY_CASTING casting)
+{
+    int retval = -1;
+    PyArray_Descr *original_dtypes[NPY_MAXARGS];
+
+    for (int i = 0; i < nop; ++i) {
+        if (operands[i] == NULL) {
+            original_dtypes[i] = NULL;
+        }
+        else {
+            /*
+             * The dtype may mismatch the signature, in which case we need
+             * to make it fit before calling the resolution.
+             */
+            PyArray_Descr *descr = PyArray_DTYPE(operands[i]);
+            original_dtypes[i] = PyArray_CastDescrToDType(descr, signature[i]);
+            if (original_dtypes[i] == NULL) {
+                nop = i;  /* only this much is initialized */
+                goto finish;
+            }
+        }
+    }
+
+    NPY_UF_DBG_PRINT("Resolving the descriptors\n");
+
+    if (ufuncimpl->resolve_descriptors != &wrapped_legacy_resolve_descriptors) {
+        /* The default: use the `ufuncimpl` as nature intended it */
+        NPY_CASTING safety = ufuncimpl->resolve_descriptors(ufuncimpl,
+                signature, original_dtypes, dtypes);
+        if (safety < 0) {
+            goto finish;
+        }
+        if (NPY_UNLIKELY(PyArray_MinCastSafety(safety, casting) != casting)) {
+            /* TODO: Currently impossible to reach (specialized unsafe loop) */
+            PyErr_Format(PyExc_TypeError,
+                    "The ufunc implementation for %s with the given dtype "
+                    "signature is not possible under the casting rule %s",
+                    ufunc_get_name_cstr(ufunc), npy_casting_to_string(casting));
+            goto finish;
+        }
+        retval = 0;
+    }
+    else {
+        /* Rare fall-back to the legacy resolver to pass `operands` */
+        retval = ufunc->type_resolver(ufunc, casting, operands, NULL, dtypes);
+    }
+
+  finish:
+    for (int i = 0; i < nop; i++) {
+        Py_XDECREF(original_dtypes[i]);
+    }
+    return retval;
+}
+
+
+/**
+ * Wraps all outputs and returns the result (which may be NULL on error).
+ *
+ * Use __array_wrap__ on all outputs
+ * if present on one of the input arguments.
+ * If present for multiple inputs:
+ * use __array_wrap__ of input object with largest
+ * __array_priority__ (default = 0.0)
+ *
+ * Exception:  we should not wrap outputs for items already
+ * passed in as output-arguments.  These items should either
+ * be left unwrapped or wrapped by calling their own __array_wrap__
+ * routine.
+ *
+ * For each output argument, wrap will be either
+ * NULL --- call PyArray_Return() -- default if no output arguments given
+ * None --- array-object passed in don't call PyArray_Return
+ * method --- the __array_wrap__ method to call.
+ *
+ * @param ufunc
+ * @param full_args Original inputs and outputs
+ * @param subok Whether subclasses are allowed
+ * @param result_arrays The ufunc result(s).  REFERENCES ARE STOLEN!
+ */
+static PyObject *
+replace_with_wrapped_result_and_return(PyUFuncObject *ufunc,
+        ufunc_full_args full_args, npy_bool subok,
+        PyArrayObject *result_arrays[])
+{
+    PyObject *retobj[NPY_MAXARGS];
+    PyObject *wraparr[NPY_MAXARGS];
+    _find_array_wrap(full_args, subok, wraparr, ufunc->nin, ufunc->nout);
+
+    /* wrap outputs */
+    for (int i = 0; i < ufunc->nout; i++) {
+        _ufunc_context context;
+        PyObject *wrapped;
+
+        context.ufunc = ufunc;
+        context.args = full_args;
+        context.out_i = i;
+
+        retobj[i] = _apply_array_wrap(wraparr[i], result_arrays[i], &context);
+        result_arrays[i] = 0;  /* Array was DECREF's and (probably) wrapped */
+        if (retobj[i] == NULL) {
+            goto fail;
+        }
+    }
+
+    if (ufunc->nout == 1) {
+        return retobj[0];
+    }
+    else {
+        PyTupleObject *ret;
+
+        ret = (PyTupleObject *)PyTuple_New(ufunc->nout);
+        if (ret == NULL) {
+            goto fail;
+        }
+        for (int i = 0; i < ufunc->nout; i++) {
+            PyTuple_SET_ITEM(ret, i, retobj[i]);
+        }
+        return (PyObject *)ret;
+    }
+
+  fail:
+    for (int i = 0; i < ufunc->nout; i++) {
+        if (result_arrays[i] != NULL) {
+            Py_DECREF(result_arrays[i]);
+        }
+        else {
+            Py_XDECREF(retobj[i]);
+        }
+    }
+    return NULL;
+}
+
+
+/*
  * Main ufunc call implementation.
  *
  * This implementation makes use of the "fastcall" way of passing keyword
@@ -4544,15 +4584,19 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     int errval;
     int nin = ufunc->nin, nout = ufunc->nout, nop = ufunc->nargs;
 
-    PyArrayObject *operands[NPY_MAXARGS];
-    PyArray_DTypeMeta *signature[NPY_MAXARGS];
-    memset(operands, 0, nop * sizeof(*operands));
-    memset(signature, 0, nop * sizeof(*signature));
-
-    PyObject *retobj[NPY_MAXARGS];
-    PyObject *wraparr[NPY_MAXARGS];
-    PyObject *override = NULL;
+    /* All following variables are cleared in the `fail` error path */
     ufunc_full_args full_args;
+    PyArrayObject *wheremask = NULL;
+
+    PyArray_DTypeMeta *signature[NPY_MAXARGS];
+    PyArrayObject *operands[NPY_MAXARGS];
+    PyArray_Descr *operation_descrs[NPY_MAXARGS];
+    PyObject *output_array_prepare[NPY_MAXARGS];
+    /* Initialize all arrays (we usually only need a small part) */
+    memset(signature, 0, nop * sizeof(*signature));
+    memset(operands, 0, nop * sizeof(*operands));
+    memset(operation_descrs, 0, nop * sizeof(*operation_descrs));
+    memset(output_array_prepare, 0, nout * sizeof(*output_array_prepare));
 
     /*
      * Note that the input (and possibly output) arguments are passed in as
@@ -4701,6 +4745,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         method = "outer";
     }
     /* We now have all the information required to check for Overrides */
+    PyObject *override = NULL;
     errval = PyUFunc_CheckOverride(ufunc, method,
             full_args.in, full_args.out,
             args, len_args, kwnames, &override);
@@ -4735,7 +4780,6 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     NPY_CASTING casting = NPY_DEFAULT_ASSIGN_CASTING;
     npy_bool subok = NPY_TRUE;
     int keepdims = -1;  /* We need to know if it was passed */
-    PyArrayObject *wheremask = NULL;
     if (convert_ufunc_arguments(ufunc, full_args, operands,
             order_obj, &order,
             casting_obj, &casting,
@@ -4747,7 +4791,11 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
 
     /*
      * Note that part of the promotion is to the complete the signature
-     * (until here it only represents the fixed part and is usually NULLs)
+     * (until here it only represents the fixed part and is usually NULLs).
+     *
+     * After promotion, we could push the following logic into the ArrayMethod
+     * in the future.  For now, we do it here.  The type resolution step can
+     * be shared between the ufunc and gufunc code.
      */
     PyArrayMethodObject *ufuncimpl = promote_and_get_ufuncimpl(ufunc,
             operands, signature);
@@ -4755,88 +4803,71 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         goto fail;
     }
 
+    /* Find the correct descriptors for the operation */
+    if (resolve_descriptors(nop, ufunc, ufuncimpl,
+            operands, operation_descrs, signature, casting) < 0) {
+        goto fail;
+    }
+
+    if (subok) {
+        _find_array_prepare(full_args, output_array_prepare, nout);
+    }
+
+    /*
+     * Do the final preparations and call the inner-loop.
+     */
     if (!ufunc->core_enabled) {
         errval = PyUFunc_GenericFunctionInternal(ufunc, ufuncimpl,
-                signature, operands, full_args, extobj, casting, order, subok,
+                operation_descrs, operands, extobj, casting, order,
+                output_array_prepare, full_args,  /* for __array_prepare__ */
                 wheremask);
-        Py_XDECREF(wheremask);
     }
     else {
         errval = PyUFunc_GeneralizedFunctionInternal(ufunc, ufuncimpl,
-                signature, operands, full_args, extobj, casting, order, subok,
+                operation_descrs, operands, extobj, casting, order,
+                /* GUFuncs never (ever) called __array_prepare__! */
                 axis_obj, axes_obj, keepdims);
     }
-
     if (errval < 0) {
         goto fail;
     }
 
-    /* Free the input references */
-    for (int i = 0; i < ufunc->nin; i++) {
-        Py_XSETREF(operands[i], NULL);
-    }
-
     /*
-     * Use __array_wrap__ on all outputs
-     * if present on one of the input arguments.
-     * If present for multiple inputs:
-     * use __array_wrap__ of input object with largest
-     * __array_priority__ (default = 0.0)
-     *
-     * Exception:  we should not wrap outputs for items already
-     * passed in as output-arguments.  These items should either
-     * be left unwrapped or wrapped by calling their own __array_wrap__
-     * routine.
-     *
-     * For each output argument, wrap will be either
-     * NULL --- call PyArray_Return() -- default if no output arguments given
-     * None --- array-object passed in don't call PyArray_Return
-     * method --- the __array_wrap__ method to call.
+     * Clear all variables which are not needed any further (set to NULL,
+     * since we still use goto error here).
      */
-    _find_array_wrap(full_args, subok, wraparr, ufunc->nin, ufunc->nout);
-
-    /* wrap outputs */
-    for (int i = 0; i < ufunc->nout; i++) {
-        int j = ufunc->nin+i;
-        _ufunc_context context;
-        PyObject *wrapped;
-
-        context.ufunc = ufunc;
-        context.args = full_args;
-        context.out_i = i;
-
-        wrapped = _apply_array_wrap(wraparr[i], operands[j], &context);
-        operands[j] = NULL;  /* Prevent fail double-freeing this */
-        if (wrapped == NULL) {
-            for (int j = 0; j < i; j++) {
-                Py_DECREF(retobj[j]);
-            }
-            goto fail;
+    Py_XDECREF(wheremask);
+    wheremask = NULL;
+    for (int i = 0; i < nop; i++) {
+        Py_DECREF(operation_descrs[i]);
+        operation_descrs[i] = NULL;
+        if (i < nin) {
+            Py_DECREF(operands[i]);
+            operands[i] = NULL;
         }
-
-        retobj[i] = wrapped;
+        else {
+            Py_XDECREF(output_array_prepare[i-nin]);
+            output_array_prepare[i-nin] = NULL;
+        }
     }
-
+    /* The following steals the references to the outputs: */
+    PyObject *result = replace_with_wrapped_result_and_return(ufunc,
+            full_args, subok, operands+nin);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
-    if (ufunc->nout == 1) {
-        return retobj[0];
-    }
-    else {
-        PyTupleObject *ret;
 
-        ret = (PyTupleObject *)PyTuple_New(ufunc->nout);
-        for (int i = 0; i < ufunc->nout; i++) {
-            PyTuple_SET_ITEM(ret, i, retobj[i]);
-        }
-        return (PyObject *)ret;
-    }
+    return result;
 
 fail:
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
+    Py_XDECREF(wheremask);
     for (int i = 0; i < ufunc->nargs; i++) {
         Py_XDECREF(operands[i]);
+        Py_XDECREF(operation_descrs[i]);
+        if (i < nout) {
+            Py_XDECREF(output_array_prepare);
+        }
     }
     return NULL;
 }
