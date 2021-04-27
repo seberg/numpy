@@ -15,7 +15,7 @@
 #include "legacy_array_method.h"
 
 
-static int
+NPY_NO_EXPORT int  // TODO: Make static again.
 add_ufunc_loop(PyUFuncObject *ufunc, PyObject *info, int ignore_duplicate)
 {
     assert(PyTuple_CheckExact(info) && PyTuple_GET_SIZE(info) == 2);
@@ -461,7 +461,8 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
  */
 NPY_NO_EXPORT PyArrayMethodObject *
 promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
-        PyArrayObject *const ops[], PyArray_DTypeMeta *signature[])
+        PyArrayObject *const ops[], PyArray_DTypeMeta *signature[],
+        PyArray_DTypeMeta *op_dtypes[], int force_legacy_promotion)
 {
     int nargs = ufunc->nargs;
 
@@ -469,25 +470,14 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
      * Get the actual DTypes we operate with by mixing the operand array
      * ones with the passed signature.
      */
-    PyArray_DTypeMeta *op_dtypes[NPY_MAXARGS];
     for (int i = 0; i < nargs; i++) {
         if (signature[i] != NULL) {
             /*
-             * ignore the input here, we cannot overwrite signature yet
+             * ignore the operand input, we cannot overwrite signature yet
              * since it is fixed (cannot be promoted!)
              */
             op_dtypes[i] = signature[i];
-        }
-        if (ops[i] == NULL) {
-            op_dtypes[i] = NULL;
-        }
-        else {
-            /*
-             * TODO: This path will have to check for when an object was
-             * "originally" a Python scalar. (Probably flagging it on the
-             * object.)  Alternatively, this needs to be done earlier.
-             */
-            op_dtypes[i] = NPY_DTYPE(PyArray_DTYPE(ops[i]));
+            assert(i >= ufunc->nin || !signature[i]->abstract);
         }
     }
 
@@ -499,14 +489,21 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
      * 2. Check all registered loops/promoters to find the best match.
      * 3. Fall back to the legacy implementation if no match was found.
      */
-    PyObject *info = PyArrayIdentityHash_GetItem(
-            (PyArrayIdentityHash *)ufunc->_dispatch_cache, (PyObject **)op_dtypes);
+    PyObject *info = NULL;
+    if (!force_legacy_promotion) {
+        info = PyArrayIdentityHash_GetItem(ufunc->_dispatch_cache,
+                (PyObject **)op_dtypes);
+    }
+    else if (legacy_resolve_implementation_info(ufunc,
+            ops, signature, &info) < 0) {
+        return NULL;
+    }
 
-    if (NPY_UNLIKELY(info == NULL)) {
+    if (info == NULL) {
         if (resolve_implementation_info(ufunc, op_dtypes, &info) < 0) {
             return NULL;
         }
-        if (NPY_UNLIKELY(info == NULL)) {
+        if (info == NULL) {
             /*
              * One last try by using the legacy type resolver (this may
              * succeed even if the final resolution is invalid because there
@@ -516,15 +513,13 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
                     ops, signature, &info) < 0) {
                 return NULL;
             }
-            if (add_ufunc_loop(ufunc, info, 1) < 0) {
-                return NULL;
-            }
+            //if (add_ufunc_loop(ufunc, info, 1) < 0) {
+            //    return NULL;
+            //}
         }
-        PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
-                (PyObject **)op_dtypes, info);
-        Py_INCREF(info);  /* info is borrowed */
+        //PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
+        //        (PyObject **)op_dtypes, info);
     }
-    assert(PyTuple_CheckExact(info) && PyTuple_GET_SIZE(info) == 2);
 
     /* Make an exact check to make abuse hard for now */
     if (Py_TYPE(PyTuple_GET_ITEM(info, 1)) != &PyArrayMethod_Type) {

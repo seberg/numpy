@@ -223,7 +223,7 @@ PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
                 NPY_ITEM_REFCOUNT | NPY_ITEM_IS_POINTER | NPY_NEEDS_PYAPI)) {
             flags |= NPY_METH_REQUIRES_PYAPI;
         }
-        if (i >= ufunc->nin && signature[i]->parametric) {
+        if (signature[i]->parametric) {
             any_output_flexible = 1;
         }
     }

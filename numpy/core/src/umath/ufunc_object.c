@@ -53,6 +53,7 @@
 #include "dispatching.h"
 #include "convert_datatype.h"
 #include "legacy_array_method.h"
+#include "abstractdtypes.h"
 
 /********** PRINTF DEBUG TRACING **************/
 #define NPY_UF_DBG_TRACING 0
@@ -914,7 +915,8 @@ _wheremask_converter(PyObject *obj, PyArrayObject **wheremask)
  */
 static int
 convert_ufunc_arguments(PyUFuncObject *ufunc,
-        ufunc_full_args full_args, PyArrayObject **out_op,
+        ufunc_full_args full_args, PyArrayObject *out_op[],
+        PyArray_DTypeMeta *out_borrowed_op_DTypes[], int *force_legacy_promotion,
         PyObject *order_obj, NPY_ORDER *out_order,
         PyObject *casting_obj, NPY_CASTING *out_casting,
         PyObject *subok_obj, npy_bool *out_subok,
@@ -927,21 +929,56 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
     PyObject *obj;
 
     /* Convert and fill in input arguments */
+    int all_scalar = 1;
+    int any_scalar = 0;
+    int all_pyscalar = 1;
     for (int i = 0; i < nin; i++) {
         obj = PyTuple_GET_ITEM(full_args.in, i);
 
         if (PyArray_Check(obj)) {
-            PyArrayObject *obj_a = (PyArrayObject *)obj;
-            out_op[i] = (PyArrayObject *)PyArray_FromArray(obj_a, NULL, 0);
+            out_op[i] = (PyArrayObject *)obj;
+            Py_INCREF(out_op[i]);
         }
         else {
-            out_op[i] = (PyArrayObject *)PyArray_FromAny(obj,
-                                    NULL, 0, 0, 0, NULL);
+            /* Convert the input to an array and check for special cases */
+            out_op[i] = (PyArrayObject *)PyArray_FromAny(obj, NULL, 0, 0, 0, NULL);
+            if (out_op[i] == NULL) {
+                goto fail;
+            }
+        }
+        out_borrowed_op_DTypes[i] = NPY_DTYPE(PyArray_DESCR(out_op[i]));
+        if (PyArray_NDIM(out_op[i]) != 0) {
+            all_scalar = 0;
+            continue;
+        }
+        else {
+            any_scalar = 1;
+        }
+        if ((PyObject *)out_op[i] == obj) {
+            continue;  /* input was an array: no need to check for pyscalar */
         }
 
-        if (out_op[i] == NULL) {
-            goto fail;
+        if (PyLong_CheckExact(obj)) {
+            out_borrowed_op_DTypes[i] = &PyArray_PyIntAbstractDType;
         }
+        else if (PyFloat_CheckExact(obj)) {
+            out_borrowed_op_DTypes[i] = &PyArray_PyFloatAbstractDType;
+        }
+        else if (PyComplex_CheckExact(obj)) {
+            out_borrowed_op_DTypes[i] = &PyArray_PyComplexAbstractDType;
+        }
+        else {
+            all_pyscalar = 0;
+        }
+    }
+    if (all_scalar && all_pyscalar) {
+        /* Simply use the concrete DTypes. */
+        for (int i = 0; i < nin; i++) {
+            out_borrowed_op_DTypes[i] = NPY_DTYPE(PyArray_DESCR(out_op[i]));
+        }
+    }
+    else if (!all_scalar && any_scalar) {
+        *force_legacy_promotion = should_use_min_scalar(nin, out_op, NULL, NULL);
     }
 
     /* Convert and fill in output arguments */
@@ -1012,6 +1049,7 @@ check_for_trivial_loop(PyUFuncObject *ufunc,
             NPY_CASTING safety = PyArray_GetCastSafety(
                     PyArray_DESCR(op[i]), dtypes[i], NULL);
             if (safety < 0) {
+                /* A proper error during a cast check should be rare */
                 return -1;
             }
             if (casting != NPY_NO_CASTING || !PyArray_ISALIGNED(op[i])) {
@@ -1133,7 +1171,7 @@ prepare_ufunc_output(PyUFuncObject *ufunc,
  *
  * Returns -2 if a trivial loop is not possible, 0 on success and -1 on error.
  */
-static NPY_INLINE int
+static int
 try_trivial_single_output_loop(PyArrayMethod_Context *context,
         PyArrayObject *op[], NPY_ORDER order,
         PyObject *arr_prep[], ufunc_full_args full_args,
@@ -4234,8 +4272,7 @@ _check_and_copy_sig_to_signature(
 static PyArray_DTypeMeta *
 _get_dtype(PyObject *dtype_obj) {
     if (PyObject_TypeCheck(dtype_obj, &PyArrayDTypeMeta_Type)) {
-        Py_INCREF(dtype_obj);
-        return (PyArray_DTypeMeta *)dtype_obj;
+        PyArray_DTypeMeta *dtype = (PyArray_DTypeMeta *)dtype_obj;
     }
     else {
         PyArray_Descr *descr = NULL;
@@ -4354,6 +4391,19 @@ _get_fixed_signature(PyUFuncObject *ufunc,
             else {
                 signature[i] = _get_dtype(item);
                 if (signature[i] == NULL) {
+                    return -1;
+                }
+                else if (i < nin && signature[i]->abstract) {
+                    /*
+                     * We reject abstract input signatures for now.  These
+                     * can probably be defined by finding the common DType with
+                     * the actual input and using the result of this for the
+                     * promotion.
+                     */
+                    PyErr_SetString(PyExc_TypeError,
+                            "Input DTypes to the signature must not be "
+                            "abstract.  The behaviour may be defined in the "
+                            "future.");
                     return -1;
                 }
             }
@@ -4780,7 +4830,13 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     NPY_CASTING casting = NPY_DEFAULT_ASSIGN_CASTING;
     npy_bool subok = NPY_TRUE;
     int keepdims = -1;  /* We need to know if it was passed */
-    if (convert_ufunc_arguments(ufunc, full_args, operands,
+    int force_legacy_promotion = 0;
+    PyArray_DTypeMeta *borrowed_operand_DTypes[NPY_MAXARGS];
+    if (convert_ufunc_arguments(ufunc,
+            /* extract operand related information: */
+            full_args, operands,
+            borrowed_operand_DTypes, &force_legacy_promotion,
+            /* extract general information: */
             order_obj, &order,
             casting_obj, &casting,
             subok_obj, &subok,
@@ -4798,7 +4854,8 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
      * be shared between the ufunc and gufunc code.
      */
     PyArrayMethodObject *ufuncimpl = promote_and_get_ufuncimpl(ufunc,
-            operands, signature);
+            operands, signature,
+            borrowed_operand_DTypes, force_legacy_promotion);
     if (ufuncimpl == NULL) {
         goto fail;
     }
