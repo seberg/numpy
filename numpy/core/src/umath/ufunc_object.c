@@ -4469,7 +4469,7 @@ _get_fixed_signature(PyUFuncObject *ufunc,
     }
     else {
         PyErr_SetString(PyExc_TypeError,
-                "The signature object to ufunc must be a string or a tuple.");
+                "the signature object to ufunc must be a string or a tuple.");
         return -1;
     }
     return 0;
