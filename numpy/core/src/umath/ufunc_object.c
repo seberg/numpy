@@ -2018,7 +2018,7 @@ _initialize_variable_parts(PyUFuncObject *ufunc,
 
 static int
 PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
-        PyArrayMethodObject *NPY_UNUSED(ufuncimpl), PyArray_Descr *operation_descrs[],
+        PyArrayMethodObject *ufuncimpl, PyArray_Descr *operation_descrs[],
         PyArrayObject *op[], PyObject *extobj,
         NPY_CASTING casting, NPY_ORDER order,
         PyObject *axis, PyObject *axes, int keepdims)
@@ -2045,13 +2045,11 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
     /* These parameters come from extobj= or from a TLS global */
     int buffersize = 0, errormask = 0;
 
-    /* The selected inner loop */
-    PyUFuncGenericFunction innerloop = NULL;
-    void *innerloopdata = NULL;
     /* The dimensions which get passed to the inner loop */
     npy_intp inner_dimensions[NPY_MAXDIMS+1];
     /* The strides which get passed to the inner loop */
     npy_intp *inner_strides = NULL;
+    NpyAuxData *auxdata = NULL;
 
     /* The sizes of the core dimensions (# entries is ufunc->core_num_dim_ix) */
     npy_intp *core_dim_sizes = inner_dimensions + 1;
@@ -2420,21 +2418,34 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
 
     /*
      * The first nop strides are for the inner loop (but only can
-     * copy them after removing the core axes)
+     * copy them after removing the core axes).  The strides will not change
+     * if the iterator is not buffered (they are effectively fixed).
+     * Supporting buffering would make sense, but probably would have to be
+     * done in the inner-loop itself (not the iterator).
      */
+    assert(!NpyIter_IsBuffered(iter));
     memcpy(inner_strides, NpyIter_GetInnerStrideArray(iter),
                                     NPY_SIZEOF_INTP * nop);
 
-#if 0
-    printf("strides: ");
-    for (i = 0; i < nop+core_dim_ixs_size; ++i) {
-        printf("%d ", (int)inner_strides[i]);
-    }
-    printf("\n");
-#endif
+    /* Final preparation of the arraymethod call */
+    PyArrayMethod_Context context = {
+            .caller = (PyObject *)ufunc,
+            .method = ufuncimpl,
+            .descriptors = operation_descrs,
+    };
+    PyArrayMethod_StridedLoop *strided_loop;
+    NPY_ARRAYMETHOD_FLAGS flags = 0;
 
-    /* Start with the floating-point exception flags cleared */
-    npy_clear_floatstatus_barrier((char*)&iter);
+    if (ufuncimpl->get_strided_loop(&context, 1, 0, inner_strides,
+            &strided_loop, &auxdata, &flags) < 0) {
+        goto fail;
+    }
+    needs_api = (flags & NPY_METH_REQUIRES_PYAPI) != 0;
+    needs_api |= NpyIter_IterationNeedsAPI(iter);
+    if (!(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+        /* Start with the floating-point exception flags cleared */
+        npy_clear_floatstatus_barrier((char*)&iter);
+    }
 
     NPY_UF_DBG_PRINT("Executing inner loop\n");
 
@@ -2453,19 +2464,17 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
         }
         dataptr = NpyIter_GetDataPtrArray(iter);
         count_ptr = NpyIter_GetInnerLoopSizePtr(iter);
-        needs_api = NpyIter_IterationNeedsAPI(iter);
 
-        if (!needs_api && !NpyIter_IterationNeedsAPI(iter)) {
+        if (!needs_api) {
             NPY_BEGIN_THREADS_THRESHOLDED(total_problem_size);
         }
         do {
             inner_dimensions[0] = *count_ptr;
-            innerloop(dataptr, inner_dimensions, inner_strides, innerloopdata);
-        } while (!(needs_api && PyErr_Occurred()) && iternext(iter));
+            retval = strided_loop(&context,
+                    dataptr, inner_dimensions, inner_strides, auxdata);
+        } while (retval == 0 && iternext(iter));
 
-        if (!needs_api && !NpyIter_IterationNeedsAPI(iter)) {
-            NPY_END_THREADS;
-        }
+        NPY_END_THREADS;
     } else {
         /**
          * For each output operand, check if it has non-zero size,
@@ -2496,19 +2505,17 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
         Py_DECREF(identity);
     }
 
-    /* Check whether any errors occurred during the loop */
-    if (PyErr_Occurred() ||
-        _check_ufunc_fperr(errormask, extobj, ufunc_name) < 0) {
-        retval = -1;
-        goto fail;
+    if (retval == 0 && !(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+        /* NOTE: We could check float errors even when `res < 0` */
+        retval = _check_ufunc_fperr(errormask, extobj, ufunc_name);
     }
 
     PyArray_free(inner_strides);
+    NPY_AUXDATA_FREE(auxdata);
     if (NpyIter_Deallocate(iter) < 0) {
         retval = -1;
     }
 
-    /* The caller takes ownership of all the references in op */
     PyArray_free(remap_axis_memory);
     PyArray_free(remap_axis);
 
@@ -2519,6 +2526,7 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
 fail:
     NPY_UF_DBG_PRINT1("Returning failure code %d\n", retval);
     PyArray_free(inner_strides);
+    NPY_AUXDATA_FREE(auxdata);
     NpyIter_Deallocate(iter);
     PyArray_free(remap_axis_memory);
     PyArray_free(remap_axis);
