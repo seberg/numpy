@@ -17,8 +17,8 @@ typedef struct {
 
 
 NPY_NO_EXPORT int
-PyArrayIdentityHash_SetItem(
-        PyArrayIdentityHash *tb, PyObject *const *key, PyObject *value);
+PyArrayIdentityHash_SetItem(PyArrayIdentityHash *tb,
+        PyObject *const *key, PyObject *value, int replace);
 
 NPY_NO_EXPORT PyObject *
 PyArrayIdentityHash_GetItem(PyArrayIdentityHash const *tb, PyObject *const *key);

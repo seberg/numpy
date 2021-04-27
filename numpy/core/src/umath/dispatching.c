@@ -15,7 +15,7 @@
 #include "legacy_array_method.h"
 
 
-NPY_NO_EXPORT int  // TODO: Make static again.
+static int
 add_ufunc_loop(PyUFuncObject *ufunc, PyObject *info, int ignore_duplicate)
 {
     assert(PyTuple_CheckExact(info) && PyTuple_GET_SIZE(info) == 2);
@@ -388,21 +388,18 @@ _make_new_typetup(
 
 
 /*
- * Legacy type resolution unfortunately works on the original array objects
- * and we have no choice but to pass them in.
- *
- * This is mostly a _promotion_ step, but we just always "add" the loop
- * (if it already exists, we will just skip adding it again, it will be
- * cached as the correct promotion in any case).
- * TODO: Is that above really correct?!
+ * Fills in the operation_DTypes with borrowed references.  This may change
+ * the content, since it will use the legacy type resolution, which can special
+ * case 0-D arrays (using value-based logic).
  */
 static int
-legacy_resolve_implementation_info(PyUFuncObject *ufunc,
+legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
         PyArrayObject *const *ops, PyArray_DTypeMeta *signature[],
-        PyObject **out_info)
+        PyArray_DTypeMeta *operation_DTypes[])
 {
     int nargs = ufunc->nargs;
-    PyArray_Descr *out_descrs[NPY_MAXARGS] = {NULL};
+    PyArray_Descr *out_descrs[NPY_MAXARGS];
+    memset(out_descrs, 0, nargs * sizeof(*out_descrs));
 
     PyObject *type_tuple = NULL;
     if (_make_new_typetup(nargs, signature, &type_tuple) < 0) {
@@ -423,22 +420,43 @@ legacy_resolve_implementation_info(PyUFuncObject *ufunc,
     }
     Py_XDECREF(type_tuple);
 
-    PyObject *DType_tuple = PyTuple_New(nargs);
-    if (DType_tuple == NULL) {
-        for (int i = 0; i < nargs; i++) {
-            Py_XDECREF(out_descrs[i]);
-        }
+    for (int i = 0; i < nargs; i++) {
+        operation_DTypes[i] = NPY_DTYPE(out_descrs[i]);
+        Py_INCREF(operation_DTypes[i]);
+        Py_DECREF(out_descrs[i]);
+    }
+    return 0;
+}
+
+/*
+ * Legacy type resolution unfortunately works on the original array objects
+ * and we have no choice but to pass them in.
+ *
+ * This is mostly a _promotion_ step, but we just always "add" the loop
+ * (if it already exists, we will just skip adding it again, it will be
+ * cached as the correct promotion in any case).
+ * TODO: Is that above really correct?!
+ */
+static int
+legacy_resolve_implementation_info(PyUFuncObject *ufunc,
+        PyArrayObject *const *ops, PyArray_DTypeMeta *signature[],
+        PyArray_DTypeMeta *operation_dtypes[], PyObject **out_info)
+{
+    if (legacy_promote_using_legacy_type_resolver(ufunc,
+            ops, signature, operation_dtypes) < 0) {
         return -1;
     }
-    for (int i = 0; i < nargs; i++) {
-        PyObject *DType = (PyObject *)NPY_DTYPE(out_descrs[i]);
-        Py_INCREF(DType);
-        PyTuple_SET_ITEM(DType_tuple, i, DType);
-        Py_CLEAR(out_descrs[i]);
+    PyObject *DType_tuple = PyTuple_New(ufunc->nargs);
+    if (DType_tuple == NULL) {
+        return -1;
+    }
+    for (int i = 0; i < ufunc->nargs; i++) {
+        Py_INCREF(operation_dtypes[i]);
+        PyTuple_SET_ITEM(DType_tuple, i, (PyObject *)operation_dtypes[i]);
     }
 
-    PyArrayMethodObject *method = PyArray_NewLegacyWrappingArrayMethod(ufunc,
-            (PyArray_DTypeMeta **)PySequence_Fast_ITEMS(DType_tuple));
+    PyArrayMethodObject *method = PyArray_NewLegacyWrappingArrayMethod(
+            ufunc, operation_dtypes);
     if (method == NULL) {
         Py_DECREF(DType_tuple);
         return -1;
@@ -481,6 +499,17 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
         }
     }
 
+    if (force_legacy_promotion) {
+        /*
+         * We must use legacy promotion for value-based logic. Call the old
+         * resolver once up-front to get the "actual" loop dtypes.
+         */
+        if (legacy_promote_using_legacy_type_resolver(ufunc,
+                ops, signature, op_dtypes) < 0) {
+            return NULL;
+        }
+    }
+
     /*
      * Fetch the dispatching info which consists of the implementation and
      * the DType signature tuple.  There are three steps:
@@ -489,15 +518,8 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
      * 2. Check all registered loops/promoters to find the best match.
      * 3. Fall back to the legacy implementation if no match was found.
      */
-    PyObject *info = NULL;
-    if (!force_legacy_promotion) {
-        info = PyArrayIdentityHash_GetItem(ufunc->_dispatch_cache,
+    PyObject *info = PyArrayIdentityHash_GetItem(ufunc->_dispatch_cache,
                 (PyObject **)op_dtypes);
-    }
-    else if (legacy_resolve_implementation_info(ufunc,
-            ops, signature, &info) < 0) {
-        return NULL;
-    }
 
     if (info == NULL) {
         if (resolve_implementation_info(ufunc, op_dtypes, &info) < 0) {
@@ -510,15 +532,16 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
              * is no matching loop.
              */
             if (legacy_resolve_implementation_info(ufunc,
-                    ops, signature, &info) < 0) {
+                    ops, signature, op_dtypes, &info) < 0) {
                 return NULL;
             }
-            //if (add_ufunc_loop(ufunc, info, 1) < 0) {
-            //    return NULL;
-            //}
+            if (add_ufunc_loop(ufunc, info, 1) < 0) {
+                return NULL;
+            }
         }
-        //PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
-        //        (PyObject **)op_dtypes, info);
+        /* Add to cache (in some legacy cases, we may add twice) */
+        PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
+                (PyObject **)op_dtypes, info, 1);
     }
 
     /* Make an exact check to make abuse hard for now */

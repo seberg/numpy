@@ -931,7 +931,7 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
     /* Convert and fill in input arguments */
     int all_scalar = 1;
     int any_scalar = 0;
-    int all_pyscalar = 1;
+    int all_legacy = 1;
     for (int i = 0; i < nin; i++) {
         obj = PyTuple_GET_ITEM(full_args.in, i);
 
@@ -947,6 +947,9 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
             }
         }
         out_borrowed_op_DTypes[i] = NPY_DTYPE(PyArray_DESCR(out_op[i]));
+        if (!out_borrowed_op_DTypes[i]->legacy) {
+            all_legacy = 0;
+        }
         if (PyArray_NDIM(out_op[i]) != 0) {
             all_scalar = 0;
             continue;
@@ -967,26 +970,25 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
         else if (PyComplex_CheckExact(obj)) {
             out_borrowed_op_DTypes[i] = &PyArray_PyComplexAbstractDType;
         }
-        else {
-            all_pyscalar = 0;
-        }
     }
-    if (all_scalar && all_pyscalar) {
-        /* Simply use the concrete DTypes. */
-        for (int i = 0; i < nin; i++) {
-            out_borrowed_op_DTypes[i] = NPY_DTYPE(PyArray_DESCR(out_op[i]));
-        }
-    }
-    else if (!all_scalar && any_scalar) {
+    if (all_legacy || (!all_scalar && any_scalar)) {
         *force_legacy_promotion = should_use_min_scalar(nin, out_op, NULL, NULL);
+        /*
+         * TODO: if this is False, we end up in a "very slow" path that should
+         *       be avoided.  This makes `int_arr + 0.` ~40% slower.
+         */
     }
 
     /* Convert and fill in output arguments */
+    memset(out_borrowed_op_DTypes + nin, 0, nout * sizeof(*out_borrowed_op_DTypes));
     if (full_args.out != NULL) {
         for (int i = 0; i < nout; i++) {
             obj = PyTuple_GET_ITEM(full_args.out, i);
             if (_set_out_array(obj, out_op + i + nin) < 0) {
                 goto fail;
+            }
+            if (out_op[i] != NULL) {
+                out_borrowed_op_DTypes[i + nin] = NPY_DTYPE(PyArray_DESCR(out_op[i]));
             }
         }
     }
@@ -4272,7 +4274,9 @@ _check_and_copy_sig_to_signature(
 static PyArray_DTypeMeta *
 _get_dtype(PyObject *dtype_obj) {
     if (PyObject_TypeCheck(dtype_obj, &PyArrayDTypeMeta_Type)) {
-        PyArray_DTypeMeta *dtype = (PyArray_DTypeMeta *)dtype_obj;
+        PyArray_DTypeMeta *out = (PyArray_DTypeMeta *)dtype_obj;
+        Py_INCREF(out);
+        return out;
     }
     else {
         PyArray_Descr *descr = NULL;
