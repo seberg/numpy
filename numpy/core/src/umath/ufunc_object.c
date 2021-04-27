@@ -4478,7 +4478,7 @@ _get_fixed_signature(PyUFuncObject *ufunc,
 
 /*
  * Fill in the actual descriptors used for the operation.  This function
- * supports falling back tot he legacy `ufunc->type_resolver`.
+ * supports falling back to the legacy `ufunc->type_resolver`.
  *
  * We guarantee the array-method that all passed in descriptors are of the
  * correct DType instance (i.e. a string can just fetch the length, it doesn't
