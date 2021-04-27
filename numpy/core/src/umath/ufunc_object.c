@@ -1384,11 +1384,11 @@ execute_ufunc_loop(PyArrayMethod_Context *context, int masked,
      * Do this before creating the iterator, as the iterator may UPDATEIFCOPY
      * some of them.
      */
-    for (int i = nin; i < nout; i++) {
+    for (int i = 0; i < nout; i++) {
         if (op[nin+i] == NULL) {
             continue;
         }
-        if (prepare_ufunc_output(ufunc, &op[i],
+        if (prepare_ufunc_output(ufunc, &op[nin+i],
                 arr_prep[i], full_args, i) < 0) {
             return -1;
         }
