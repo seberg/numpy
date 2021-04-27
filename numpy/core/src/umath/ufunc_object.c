@@ -2068,6 +2068,14 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
 
     NPY_UF_DBG_PRINT1("\nEvaluating ufunc %s\n", ufunc_name);
 
+    if (PyUFunc_ValidateCasting(ufunc, casting, op, operation_descrs) < 0) {
+        /*
+         * Would be nice to just move this into the iterator, but this prints
+         * a better error message.
+         */
+        return -1;
+    }
+
     /* Initialize possibly variable parts to the values from the ufunc */
     retval = _initialize_variable_parts(ufunc, op_core_num_dims,
                                         core_dim_sizes, core_dim_flags);
@@ -2285,12 +2293,6 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
                        NPY_ITER_WRITEONLY |
                        NPY_UFUNC_DEFAULT_OUTPUT_FLAGS,
                        op_flags);
-    /* For the generalized ufunc, we get the loop right away too */
-    retval = ufunc->legacy_inner_loop_selector(ufunc, operation_descrs,
-                                    &innerloop, &innerloopdata, &needs_api);
-    if (retval < 0) {
-        goto fail;
-    }
 
 #if NPY_UF_DBG_TRACING
     printf("input types:\n");
@@ -2305,14 +2307,6 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
     }
     printf("\n");
 #endif
-
-    if (PyUFunc_ValidateCasting(ufunc, casting, op, operation_descrs) < 0) {
-        /*
-         * Would be nice to just move this into the iterator, but this prints
-         * a better error message.
-         */
-        return -1;
-    }
 
     /*
      * Set up the iterator per-op flags.  For generalized ufuncs, we
