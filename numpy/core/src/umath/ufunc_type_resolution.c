@@ -1,4 +1,16 @@
 /*
+ * NOTE: The type resolution defined in this file is considered legacy.
+ *
+ * The new mechanism separates type resolution and promotion into two
+ * distinct steps, as per NEP 43.
+ * Further, the functions in this file rely on the operands rather than
+ * only the DTypes/descriptors.  They are still called and at this point
+ * vital (NumPy ~1.21), but should hopefully become largely irrelevant very
+ * quickly.
+ *
+ * At that point, this file should be deletable in its entirety.
+ *
+ *
  * This file implements type resolution for NumPy element-wise ufuncs.
  * This mechanism is still backwards-compatible with the pre-existing
  * legacy mechanism, so performs much slower than is necessary.
@@ -89,14 +101,11 @@ raise_binary_type_reso_error(PyUFuncObject *ufunc, PyArrayObject **operands) {
 /** Helper function to raise UFuncNoLoopError
  * Always returns -1 to indicate the exception was raised, for convenience
  */
-static int
+NPY_NO_EXPORT int
 raise_no_loop_found_error(
-        PyUFuncObject *ufunc, PyArray_Descr **dtypes)
+        PyUFuncObject *ufunc, PyObject **dtypes)
 {
     static PyObject *exc_type = NULL;
-    PyObject *exc_value;
-    PyObject *dtypes_tup;
-    npy_intp i;
 
     npy_cache_import(
         "numpy.core._exceptions", "_UFuncNoLoopError",
@@ -105,22 +114,12 @@ raise_no_loop_found_error(
         return -1;
     }
 
-    /* convert dtypes to a tuple */
-    dtypes_tup = PyTuple_New(ufunc->nargs);
+    PyObject *dtypes_tup = PyArray_TupleFromItems(ufunc->nargs, dtypes, 1);
     if (dtypes_tup == NULL) {
         return -1;
     }
-    for (i = 0; i < ufunc->nargs; ++i) {
-        PyObject *tmp = Py_None;
-        if (dtypes[i] != NULL) {
-            tmp = (PyObject *)dtypes[i];
-        }
-        Py_INCREF(tmp);
-        PyTuple_SET_ITEM(dtypes_tup, i, tmp);
-    }
-
     /* produce an error object */
-    exc_value = PyTuple_Pack(2, ufunc, dtypes_tup);
+    PyObject *exc_value = PyTuple_Pack(2, ufunc, dtypes_tup);
     Py_DECREF(dtypes_tup);
     if (exc_value == NULL) {
         return -1;
@@ -130,6 +129,7 @@ raise_no_loop_found_error(
 
     return -1;
 }
+
 
 static int
 raise_casting_error(
@@ -542,7 +542,7 @@ PyUFunc_SimpleUniformOperationTypeResolver(
                     out_dtypes[iop] = PyArray_DESCR(operands[iop]);
                     Py_INCREF(out_dtypes[iop]);
                 }
-                return raise_no_loop_found_error(ufunc, out_dtypes);
+                return raise_no_loop_found_error(ufunc, (PyObject **)out_dtypes);
             }
             out_dtypes[0] = PyArray_ResultType(ufunc->nin, operands, 0, NULL);
         }
@@ -1492,7 +1492,7 @@ PyUFunc_DefaultLegacyInnerLoopSelector(PyUFuncObject *ufunc,
         types += nargs;
     }
 
-    return raise_no_loop_found_error(ufunc, dtypes);
+    return raise_no_loop_found_error(ufunc, (PyObject **)dtypes);
 }
 
 

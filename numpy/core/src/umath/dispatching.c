@@ -16,6 +16,7 @@
 #include "dtypemeta.h"
 #include "npy_hashtable.h"
 #include "legacy_array_method.h"
+#include "ufunc_type_resolution.h"  /* for `raise_no_loop_found_error` */
 
 
 static int
@@ -367,9 +368,22 @@ call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
         }
     }
 
-    /* Notes: Passing the operands is a crutch and nobody should use it! */
+    /* Note: Passing the operands is a crutch and nobody should use them! */
     PyObject *result = PyObject_CallFunctionObjArgs(promoter,
             dtypes_tuple, signature_tuple, operands_tuple, NULL);
+    if (result == NULL) {
+        Py_XDECREF(result);
+        goto finish;
+    }
+    if (result == Py_None) {
+        /*
+         * TODO: In principle the dtypes could have been modified at this
+         *       point, so that the error will be slightly off.
+         */
+        raise_no_loop_found_error(ufunc, (PyObject **)op_dtypes);
+        Py_XDECREF(result);
+        goto finish;
+    }
 
     if (!PyTuple_CheckExact(result) && PyTuple_Size(result) != nargs) {
         /*
@@ -383,8 +397,8 @@ call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
          * returning (if necessary) should be straight forward.
          */
         PyErr_SetString(PyExc_TypeError,
-                "currently a promoter must return a tuple of dtypes "
-                "with the correct length.  This may be relaxed in the future. "
+                "currently a promoter must return a tuple of dtypes with "
+                "the correct length.  This may be relaxed in the future. "
                 "If a promoter needs to add a new ArrayMethod, it must "
                 "register this manually before returning.");
         return NULL;
@@ -404,8 +418,11 @@ call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
         op_dtypes[i] = (PyArray_DTypeMeta *)tmp;
     }
 
-    /* Do a recursive call! */
-    if (Py_EnterRecursiveCall("during ufunc promotion.") < 0) {
+    /*
+     * Do a recursive call, the promotion function has to ensure that the
+     * new tuple is strictly more precise (thus guaranteeing eventual finishing)
+     */
+    if (Py_EnterRecursiveCall(" during ufunc promotion.") < 0) {
         Py_DECREF(result);
         goto finish;
     }
@@ -625,9 +642,8 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
     }
 
     if (!PyObject_TypeCheck(PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
-        info = call_promoter(ufunc, PyTuple_GET_ITEM(info, 1),
+        return call_promoter(ufunc, PyTuple_GET_ITEM(info, 1),
                 op_dtypes, signature, ops, force_legacy_promotion);
-        return NULL;
     }
 
     /* Fill in the signature with the actual signature we are working on */
