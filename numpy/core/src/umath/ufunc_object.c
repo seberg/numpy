@@ -4598,16 +4598,7 @@ replace_with_wrapped_result_and_return(PyUFuncObject *ufunc,
         return retobj[0];
     }
     else {
-        PyTupleObject *ret;
-
-        ret = (PyTupleObject *)PyTuple_New(ufunc->nout);
-        if (ret == NULL) {
-            goto fail;
-        }
-        for (int i = 0; i < ufunc->nout; i++) {
-            PyTuple_SET_ITEM(ret, i, retobj[i]);
-        }
-        return (PyObject *)ret;
+        return PyArray_TupleFromItems(ufunc->nout, retobj, 0);
     }
 
   fail:
@@ -4672,14 +4663,9 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     }
 
     /* Fetch input arguments. */
-    full_args.in = PyTuple_New(ufunc->nin);
+    full_args.in = PyArray_TupleFromItems(ufunc->nin, args, 0);
     if (full_args.in == NULL) {
         return NULL;
-    }
-    for (int i = 0; i < ufunc->nin; i++) {
-        PyObject *tmp = args[i];
-        Py_INCREF(tmp);
-        PyTuple_SET_ITEM(full_args.in, i, tmp);
     }
 
     /*

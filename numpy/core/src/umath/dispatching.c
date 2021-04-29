@@ -3,11 +3,14 @@
  * is necessary to happen before dispatching).
  * As such it works on the UFunc object.
  */
+#include <Python.h>
+
 #define _UMATHMODULE
 #define _MULTIARRAYMODULE
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 
 #include <numpy/ndarraytypes.h>
+#include <common.h>
 
 #include "dispatching.h"
 #include "dtypemeta.h"
@@ -88,12 +91,12 @@ resolve_implementation_info(PyUFuncObject *ufunc,
                 ufunc->_loops, res_idx);
         PyObject *curr_dtypes = PyTuple_GET_ITEM(resolver_info, 0);
 
-        // TODO: If we have abstract, there is no point in checking
-        //       a UFuncImpl (which is always concrete)
         /*
          * Test if the current resolver matches, it could make sense to
          * reorder these checks to avoid the IsSubclass check as much as
          * possible.
+         * TODO: If we have abstract, there is no point in checking
+         *       a resolved ArrayMethod (which is always concrete)
          */
 #if NPY_UF_DBG_TRACING
         printf("Check if the resolver/loop matches:\n");
@@ -149,7 +152,7 @@ resolve_implementation_info(PyUFuncObject *ufunc,
             for (Py_ssize_t i = 0; i < nargs; i++) {
                 int best;
 
-                /* Whether this (output) dtype was specified at all */
+                /* Whether this (normally output) dtype was specified at all */
                 int is_not_specified = (
                         op_dtypes[i] == (PyArray_DTypeMeta *)Py_None);
 
@@ -221,12 +224,12 @@ resolve_implementation_info(PyUFuncObject *ufunc,
                     unambiguous_equivally_good = 0;
                     best = 1;
                 }
-                    /*
-                     * Both are abstract DTypes, there is a clear order if
-                     * one of them is a subclass of the other.
-                     * If this fails, reject it completely (could be changed).
-                     * The case that it is the same dtype is already caught.
-                     */
+                /*
+                 * Both are abstract DTypes, there is a clear order if
+                 * one of them is a subclass of the other.
+                 * If this fails, reject it completely (could be changed).
+                 * The case that it is the same dtype is already caught.
+                 */
                 else {
                     /* Note the identity check above, so this true subclass */
                     int new_is_subclass = PyObject_IsSubclass(
@@ -338,6 +341,88 @@ resolve_implementation_info(PyUFuncObject *ufunc,
 }
 
 
+static PyArrayMethodObject *
+call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
+        PyArray_DTypeMeta *op_dtypes[], PyArray_DTypeMeta *signature[],
+        PyArrayObject *const operands[], int force_legacy_promotion)
+{
+    int nargs = ufunc->nargs;
+    PyArrayMethodObject *resolved_method = NULL;
+    PyObject *dtypes_tuple = NULL;
+    PyObject *signature_tuple = NULL;
+    PyObject *operands_tuple = NULL;
+
+    dtypes_tuple = PyArray_TupleFromItems(nargs, (PyObject **)op_dtypes, 1);
+    if (dtypes_tuple == NULL) {
+        goto finish;
+    }
+    signature_tuple = PyArray_TupleFromItems(nargs, (PyObject **)signature, 1);
+    if (signature_tuple == NULL) {
+        goto finish;
+    }
+    if (force_legacy_promotion) {
+        operands_tuple = PyArray_TupleFromItems(nargs, (PyObject **)operands, 1);
+        if (operands_tuple == NULL) {
+            goto finish;
+        }
+    }
+
+    /* Notes: Passing the operands is a crutch and nobody should use it! */
+    PyObject *result = PyObject_CallFunctionObjArgs(promoter,
+            dtypes_tuple, signature_tuple, operands_tuple, NULL);
+
+    if (!PyTuple_CheckExact(result) && PyTuple_Size(result) != nargs) {
+        /*
+         * My (@seberg's) first intention was to allow returning an ArrayMethod
+         * (bound) here, so that arbitrary array methods can be returned.
+         * Rejecting this has the advantage that we can side-step settling on
+         * the exact method of bound vs. unbound ArrayMethods for now.
+         * (It is not necessary to provide a `ufunc.resolve_implementation()`!)
+         *
+         * Forcing the user to explicitly register the new ArrayMethod before
+         * returning (if necessary) should be straight forward.
+         */
+        PyErr_SetString(PyExc_TypeError,
+                "currently a promoter must return a tuple of dtypes "
+                "with the correct length.  This may be relaxed in the future. "
+                "If a promoter needs to add a new ArrayMethod, it must "
+                "register this manually before returning.");
+        return NULL;
+    }
+
+    for (int i = 0; i < nargs; i++) {
+        PyObject *tmp = PyTuple_GET_ITEM(result, i);
+        if (tmp == Py_None) {
+            tmp = NULL;
+        }
+        else if (!PyObject_TypeCheck(result, &PyArrayDTypeMeta_Type)) {
+            PyErr_SetString(PyExc_TypeError,
+                    "promoter must return a tuple of DTypes (or None).");
+            Py_DECREF(result);
+            goto finish;
+        }
+        op_dtypes[i] = (PyArray_DTypeMeta *)tmp;
+    }
+
+    /* Do a recursive call! */
+    if (Py_EnterRecursiveCall("during ufunc promotion.") < 0) {
+        Py_DECREF(result);
+        goto finish;
+    }
+    resolved_method = promote_and_get_ufuncimpl(ufunc,
+            operands, signature, op_dtypes, force_legacy_promotion);
+
+    Py_LeaveRecursiveCall();
+    Py_DECREF(result);
+
+  finish:
+    Py_XDECREF(dtypes_tuple);
+    Py_XDECREF(signature_tuple);
+    Py_XDECREF(operands_tuple);
+    return resolved_method;
+}
+
+
 /*
  * Used for the legacy fallback promotion when `signature` or `dtype` is
  * provided.
@@ -431,11 +516,6 @@ legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
 /*
  * Legacy type resolution unfortunately works on the original array objects
  * and we have no choice but to pass them in.
- *
- * This is mostly a _promotion_ step, but we just always "add" the loop
- * (if it already exists, we will just skip adding it again, it will be
- * cached as the correct promotion in any case).
- * TODO: Is that above really correct?!
  */
 static int
 legacy_resolve_implementation_info(PyUFuncObject *ufunc,
@@ -544,21 +624,9 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
                 (PyObject **)op_dtypes, info, 1);
     }
 
-    /* Make an exact check to make abuse hard for now */
-    if (Py_TYPE(PyTuple_GET_ITEM(info, 1)) != &PyArrayMethod_Type) {
-        PyErr_SetString(PyExc_NotImplementedError,
-                "Promoters are not implemented yet, they will be called here.");
-        /*
-         * int res = call_ufuncimpl_resolver(
-         *        best_resolver, ufunc, signature, ufunc_impl);
-         * if (res < 0) {
-         *     return -1;
-         * }
-         * if (!is_any_dtype_abstract) {
-         *     // No abstract dtype, so store ufunc_impl and not function
-         *     best_resolver = (PyObject *)*ufunc_impl;
-         * }
-         */
+    if (!PyObject_TypeCheck(PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
+        info = call_promoter(ufunc, PyTuple_GET_ITEM(info, 1),
+                op_dtypes, signature, ops, force_legacy_promotion);
         return NULL;
     }
 
