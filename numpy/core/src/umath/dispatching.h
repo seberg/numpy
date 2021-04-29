@@ -7,6 +7,10 @@
 #include "array_method.h"
 
 
+typedef int promoter_function(PyUFuncObject *ufunc,
+        PyArray_DTypeMeta *op_dtypes[], PyArray_DTypeMeta *signature[],
+        PyArrayObject *const operands[], PyArray_DTypeMeta *new_op_dtypes[]);
+
 NPY_NO_EXPORT PyArrayMethodObject *
 promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
         PyArrayObject *const ops[], PyArray_DTypeMeta *signature[],

@@ -342,16 +342,15 @@ resolve_implementation_info(PyUFuncObject *ufunc,
 }
 
 
-static PyArrayMethodObject *
-call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
+static int call_python_promoter(PyUFuncObject *ufunc, PyObject *promoter,
         PyArray_DTypeMeta *op_dtypes[], PyArray_DTypeMeta *signature[],
-        PyArrayObject *const operands[], int force_legacy_promotion)
+        PyArray_DTypeMeta *new_op_dtypes[])
 {
     int nargs = ufunc->nargs;
-    PyArrayMethodObject *resolved_method = NULL;
+    int retval = -1;
     PyObject *dtypes_tuple = NULL;
     PyObject *signature_tuple = NULL;
-    PyObject *operands_tuple = NULL;
+    PyObject *promoter_result = NULL;
 
     dtypes_tuple = PyArray_TupleFromItems(nargs, (PyObject **)op_dtypes, 1);
     if (dtypes_tuple == NULL) {
@@ -361,31 +360,21 @@ call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
     if (signature_tuple == NULL) {
         goto finish;
     }
-    if (force_legacy_promotion) {
-        operands_tuple = PyArray_TupleFromItems(nargs, (PyObject **)operands, 1);
-        if (operands_tuple == NULL) {
-            goto finish;
-        }
-    }
 
     /* Note: Passing the operands is a crutch and nobody should use them! */
-    PyObject *result = PyObject_CallFunctionObjArgs(promoter,
-            dtypes_tuple, signature_tuple, operands_tuple, NULL);
-    if (result == NULL) {
-        Py_XDECREF(result);
+    promoter_result = PyObject_CallFunctionObjArgs(promoter,
+            dtypes_tuple, signature_tuple, NULL);
+    if (promoter_result == NULL) {
         goto finish;
     }
-    if (result == Py_None) {
-        /*
-         * TODO: In principle the dtypes could have been modified at this
-         *       point, so that the error will be slightly off.
-         */
+    if (promoter_result == Py_None) {
+        /* TODO: op_dtypes may not be original. */
         raise_no_loop_found_error(ufunc, (PyObject **)op_dtypes);
-        Py_XDECREF(result);
         goto finish;
     }
 
-    if (!PyTuple_CheckExact(result) && PyTuple_Size(result) != nargs) {
+    if (!PyTuple_CheckExact(promoter_result) ||
+            PyTuple_Size(promoter_result) != nargs) {
         /*
          * My (@seberg's) first intention was to allow returning an ArrayMethod
          * (bound) here, so that arbitrary array methods can be returned.
@@ -404,18 +393,70 @@ call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
         return NULL;
     }
 
+    /* Copy the dtypes into the result array transferring ownership. */
     for (int i = 0; i < nargs; i++) {
-        PyObject *tmp = PyTuple_GET_ITEM(result, i);
+        PyObject *tmp = PyTuple_GET_ITEM(promoter_result, i);
         if (tmp == Py_None) {
             tmp = NULL;
         }
-        else if (!PyObject_TypeCheck(result, &PyArrayDTypeMeta_Type)) {
+        else if (!PyObject_TypeCheck(promoter_result, &PyArrayDTypeMeta_Type)) {
             PyErr_SetString(PyExc_TypeError,
                     "promoter must return a tuple of DTypes (or None).");
-            Py_DECREF(result);
+            for (int j = 0; j < i; j++) {
+                Py_XDECREF(new_op_dtypes[i]);
+            }
             goto finish;
         }
-        op_dtypes[i] = (PyArray_DTypeMeta *)tmp;
+        else {
+            Py_INCREF(tmp);
+        }
+        new_op_dtypes[i] = (PyArray_DTypeMeta *)tmp;
+    }
+    retval = 0;
+
+  finish:
+    Py_XDECREF(dtypes_tuple);
+    Py_XDECREF(signature_tuple);
+    Py_XDECREF(promoter_result);
+    return retval;
+}
+
+
+static PyArrayMethodObject *
+call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
+        PyArray_DTypeMeta *op_dtypes[], PyArray_DTypeMeta *signature[],
+        PyArrayObject *const operands[], int force_legacy_promotion)
+{
+    int nargs = ufunc->nargs;
+    PyArrayMethodObject *resolved_method = NULL;
+    PyObject *dtypes_tuple = NULL;
+    PyObject *signature_tuple = NULL;
+    PyObject *operands_tuple = NULL;
+
+    int promoter_result;
+    PyArray_DTypeMeta *new_op_dtypes[NPY_MAXARGS];
+
+    if (PyCapsule_CheckExact(promoter)) {
+        /* We could also go the other way and wrap up the python function... */
+        promoter_function *promoter_function = PyCapsule_GetPointer(promoter,
+                "numpy._ufunc_promoter");
+        if (promoter_function == NULL) {
+            return NULL;
+        }
+        promoter_result = promoter_function(ufunc,
+                op_dtypes, signature, operands, new_op_dtypes);
+    }
+    else {
+        /* Do not pass operands to python, since nobody should use them. */
+        promoter_result = call_python_promoter(ufunc, promoter,
+                op_dtypes, signature, new_op_dtypes);
+    }
+    if (promoter_result < 0) {
+        if (!PyErr_Occurred()) {
+            /* TODO: op_dtypes may not be original. */
+            raise_no_loop_found_error(ufunc, (PyObject **)op_dtypes);
+        }
+        return NULL;
     }
 
     /*
@@ -423,19 +464,20 @@ call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
      * new tuple is strictly more precise (thus guaranteeing eventual finishing)
      */
     if (Py_EnterRecursiveCall(" during ufunc promotion.") < 0) {
-        Py_DECREF(result);
         goto finish;
     }
     resolved_method = promote_and_get_ufuncimpl(ufunc,
-            operands, signature, op_dtypes, force_legacy_promotion);
+            operands, signature, new_op_dtypes, force_legacy_promotion);
 
     Py_LeaveRecursiveCall();
-    Py_DECREF(result);
 
   finish:
     Py_XDECREF(dtypes_tuple);
     Py_XDECREF(signature_tuple);
     Py_XDECREF(operands_tuple);
+    for (int i = 0; i < nargs; i++) {
+        Py_XDECREF(new_op_dtypes[i]);
+    }
     return resolved_method;
 }
 
