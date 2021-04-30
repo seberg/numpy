@@ -110,8 +110,9 @@ resolve_implementation_info(PyUFuncObject *ufunc,
             PyArray_DTypeMeta *given_dtype = op_dtypes[i];
             PyArray_DTypeMeta *resolver_dtype = (
                     (PyArray_DTypeMeta *)PyTuple_GET_ITEM(curr_dtypes, i));
-            if (given_dtype == (PyArray_DTypeMeta *)Py_None) {
-                /* If None is given, anything will match. */
+            assert((PyObject *)given_dtype != Py_None);
+            if (given_dtype == NULL) {
+                /* Not given, anything matches. */
                 continue;
             }
             if (given_dtype == resolver_dtype) {
@@ -130,6 +131,13 @@ resolve_implementation_info(PyUFuncObject *ufunc,
                 matches = NPY_FALSE;
                 break;
             }
+            /*
+             * TODO: Should consider allowing reverse subclasses, i.e.
+             *       the operation DType passed in to be abstract.  That
+             *       definitely is OK for outputs (and potentially useful,
+             *       you could enforce e.g. an inexact result).
+             *       It might also be useful for some stranger promoters.
+             */
         }
         if (!matches) {
             continue;
@@ -423,7 +431,7 @@ static int call_python_promoter(PyUFuncObject *ufunc, PyObject *promoter,
 
 
 static PyArrayMethodObject *
-call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
+call_promoter_and_recurse(PyUFuncObject *ufunc, PyObject *promoter,
         PyArray_DTypeMeta *op_dtypes[], PyArray_DTypeMeta *signature[],
         PyArrayObject *const operands[], int force_legacy_promotion)
 {
@@ -453,7 +461,10 @@ call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
     }
     if (promoter_result < 0) {
         if (!PyErr_Occurred()) {
-            /* TODO: op_dtypes may not be original. */
+            /*
+             * TODO: op_dtypes may not be original (if we recurse) so in rare
+             *       cases the error message could be slightly confusing.
+             */
             raise_no_loop_found_error(ufunc, (PyObject **)op_dtypes);
         }
         return NULL;
@@ -467,7 +478,7 @@ call_promoter(PyUFuncObject *ufunc, PyObject *promoter,
         goto finish;
     }
     resolved_method = promote_and_get_ufuncimpl(ufunc,
-            operands, signature, new_op_dtypes, force_legacy_promotion);
+            operands, signature, new_op_dtypes, 0);
 
     Py_LeaveRecursiveCall();
 
@@ -572,42 +583,33 @@ legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
     return 0;
 }
 
-/*
- * Legacy type resolution unfortunately works on the original array objects
- * and we have no choice but to pass them in.
- */
-static int
-legacy_resolve_implementation_info(PyUFuncObject *ufunc,
-        PyArrayObject *const *ops, PyArray_DTypeMeta *signature[],
-        PyArray_DTypeMeta *operation_dtypes[], PyObject **out_info)
+
+NPY_NO_EXPORT PyObject *
+add_and_return_legacy_wrapping_ufunc_loop(PyUFuncObject *ufunc,
+        PyArray_DTypeMeta *operation_dtypes[])
 {
-    if (legacy_promote_using_legacy_type_resolver(ufunc,
-            ops, signature, operation_dtypes) < 0) {
-        return -1;
-    }
-    PyObject *DType_tuple = PyTuple_New(ufunc->nargs);
+    PyObject *DType_tuple = PyArray_TupleFromItems(ufunc->nargs,
+            (PyObject **)operation_dtypes, 0);
     if (DType_tuple == NULL) {
-        return -1;
-    }
-    for (int i = 0; i < ufunc->nargs; i++) {
-        Py_INCREF(operation_dtypes[i]);
-        PyTuple_SET_ITEM(DType_tuple, i, (PyObject *)operation_dtypes[i]);
+        return NULL;
     }
 
     PyArrayMethodObject *method = PyArray_NewLegacyWrappingArrayMethod(
             ufunc, operation_dtypes);
     if (method == NULL) {
         Py_DECREF(DType_tuple);
-        return -1;
+        return NULL;
     }
-    *out_info = PyTuple_Pack(2, DType_tuple, method);
+    PyObject *info = PyTuple_Pack(2, DType_tuple, method);
     Py_DECREF(DType_tuple);
     Py_DECREF(method);
-    if (*out_info == NULL) {
-        return -1;
+
+    if (add_ufunc_loop(ufunc, info, 0) < 0) {
+        Py_DECREF(info);
+        return NULL;
     }
 
-    return 0;
+    return info;
 }
 
 
@@ -659,51 +661,89 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
      */
     PyObject *info = PyArrayIdentityHash_GetItem(ufunc->_dispatch_cache,
                 (PyObject **)op_dtypes);
-
     if (info == NULL) {
         if (resolve_implementation_info(ufunc, op_dtypes, &info) < 0) {
             return NULL;
         }
-        if (info == NULL) {
-            /*
-             * One last try by using the legacy type resolver (this may
-             * succeed even if the final resolution is invalid because there
-             * is no matching loop.
-             */
-            if (legacy_resolve_implementation_info(ufunc,
-                    ops, signature, op_dtypes, &info) < 0) {
-                return NULL;
-            }
-            if (add_ufunc_loop(ufunc, info, 1) < 0) {
+        if (info != NULL) {
+            if (PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
+                    (PyObject **)op_dtypes, info, 0) < 0) {
                 return NULL;
             }
         }
-        /* Add to cache (in some legacy cases, we may add twice) */
-        PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
-                (PyObject **)op_dtypes, info, 1);
     }
 
-    if (!PyObject_TypeCheck(PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
-        return call_promoter(ufunc, PyTuple_GET_ITEM(info, 1),
-                op_dtypes, signature, ops, force_legacy_promotion);
+    if (info == NULL ||
+            !PyObject_TypeCheck(PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
+        /*
+         * We have to use promotion. If `info == NULL`, only the legacy
+         * promotion is still left to try. Otherwise, we first need to try
+         * normal promotion.
+         */
+        if (info != NULL) {
+            PyObject *promoter = PyTuple_GET_ITEM(info, 1);
+
+            PyArrayMethodObject *method = call_promoter_and_recurse(ufunc,
+                    promoter, op_dtypes, signature, ops, force_legacy_promotion);
+            if (method != NULL || PyErr_Occurred()) {
+                return method;
+            }
+        }
+
+        /*
+         * Using promotion failed, this should normally be an error.
+         * However, we need to give the legacy implementation a chance here.
+         * (it will modify `op_dtypes`).
+         */
+        if (ufunc->ntypes == 0 || ufunc->type_resolver == NULL) {
+            /* Not a "legacy" ufunc, so we can just return (nothing found) */
+            return NULL;
+        }
+        if (legacy_promote_using_legacy_type_resolver(ufunc,
+                ops, signature, op_dtypes) < 0) {
+            return NULL;
+        }
+        /* Try the cache one more time now */
+        info = PyArrayIdentityHash_GetItem(ufunc->_dispatch_cache,
+                (PyObject **)op_dtypes);
+        if (info == NULL) {
+            /*
+             * The loop is probably added to the ufunc, just not cached,
+             * but simply call but uncached should be very rare...
+             */
+            info = add_and_return_legacy_wrapping_ufunc_loop(ufunc, op_dtypes);
+            if (info == NULL) {
+                return NULL;
+            }
+            /* Cache this for the next time. */
+            if (PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
+                    (PyObject **)op_dtypes, info, 0) < 0) {
+                return NULL;
+            }
+        }
+        else if (!PyObject_TypeCheck(
+                PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
+            PyErr_SetString(PyExc_RuntimeError,
+                    "Signature resolved by a legacy DType resolver did "
+                    "not point to a loop indicating an error in the ufunc. "
+                    "Please notify the ufunc authors and/or NumPy developers.");
+            return NULL;
+        }
     }
 
-    /* Fill in the signature with the actual signature we are working on */
+    PyArrayMethodObject *method = (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
+
+    /* Fill in the signature with the signature we are working on */
     PyObject *all_dtypes = PyTuple_GET_ITEM(info, 0);
     for (int i = 0; i < nargs; i++) {
         if (signature[i] == NULL) {
             signature[i] = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(all_dtypes, i);
             Py_INCREF(signature[i]);
         }
-        else if (NPY_UNLIKELY(
-                (PyObject *)signature[i] != PyTuple_GET_ITEM(all_dtypes, i))) {
-            /* Note, this check is only really necessary for promotions! */
-            PyErr_Format(PyExc_TypeError,
-                    "No loop with compatible signature found.  Best loop uses "
-                    "%S for operand %d, but %S was requested.",
-                    PyTuple_GET_ITEM(all_dtypes, i), i, (PyObject *)signature[i]);
-            return NULL;
+        else {
+            assert((PyObject *)signature[i] == PyTuple_GET_ITEM(all_dtypes, i));
         }
     }
-    return (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
+
+    return method;
 }
