@@ -16,5 +16,8 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
         PyArrayObject *const ops[], PyArray_DTypeMeta *signature[],
         PyArray_DTypeMeta *op_dtypes[], int force_legacy_promotion);
 
+NPY_NO_EXPORT PyObject *
+add_and_return_legacy_wrapping_ufunc_loop(PyUFuncObject *ufunc,
+        PyArray_DTypeMeta *operation_dtypes[], int ignore_duplicate);
 
 #endif  /*_NPY_DISPATCHING_H */

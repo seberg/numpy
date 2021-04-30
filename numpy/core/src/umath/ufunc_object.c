@@ -4849,6 +4849,10 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
             operands, signature,
             borrowed_operand_DTypes, force_legacy_promotion);
     if (ufuncimpl == NULL) {
+        if (!PyErr_Occurred()) {
+            raise_no_loop_found_error(
+                    ufunc, (PyObject **)borrowed_operand_DTypes);
+        }
         goto fail;
     }
 
@@ -5228,6 +5232,28 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
     if (signature != NULL) {
         if (_parse_signature(ufunc, signature) != 0) {
             Py_DECREF(ufunc);
+            return NULL;
+        }
+    }
+
+    char *curr_types = ufunc->types;
+    for (int i = 0; i < ntypes; i += nin + nout) {
+        /*
+         * Add all legacy wrapping loops here. This is normally necessary, but
+         * makes sense.  It could also help/be needed to avoid issues with
+         * ambiguous loops such as: `OO->?` and `OO->O` where in theory the
+         * wrong loop could be picked if only the second was added.
+         */
+        PyObject *info;
+        PyArray_DTypeMeta *op_dtypes[NPY_MAXARGS];
+        for (int arg = 0; arg < nin + nout; arg++) {
+            op_dtypes[arg] = PyArray_DTypeFromTypeNum(curr_types[arg]);
+            Py_DECREF(op_dtypes[arg]);  /* That DType can't be deleted... */
+        }
+        curr_types += nin + nout;
+
+        info = add_and_return_legacy_wrapping_ufunc_loop(ufunc, op_dtypes, 1);
+        if (info == NULL) {
             return NULL;
         }
     }

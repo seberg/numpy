@@ -16,7 +16,7 @@
 #include "dtypemeta.h"
 #include "npy_hashtable.h"
 #include "legacy_array_method.h"
-#include "ufunc_type_resolution.h"  /* for `raise_no_loop_found_error` */
+#include "ufunc_object.h"
 
 
 static int
@@ -46,12 +46,11 @@ add_ufunc_loop(PyUFuncObject *ufunc, PyObject *info, int ignore_duplicate)
             continue;
         }
         if (ignore_duplicate) {
-            /* The loop already exists, just ignore it. */
             return 0;
         }
         PyErr_Format(PyExc_TypeError,
-                "A loop/promoter has already been registered for %R",
-                DType_tuple);
+                "A loop/promoter has already been registered with '%s' for %R",
+                ufunc_get_name_cstr(ufunc), DType_tuple);
         return -1;
     }
 
@@ -460,13 +459,6 @@ call_promoter_and_recurse(PyUFuncObject *ufunc, PyObject *promoter,
                 op_dtypes, signature, new_op_dtypes);
     }
     if (promoter_result < 0) {
-        if (!PyErr_Occurred()) {
-            /*
-             * TODO: op_dtypes may not be original (if we recurse) so in rare
-             *       cases the error message could be slightly confusing.
-             */
-            raise_no_loop_found_error(ufunc, (PyObject **)op_dtypes);
-        }
         return NULL;
     }
 
@@ -568,7 +560,7 @@ legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
      * during the type resolution step (which may _also_ calls this!).
      */
     if (ufunc->type_resolver(ufunc,
-            NPY_UNSAFE_CASTING, (PyArrayObject **)ops, type_tuple,
+            NPY_SAFE_CASTING, (PyArrayObject **)ops, type_tuple,
             out_descrs) < 0) {
         Py_XDECREF(type_tuple);
         return -1;
@@ -584,9 +576,13 @@ legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
 }
 
 
+/*
+ * Note, this function returns a BORROWED references to info since it adds
+ * it to the loops.
+ */
 NPY_NO_EXPORT PyObject *
 add_and_return_legacy_wrapping_ufunc_loop(PyUFuncObject *ufunc,
-        PyArray_DTypeMeta *operation_dtypes[])
+        PyArray_DTypeMeta *operation_dtypes[], int ignore_duplicate)
 {
     PyObject *DType_tuple = PyArray_TupleFromItems(ufunc->nargs,
             (PyObject **)operation_dtypes, 0);
@@ -603,8 +599,11 @@ add_and_return_legacy_wrapping_ufunc_loop(PyUFuncObject *ufunc,
     PyObject *info = PyTuple_Pack(2, DType_tuple, method);
     Py_DECREF(DType_tuple);
     Py_DECREF(method);
+    if (info == NULL) {
+        return NULL;
+    }
 
-    if (add_ufunc_loop(ufunc, info, 0) < 0) {
+    if (add_ufunc_loop(ufunc, info, ignore_duplicate) < 0) {
         Py_DECREF(info);
         return NULL;
     }
@@ -695,7 +694,8 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
          * However, we need to give the legacy implementation a chance here.
          * (it will modify `op_dtypes`).
          */
-        if (ufunc->ntypes == 0 || ufunc->type_resolver == NULL) {
+        if ((ufunc->ntypes == 0 && ufunc->userloops == NULL) ||
+                ufunc->type_resolver == NULL) {
             /* Not a "legacy" ufunc, so we can just return (nothing found) */
             return NULL;
         }
@@ -708,10 +708,10 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
                 (PyObject **)op_dtypes);
         if (info == NULL) {
             /*
-             * The loop is probably added to the ufunc, just not cached,
+             * The loop is probably added to the ufunc alraedy, just not cached,
              * but simply call but uncached should be very rare...
              */
-            info = add_and_return_legacy_wrapping_ufunc_loop(ufunc, op_dtypes);
+            info = add_and_return_legacy_wrapping_ufunc_loop(ufunc, op_dtypes, 1);
             if (info == NULL) {
                 return NULL;
             }
