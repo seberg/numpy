@@ -4352,10 +4352,15 @@ _get_fixed_signature(PyUFuncObject *ufunc,
                     "Cannot provide `dtype` when a ufunc has no outputs");
             return -1;
         }
-        signature[nin] = _get_dtype(dtype_obj);
-        if (signature[nin] == NULL) {
+        PyArray_DTypeMeta *dtype = _get_dtype(dtype_obj);
+        if (dtype == NULL) {
             return -1;
         }
+        for (int i = nin; i < nop; i++) {
+            Py_INCREF(dtype);
+            signature[i] = dtype;
+        }
+        Py_DECREF(dtype);
         return 0;
     }
 
