@@ -17,6 +17,7 @@
 #include "npy_hashtable.h"
 #include "legacy_array_method.h"
 #include "ufunc_object.h"
+#include "ufunc_type_resolution.h"
 
 
 static int
@@ -560,7 +561,7 @@ legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
      * during the type resolution step (which may _also_ calls this!).
      */
     if (ufunc->type_resolver(ufunc,
-            NPY_SAFE_CASTING, (PyArrayObject **)ops, type_tuple,
+            NPY_UNSAFE_CASTING, (PyArrayObject **)ops, type_tuple,
             out_descrs) < 0) {
         Py_XDECREF(type_tuple);
         return -1;
@@ -571,6 +572,16 @@ legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
         operation_DTypes[i] = NPY_DTYPE(out_descrs[i]);
         Py_INCREF(operation_DTypes[i]);
         Py_DECREF(out_descrs[i]);
+    }
+    if (ufunc->type_resolver == &PyUFunc_SimpleBinaryComparisonTypeResolver) {
+        /*
+         * In this one case, the deprecation means that we actually override
+         * the signature.
+         */
+        for (int i = 0; i < nargs; i++) {
+            Py_INCREF(operation_DTypes[i]);
+            Py_XSETREF(signature[i], operation_DTypes[i]);
+        }
     }
     return 0;
 }

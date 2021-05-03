@@ -359,10 +359,16 @@ PyUFunc_SimpleBinaryComparisonTypeResolver(PyUFuncObject *ufunc,
     else {
         PyArray_Descr *descr;
         /*
+         * DEPRECATED 2021-03, NumPy 1.20
+         *
          * If the type tuple was originally a single element (probably),
          * issue a deprecation warning, but otherwise accept it.  Since the
          * result dtype is always boolean, this is not actually valid unless it
          * is `object` (but if there is an object input we already deferred).
+         *
+         * TODO: One this deprecation is gone, the special case for
+         *       `PyUFunc_SimpleBinaryComparisonTypeResolver` in dispatching.c
+         *       can be removed.
          */
         if (PyTuple_Check(type_tup) && PyTuple_GET_SIZE(type_tup) == 3 &&
                 PyTuple_GET_ITEM(type_tup, 0) == Py_None &&
