@@ -4592,7 +4592,7 @@ replace_with_wrapped_result_and_return(PyUFuncObject *ufunc,
         context.out_i = i;
 
         retobj[i] = _apply_array_wrap(wraparr[i], result_arrays[i], &context);
-        result_arrays[i] = 0;  /* Array was DECREF's and (probably) wrapped */
+        result_arrays[i] = NULL;  /* Was DECREF'ed and (probably) wrapped */
         if (retobj[i] == NULL) {
             goto fail;
         }
@@ -4602,7 +4602,14 @@ replace_with_wrapped_result_and_return(PyUFuncObject *ufunc,
         return retobj[0];
     }
     else {
-        return PyArray_TupleFromItems(ufunc->nout, retobj, 0);
+        PyObject *result = PyTuple_New(ufunc->nout);
+        if (result == NULL) {
+            return NULL;
+        }
+        for (int i = 0; i < ufunc->nout; i++) {
+            PyTuple_SET_ITEM(result, i, retobj[i]);
+        }
+        return result;
     }
 
   fail:
