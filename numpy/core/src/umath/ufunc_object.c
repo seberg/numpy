@@ -4890,21 +4890,17 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     }
 
     /*
-     * Clear all variables which are not needed any further (set to NULL,
-     * since we still use goto error here).
+     * Clear all variables which are not needed any further.
+     * (From here on, we cannot `goto fail` any more.)
      */
     Py_XDECREF(wheremask);
-    wheremask = NULL;
     for (int i = 0; i < nop; i++) {
         Py_DECREF(operation_descrs[i]);
-        operation_descrs[i] = NULL;
         if (i < nin) {
             Py_DECREF(operands[i]);
-            operands[i] = NULL;
         }
         else {
             Py_XDECREF(output_array_prepare[i-nin]);
-            output_array_prepare[i-nin] = NULL;
         }
     }
     /* The following steals the references to the outputs: */
@@ -4923,7 +4919,7 @@ fail:
         Py_XDECREF(operands[i]);
         Py_XDECREF(operation_descrs[i]);
         if (i < nout) {
-            Py_XDECREF(output_array_prepare);
+            Py_XDECREF(output_array_prepare[i]);
         }
     }
     return NULL;
