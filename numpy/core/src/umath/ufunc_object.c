@@ -972,7 +972,7 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
         }
     }
     if (all_legacy && (!all_scalar && any_scalar)) {
-        *force_legacy_promotion = should_use_min_scalar(nin, out_op, NULL, NULL);
+        *force_legacy_promotion = should_use_min_scalar(nin, out_op, 0, NULL);
         /*
          * TODO: if this is False, we end up in a "very slow" path that should
          *       be avoided.  This makes `int_arr + 0.` ~40% slower.
@@ -4586,7 +4586,6 @@ replace_with_wrapped_result_and_return(PyUFuncObject *ufunc,
     /* wrap outputs */
     for (int i = 0; i < ufunc->nout; i++) {
         _ufunc_context context;
-        PyObject *wrapped;
 
         context.ufunc = ufunc;
         context.args = full_args;

@@ -475,7 +475,7 @@ call_promoter_and_recurse(PyUFuncObject *ufunc, PyObject *promoter,
      * Do a recursive call, the promotion function has to ensure that the
      * new tuple is strictly more precise (thus guaranteeing eventual finishing)
      */
-    if (Py_EnterRecursiveCall(" during ufunc promotion.") < 0) {
+    if (Py_EnterRecursiveCall(" during ufunc promotion.") != 0) {
         goto finish;
     }
     resolved_info = promote_and_get_info_and_ufuncimpl(ufunc,
@@ -725,7 +725,7 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
                 PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
             PyErr_SetString(PyExc_RuntimeError,
                     "Signature resolved by a legacy DType resolver did "
-                    "not point to a loop indicating an error in the ufunc. "
+                    "not point to a loop, indicating an error in the ufunc. "
                     "Please notify the ufunc authors and/or NumPy developers.");
             return NULL;
         }
@@ -785,7 +785,7 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
 
     PyArrayMethodObject *method = (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
 
-    /* Fill in the signature with the signature we are working on */
+    /* Fill in the signature with the signature that we will be working with */
     PyObject *all_dtypes = PyTuple_GET_ITEM(info, 0);
     for (int i = 0; i < nargs; i++) {
         if (signature[i] == NULL) {
