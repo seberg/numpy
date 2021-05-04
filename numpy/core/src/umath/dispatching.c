@@ -106,12 +106,7 @@ resolve_implementation_info(PyUFuncObject *ufunc,
          * TODO: If we have abstract, there is no point in checking
          *       a resolved ArrayMethod (which is always concrete)
          */
-#if NPY_UF_DBG_TRACING
-        printf("Check if the resolver/loop matches:\n");
-        PyObject_Print(dtype_tuple, stdout, 0);
-        PyObject_Print(curr_dtypes, stdout, 0);
-        printf("\n");
-#endif
+
         npy_bool matches = NPY_TRUE;
         for (Py_ssize_t i = 0; i < nargs; i++) {
             PyArray_DTypeMeta *given_dtype = op_dtypes[i];
@@ -150,9 +145,6 @@ resolve_implementation_info(PyUFuncObject *ufunc,
             continue;
         }
 
-#if NPY_UF_DBG_TRACING
-        printf("    Found a match!\n");
-#endif
         /* The resolver matches, but we have to check if it is better */
         if (best_dtypes != NULL) {
             int current_best = -1;  /* -1 neither, 0 current best, 1 new */
@@ -308,13 +300,6 @@ resolve_implementation_info(PyUFuncObject *ufunc,
                 current_best = best;
             }
 
-#if NPY_UF_DBG_TRACING
-            printf("Comparison between the two tuples gave %d\n ",
-                   current_best);
-            PyObject_Print(best_dtypes, stdout, 0);
-            PyObject_Print(curr_dtypes, stdout, 0);
-            printf(" in ufunc %s\n", ufunc->name);
-#endif
             if (current_best == -1) {
                 if (unambiguous_equivally_good) {
                     /* unset the best resolver to indicate this */
