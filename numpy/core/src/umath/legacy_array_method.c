@@ -158,7 +158,7 @@ simple_legacy_resolve_descriptors(
  * This function grabs the legacy inner-loop.  If this turns out to be slow
  * we could probably cache it (with some care).
  */
-static int
+NPY_NO_EXPORT int
 get_wrapped_legacy_ufunc_loop(PyArrayMethod_Context *context,
         int aligned, int move_references,
         npy_intp *NPY_UNUSED(strides),

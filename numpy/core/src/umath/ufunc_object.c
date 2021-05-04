@@ -971,7 +971,7 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
             out_borrowed_op_DTypes[i] = &PyArray_PyComplexAbstractDType;
         }
     }
-    if (all_legacy || (!all_scalar && any_scalar)) {
+    if (all_legacy && (!all_scalar && any_scalar)) {
         *force_legacy_promotion = should_use_min_scalar(nin, out_op, NULL, NULL);
         /*
          * TODO: if this is False, we end up in a "very slow" path that should
@@ -5476,6 +5476,8 @@ PyUFunc_RegisterLoopForType(PyUFuncObject *ufunc,
     PyArray_Descr *descr;
     PyUFunc_Loop1d *funcdata;
     PyObject *key, *cobj;
+    PyArray_DTypeMeta *signature[NPY_MAXARGS];
+    PyObject *signature_tuple = NULL;
     int i;
     int *newtypes=NULL;
 
@@ -5504,11 +5506,59 @@ PyUFunc_RegisterLoopForType(PyUFuncObject *ufunc,
     if (arg_types != NULL) {
         for (i = 0; i < ufunc->nargs; i++) {
             newtypes[i] = arg_types[i];
+            signature[i] = PyArray_DTypeFromTypeNum(arg_types[i]);
+            Py_DECREF(signature[i]);  /* DType can't be deleted... */
         }
     }
     else {
         for (i = 0; i < ufunc->nargs; i++) {
             newtypes[i] = usertype;
+            signature[i] = PyArray_DTypeFromTypeNum(usertype);
+            Py_DECREF(signature[i]);  /* DType can't be deleted... */
+        }
+    }
+
+    signature_tuple = PyArray_TupleFromItems(
+            ufunc->nargs, (PyObject **)signature, 0);
+    if (signature_tuple == NULL) {
+        goto fail;
+    }
+    /*
+     * We add the loop to the new list of all loops and promoters.  If the
+     * equivalent loop was already added, skip this.  If a different loop is
+     * added, raise an error.
+     */
+    int add_new_loop = 1;
+    for (Py_ssize_t j = 0; j < PyList_GET_SIZE(ufunc->_loops); j++) {
+        PyObject *item = PyList_GET_ITEM(ufunc->_loops, j);
+        PyObject *existing_tuple = PyTuple_GET_ITEM(item, 0);
+
+        int cmp = PyObject_RichCompareBool(existing_tuple, signature_tuple, Py_EQ);
+        if (cmp < 0) {
+            goto fail;
+        }
+        if (!cmp) {
+            continue;
+        }
+        PyObject *registered = PyTuple_GET_ITEM(item, 1);
+        if (!PyObject_TypeCheck(registered, &PyArrayMethod_Type) || (
+                (PyArrayMethodObject *)registered)->get_strided_loop !=
+                        &get_wrapped_legacy_ufunc_loop) {
+            PyErr_Format(PyExc_TypeError,
+                    "A non-compatible loop was already registered for "
+                    "ufunc %s and DTypes %S.",
+                    ufunc_get_name_cstr(ufunc), signature_tuple);
+            goto fail;
+        }
+        /* The loop was already added */
+        add_new_loop = 0;
+        break;
+    }
+    if (add_new_loop) {
+        PyObject *info = add_and_return_legacy_wrapping_ufunc_loop(
+                ufunc, signature, 0);
+        if (info == NULL) {
+            goto fail;
         }
     }
 
@@ -5580,10 +5630,12 @@ PyUFunc_RegisterLoopForType(PyUFuncObject *ufunc,
         }
     }
     Py_DECREF(key);
+    Py_DECREF(signature_tuple);
     return 0;
 
  fail:
     Py_DECREF(key);
+    Py_XDECREF(signature_tuple);
     PyArray_free(funcdata);
     PyArray_free(newtypes);
     if (!PyErr_Occurred()) PyErr_NoMemory();
