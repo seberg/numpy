@@ -5656,8 +5656,10 @@ ufunc_dealloc(PyUFuncObject *ufunc)
     if (ufunc->identity == PyUFunc_IdentityValue) {
         Py_DECREF(ufunc->identity_value);
     }
-    if (ufunc->obj != NULL) {
-        Py_DECREF(ufunc->obj);
+    Py_XDECREF(ufunc->obj);
+    Py_XDECREF(ufunc->_loops);
+    if (ufunc->_dispatch_cache != NULL) {
+        PyArrayIdentityHash_Dealloc(ufunc->_dispatch_cache);
     }
     PyObject_GC_Del(ufunc);
 }
