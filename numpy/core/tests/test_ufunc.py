@@ -1699,9 +1699,17 @@ class TestUfunc:
         target = np.array([0, 2, 4], dtype=_rational_tests.rational)
         assert_equal(result, target)
 
-        # no output type should raise TypeError
+        # The new resolution means that we can (usually) find custom loops
+        # as long as they match exactly:
+        result = _rational_tests.test_add(a, b)
+        assert_equal(result, target)
+
+        # But since we use the old type resolver, this may not work
+        # for dtype variations unless the output dtype is given:
+        result = _rational_tests.test_add(a, b.astype(np.uint16), out=c)
+        assert_equal(result, target)
         with assert_raises(TypeError):
-            _rational_tests.test_add(a, b)
+            _rational_tests.test_add(a, b.astype(np.uint16))
 
     def test_operand_flags(self):
         a = np.arange(16, dtype='l').reshape(4, 4)

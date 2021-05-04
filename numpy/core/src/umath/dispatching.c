@@ -551,7 +551,7 @@ _make_new_typetup(
 static int
 legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
         PyArrayObject *const *ops, PyArray_DTypeMeta *signature[],
-        PyArray_DTypeMeta *operation_DTypes[])
+        PyArray_DTypeMeta *operation_DTypes[], int *out_cacheable)
 {
     int nargs = ufunc->nargs;
     PyArray_Descr *out_descrs[NPY_MAXARGS];
@@ -587,8 +587,11 @@ legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
          * the signature.
          */
         for (int i = 0; i < nargs; i++) {
-            Py_INCREF(operation_DTypes[i]);
-            Py_XSETREF(signature[i], operation_DTypes[i]);
+            if (signature[i] != NULL && signature[i] != operation_DTypes[i]) {
+                Py_INCREF(operation_DTypes[i]);
+                Py_SETREF(signature[i], operation_DTypes[i]);
+                *out_cacheable = 0;
+            }
         }
     }
     return 0;
@@ -690,8 +693,9 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
             return NULL;
         }
         PyArray_DTypeMeta *new_op_dtypes[NPY_MAXARGS];
+        int cacheable = 1;  /* TODO: only used for comparison deprecation. */
         if (legacy_promote_using_legacy_type_resolver(ufunc,
-                ops, signature, new_op_dtypes) < 0) {
+                ops, signature, new_op_dtypes, &cacheable) < 0) {
             return NULL;
         }
         /* Try the cache one more time now */
@@ -712,7 +716,7 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
                     return NULL;
                 }
             }
-            if (PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
+            if (cacheable && PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
                     (PyObject **)op_dtypes, info, 0) < 0) {
                 return NULL;
             }
@@ -765,8 +769,9 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
          * resolver once up-front to get the "actual" loop dtypes.
          * After this (additional) promotion, we can even use normal caching.
          */
+        int cacheable = 1;  /* unused, as we modify the original `op_dtypes` */
         if (legacy_promote_using_legacy_type_resolver(ufunc,
-                ops, signature, op_dtypes) < 0) {
+                ops, signature, op_dtypes, &cacheable) < 0) {
             return NULL;
         }
     }
