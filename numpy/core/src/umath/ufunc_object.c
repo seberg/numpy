@@ -1265,6 +1265,12 @@ try_trivial_single_output_loop(PyArrayMethod_Context *context,
                 return -2;
             }
         }
+        /* Check self-overlap (non 1-D are contiguous, perfect overlap is OK) */
+        if (operation_ndim == 1 &&
+                PyArray_STRIDES(op[nin])[0] < PyArray_ITEMSIZE(op[nin]) &&
+                PyArray_STRIDES(op[nin])[0] != 0) {
+            return -2;
+        }
     }
 
     /* Call the __prepare_array__ if necessary */
