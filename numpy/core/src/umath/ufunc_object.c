@@ -1047,6 +1047,8 @@ check_for_trivial_loop(PyUFuncObject *ufunc,
         if (op[i] == NULL) {
             continue;
         }
+        int must_copy = !PyArray_ISALIGNED(op[i]);
+
         if (dtypes[i] != PyArray_DESCR(op[i])) {
             NPY_CASTING safety = PyArray_GetCastSafety(
                     PyArray_DESCR(op[i]), dtypes[i], NULL);
@@ -1054,31 +1056,34 @@ check_for_trivial_loop(PyUFuncObject *ufunc,
                 /* A proper error during a cast check should be rare */
                 return -1;
             }
-            if (casting != NPY_NO_CASTING || !PyArray_ISALIGNED(op[i])) {
-                /*
-                 * If op[j] is a scalar or small one dimensional
-                 * array input, make a copy to keep the opportunity
-                 * for a trivial loop.
-                 */
+            if (casting != NPY_NO_CASTING) {
+                must_copy = 1;
                 if (PyArray_MinCastSafety(safety, casting) != casting) {
                     return 0;  /* the cast is not safe enough */
                 }
-                if (i < nin && (PyArray_NDIM(op[i]) == 0 || (
-                            PyArray_NDIM(op[i]) == 1 &&
-                            PyArray_DIM(op[i], 0) <= buffersize))) {
-                    PyArrayObject *tmp;
-                    Py_INCREF(dtypes[i]);
-                    tmp = (PyArrayObject *)
-                            PyArray_CastToType(op[i], dtypes[i], 0);
-                    if (tmp == NULL) {
-                        return -1;
-                    }
-                    Py_DECREF(op[i]);
-                    op[i] = tmp;
+            }
+        }
+        if (must_copy) {
+            /*
+             * If op[j] is a scalar or small one dimensional
+             * array input, make a copy to keep the opportunity
+             * for a trivial loop.  Outputs are not copied here.
+             */
+            if (i < nin && (PyArray_NDIM(op[i]) == 0 || (
+                        PyArray_NDIM(op[i]) == 1 &&
+                        PyArray_DIM(op[i], 0) <= buffersize))) {
+                PyArrayObject *tmp;
+                Py_INCREF(dtypes[i]);
+                tmp = (PyArrayObject *)
+                        PyArray_CastToType(op[i], dtypes[i], 0);
+                if (tmp == NULL) {
+                    return -1;
                 }
-                else {
-                    return 0;
-                }
+                Py_DECREF(op[i]);
+                op[i] = tmp;
+            }
+            else {
+                return 0;
             }
         }
     }
