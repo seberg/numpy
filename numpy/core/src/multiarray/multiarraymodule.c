@@ -4712,6 +4712,10 @@ PyMODINIT_FUNC PyInit__multiarray_umath(void) {
     initialize_casting_tables();
     initialize_numeric_types();
 
+    if (initscalarmath(m) < 0) {
+        goto err;
+    }
+
     if (PyType_Ready(&PyArray_Type) < 0) {
         goto err;
     }
@@ -4889,10 +4893,6 @@ PyMODINIT_FUNC PyInit__multiarray_umath(void) {
     }
 
     if (set_matmul_flags(d) < 0) {
-        goto err;
-    }
-
-    if (initscalarmath(m) < 0) {
         goto err;
     }
 
