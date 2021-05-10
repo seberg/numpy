@@ -48,7 +48,7 @@ static NPY_INLINE PyObject **
 find_item(PyArrayIdentityHash const *tb, PyObject *const *key)
 {
     Py_hash_t hash = identity_list_hash(key, tb->key_len);
-    npy_intp perturb = (npy_intp)hash;
+    npy_uintp perturb = (npy_uintp)hash;
     npy_intp bucket;
     npy_intp mask = tb->size - 1 ;
     PyObject **item;
