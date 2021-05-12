@@ -46,6 +46,7 @@
 
 #include <Python.h>
 #include "ndarraytypes.h"
+#include "ufuncobject.h"
 
 
 /*
@@ -201,6 +202,22 @@ typedef PyObject* __dtypemeta_fromspec(PyArrayDTypeMeta_Spec *dtype_spec);
     ((__dtypemeta_fromspec *)(__experimental_dtype_api_table[1]))
 
 
+/*
+ * *********************************************************************
+ *                            UFUNC API
+ * *********************************************************************
+ */
+
+typedef int __add_loop_fromspec(PyUFuncObject *ufunc, PyArrayMethod_Spec *spec);
+#define PyUFunc_AddLoop_FromSpec \
+    ((__add_loop_fromspec *)(__experimental_dtype_api_table[2]))
+
+typedef int __add_promoter(PyUFuncObject *ufunc,
+        PyObject *dtypes_tuple, PyObject *promoter);
+#define PyUFunc_AddPromoter \
+    ((__add_promoter *)(__experimental_dtype_api_table[3]))
+
+
 
 /*
  * *************************************************************************
@@ -212,7 +229,7 @@ typedef PyObject* __dtypemeta_fromspec(PyArrayDTypeMeta_Spec *dtype_spec);
  * runtime-check this.
  * You must call this function to use the symbols in this file.
  */
-#define __EXPERIMENTAL_DTYPE_VERSION 0
+#define __EXPERIMENTAL_DTYPE_VERSION 1
 
 static int
 import_experimental_dtype_api(int version)

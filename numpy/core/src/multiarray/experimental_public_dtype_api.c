@@ -9,9 +9,11 @@
 #include "dtypemeta.h"
 #include "array_coercion.h"
 #include "convert_datatype.h"
+#include "numpy/ufuncobject.h"
+#include "../umath/dispatching.h"
 
 
-#define EXPERIMENTAL_DTYPE_API_VERSION 0
+#define EXPERIMENTAL_DTYPE_API_VERSION 1
 
 
 #define NPY_DTYPE_PARAMETRIC 1
@@ -307,7 +309,7 @@ PyArrayDTypeMeta_FromSpec(PyArrayDTypeMeta_Spec *spec)
         }
     }
 
-    if (DType->within_dtype_castingimpl == NULL) {
+    if (DType->within_dtype_castingimpl == NULL && !DType->abstract) {
         /*
          * We expect this for now. We should have a default for DType that
          * only support simple copy (and possibly byte-order when assuming that
@@ -325,11 +327,79 @@ PyArrayDTypeMeta_FromSpec(PyArrayDTypeMeta_Spec *spec)
 }
 
 
+static int
+PyUFunc_AddLoop_FromSpec(PyUFuncObject *ufunc,
+        PyArrayMethod_Spec *spec)
+{
+    if (ufunc->nin != spec->nin || ufunc->nout != spec->nout) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "ArrayMethod is not compatible with ufunc, adding loop failed");
+        return -1;
+    }
+    /* In principle we might add more checks here! */
+    PyBoundArrayMethodObject *new = PyArrayMethod_FromSpec_int(spec, 0);
+    if (new == NULL) {
+        return -1;
+    }
+    PyObject *dtypes_tuple = PyArray_TupleFromItems(
+            spec->nin+spec->nout, (PyObject **)new->dtypes, 0);
+    if (dtypes_tuple == NULL) {
+        Py_DECREF(new);
+        return -1;
+    }
+    PyObject *info = PyTuple_Pack(2, dtypes_tuple, new->method);
+    Py_DECREF(dtypes_tuple);
+    Py_DECREF(new);
+    if (info == NULL) {
+        return -1;
+    }
+    int res = PyUFunc_AddLoop(ufunc, info, 0);
+    Py_DECREF(info);
+    return res;
+}
+
+
+static int
+PyUFunc_AddPromoter(PyUFuncObject *ufunc,
+        PyObject *dtypes_tuple, PyObject *promoter)
+{
+    if (!PyCallable_Check(promoter)) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "Expecting the promoter to be a callable function (currently)");
+        return -1;
+    }
+    if (!PyTuple_CheckExact(dtypes_tuple) ||
+            PyTuple_GET_SIZE(dtypes_tuple) != (ufunc->nargs)) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "The dtypes tuple must be an exact tuple with length of "
+                "ufunc operands");
+        return -1;
+    }
+    for (int i = 0; i < ufunc->nargs; i++) {
+        PyObject *item = PyTuple_GET_ITEM(dtypes_tuple, i);
+        if (item == Py_None) {
+            continue;
+        }
+        if (PyObject_TypeCheck(item, &PyArrayDTypeMeta_Type)) {
+            continue;
+        }
+        PyErr_SetString(PyExc_RuntimeError,
+                "The DTypes tuple can only contain `None` or dtypes.");
+        return -1;
+    }
+
+    PyObject *info = PyTuple_Pack(2, dtypes_tuple, promoter);
+    int res = PyUFunc_AddLoop(ufunc, info, 0);
+    Py_DECREF(info);
+    return res;
+}
 
 
 static void *experimental_api_table[] = {
         &PyArrayMethod_FromSpec,
         &PyArrayDTypeMeta_FromSpec,
+        &PyUFunc_AddLoop_FromSpec,
+        &PyUFunc_AddPromoter,
         NULL,
 };
 
