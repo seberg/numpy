@@ -671,11 +671,22 @@ def select(condlist, choicelist, default=0):
         raise ValueError("select with an empty condition list is not possible")
 
     choicelist = [np.asarray(choice) for choice in choicelist]
-    choicelist.append(np.asarray(default))
+
+    try:
+        intermediate_dtype = np.result_type(*choicelist)
+    except TypeError as e:
+        msg = f'Choicelist elements do not have a common dtype: {e}'
+        raise TypeError(msg) from None
+    default_array = np.asarray(default)
+    choicelist.append(default_array)
 
     # need to get the result type before broadcasting for correct scalar
     # behaviour
-    dtype = np.result_type(*choicelist)
+    try:
+        dtype = np.result_type(intermediate_dtype, default_array)
+    except TypeError as e:
+        msg = f'Choicelists and default value do not have a common dtype: {e}'
+        raise TypeError(msg) from None
 
     # Convert conditions to arrays and broadcast conditions and choices
     # as the shape is needed for the result. Doing it separately optimizes
@@ -3946,11 +3957,10 @@ def _quantile_is_valid(q):
     # avoid expensive reductions, relevant for arrays with < O(1000) elements
     if q.ndim == 1 and q.size < 10:
         for i in range(q.size):
-            if q[i] < 0.0 or q[i] > 1.0:
+            if not (0.0 <= q[i] <= 1.0):
                 return False
     else:
-        # faster than any()
-        if np.count_nonzero(q < 0.0) or np.count_nonzero(q > 1.0):
+        if not (np.all(0 <= q) and np.all(q <= 1)):
             return False
     return True
 

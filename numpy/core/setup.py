@@ -405,11 +405,6 @@ def configuration(parent_package='',top_path=None):
     from numpy.distutils.system_info import (get_info, blas_opt_info,
                                              lapack_opt_info)
 
-    # Accelerate is buggy, disallow it. See also numpy/linalg/setup.py
-    for opt_order in (blas_opt_info.blas_order, lapack_opt_info.lapack_order):
-        if 'accelerate' in opt_order:
-            opt_order.remove('accelerate')
-
     config = Configuration('core', parent_package, top_path)
     local_dir = config.local_path
     codegen_dir = join(local_dir, 'code_generators')
@@ -739,6 +734,7 @@ def configuration(parent_package='',top_path=None):
             join('src', 'common', 'npy_ctypes.h'),
             join('src', 'common', 'npy_extint128.h'),
             join('src', 'common', 'npy_import.h'),
+            join('src', 'common', 'npy_hashtable.h'),
             join('src', 'common', 'npy_longdouble.h'),
             join('src', 'common', 'templ_common.h.src'),
             join('src', 'common', 'ucsnarrow.h'),
@@ -753,6 +749,7 @@ def configuration(parent_package='',top_path=None):
             join('src', 'common', 'array_assign.c'),
             join('src', 'common', 'mem_overlap.c'),
             join('src', 'common', 'npy_argparse.c'),
+            join('src', 'common', 'npy_hashtable.c'),
             join('src', 'common', 'npy_longdouble.c'),
             join('src', 'common', 'templ_common.h.src'),
             join('src', 'common', 'ucsnarrow.c'),
@@ -933,12 +930,15 @@ def configuration(parent_package='',top_path=None):
             join('src', 'umath', 'loops.c.src'),
             join('src', 'umath', 'loops_unary_fp.dispatch.c.src'),
             join('src', 'umath', 'loops_arithm_fp.dispatch.c.src'),
+            join('src', 'umath', 'loops_arithmetic.dispatch.c.src'),
             join('src', 'umath', 'loops_trigonometric.dispatch.c.src'),
             join('src', 'umath', 'loops_exponent_log.dispatch.c.src'),
             join('src', 'umath', 'matmul.h.src'),
             join('src', 'umath', 'matmul.c.src'),
             join('src', 'umath', 'clip.h.src'),
             join('src', 'umath', 'clip.c.src'),
+            join('src', 'umath', 'dispatching.c'),
+            join('src', 'umath', 'legacy_array_method.c'),
             join('src', 'umath', 'ufunc_object.c'),
             join('src', 'umath', 'extobj.c'),
             join('src', 'umath', 'scalarmath.c.src'),

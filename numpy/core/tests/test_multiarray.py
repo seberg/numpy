@@ -207,7 +207,7 @@ class TestFlags:
             a[2] = 10
             # only warn once
             assert_(len(w) == 1)
-    
+
     @pytest.mark.parametrize(["flag", "flag_value", "writeable"],
             [("writeable", True, True),
              # Delete _warn_on_write after deprecation and simplify
@@ -1445,11 +1445,11 @@ class TestStructured:
         a = np.array([(1,2)], dtype=[('a', 'i4'), ('b', 'i4')])
         a[['a', 'b']] = a[['b', 'a']]
         assert_equal(a[0].item(), (2,1))
-    
+
     def test_scalar_assignment(self):
         with assert_raises(ValueError):
-            arr = np.arange(25).reshape(5, 5)                                                                               
-            arr.itemset(3)  
+            arr = np.arange(25).reshape(5, 5)
+            arr.itemset(3)
 
     def test_structuredscalar_indexing(self):
         # test gh-7262
@@ -5047,6 +5047,24 @@ class TestIO:
                     np.fromfile, self.filename, dtype=self.dtype,
                     sep=",", offset=1)
 
+    @pytest.mark.skipif(IS_PYPY, reason="bug in PyPy's PyNumber_AsSsize_t")
+    def test_fromfile_bad_dup(self):
+        def dup_str(fd):
+            return 'abc'
+
+        def dup_bigint(fd):
+            return 2**68
+
+        old_dup = os.dup
+        try:
+            with open(self.filename, 'wb') as f:
+                self.x.tofile(f)
+                for dup, exc in ((dup_str, TypeError), (dup_bigint, OSError)):
+                    os.dup = dup
+                    assert_raises(exc, np.fromfile, f)
+        finally:
+            os.dup = old_dup
+
     def _check_from(self, s, value, **kw):
         if 'sep' not in kw:
             y = np.frombuffer(s, **kw)
@@ -6194,6 +6212,71 @@ class TestDot:
         assert_equal(np.dot(b, a), res)
         assert_equal(np.dot(b, b), res)
 
+    def test_accelerate_framework_sgemv_fix(self):
+
+        def aligned_array(shape, align, dtype, order='C'):
+            d = dtype(0)
+            N = np.prod(shape)
+            tmp = np.zeros(N * d.nbytes + align, dtype=np.uint8)
+            address = tmp.__array_interface__["data"][0]
+            for offset in range(align):
+                if (address + offset) % align == 0:
+                    break
+            tmp = tmp[offset:offset+N*d.nbytes].view(dtype=dtype)
+            return tmp.reshape(shape, order=order)
+
+        def as_aligned(arr, align, dtype, order='C'):
+            aligned = aligned_array(arr.shape, align, dtype, order)
+            aligned[:] = arr[:]
+            return aligned
+
+        def assert_dot_close(A, X, desired):
+            assert_allclose(np.dot(A, X), desired, rtol=1e-5, atol=1e-7)
+
+        m = aligned_array(100, 15, np.float32)
+        s = aligned_array((100, 100), 15, np.float32)
+        np.dot(s, m)  # this will always segfault if the bug is present
+
+        testdata = itertools.product((15, 32), (10000,), (200, 89), ('C', 'F'))
+        for align, m, n, a_order in testdata:
+            # Calculation in double precision
+            A_d = np.random.rand(m, n)
+            X_d = np.random.rand(n)
+            desired = np.dot(A_d, X_d)
+            # Calculation with aligned single precision
+            A_f = as_aligned(A_d, align, np.float32, order=a_order)
+            X_f = as_aligned(X_d, align, np.float32)
+            assert_dot_close(A_f, X_f, desired)
+            # Strided A rows
+            A_d_2 = A_d[::2]
+            desired = np.dot(A_d_2, X_d)
+            A_f_2 = A_f[::2]
+            assert_dot_close(A_f_2, X_f, desired)
+            # Strided A columns, strided X vector
+            A_d_22 = A_d_2[:, ::2]
+            X_d_2 = X_d[::2]
+            desired = np.dot(A_d_22, X_d_2)
+            A_f_22 = A_f_2[:, ::2]
+            X_f_2 = X_f[::2]
+            assert_dot_close(A_f_22, X_f_2, desired)
+            # Check the strides are as expected
+            if a_order == 'F':
+                assert_equal(A_f_22.strides, (8, 8 * m))
+            else:
+                assert_equal(A_f_22.strides, (8 * n, 8))
+            assert_equal(X_f_2.strides, (8,))
+            # Strides in A rows + cols only
+            X_f_2c = as_aligned(X_f_2, align, np.float32)
+            assert_dot_close(A_f_22, X_f_2c, desired)
+            # Strides just in A cols
+            A_d_12 = A_d[:, ::2]
+            desired = np.dot(A_d_12, X_d_2)
+            A_f_12 = A_f[:, ::2]
+            assert_dot_close(A_f_12, X_f_2c, desired)
+            # Strides in A cols and X
+            assert_dot_close(A_f_12, X_f_2, desired)
+
+
 
 class MatmulCommon:
     """Common tests for '@' operator and numpy.matmul.
@@ -6446,6 +6529,16 @@ class TestMatmul(MatmulCommon):
             c = c.astype(tgt.dtype)
         assert_array_equal(c, tgt)
 
+    def test_empty_out(self):
+        # Check that the output cannot be broadcast, so that it cannot be
+        # size zero when the outer dimensions (iterator size) has size zero.
+        arr = np.ones((0, 1, 1))
+        out = np.ones((1, 1, 1))
+        assert self.matmul(arr, arr).shape == (0, 1, 1)
+
+        with pytest.raises(ValueError, match=r"non-broadcastable"):
+            self.matmul(arr, arr, out=out)
+
     def test_out_contiguous(self):
         a = np.ones((5, 2), dtype=float)
         b = np.array([[1, 3], [5, 7]], dtype=float)
@@ -6593,7 +6686,7 @@ class TestMatmulOperator(MatmulCommon):
     def test_matmul_raises(self):
         assert_raises(TypeError, self.matmul, np.int8(5), np.int8(5))
         assert_raises(TypeError, self.matmul, np.void(b'abc'), np.void(b'abc'))
-        assert_raises(ValueError, self.matmul, np.arange(10), np.void(b'abc'))
+        assert_raises(TypeError, self.matmul, np.arange(10), np.void(b'abc'))
 
 def test_matmul_inplace():
     # It would be nice to support in-place matmul eventually, but for now
@@ -7276,7 +7369,7 @@ class TestNewBufferProtocol:
         self._check_roundtrip(x)
 
     def test_roundtrip_single_types(self):
-        for typ in np.typeDict.values():
+        for typ in np.sctypeDict.values():
             dtype = np.dtype(typ)
 
             if dtype.char in 'Mm':

@@ -3113,13 +3113,19 @@ add_newdoc('numpy.core.multiarray', 'ndarray', ('copy',
         'F' means F-order, 'A' means 'F' if `a` is Fortran contiguous,
         'C' otherwise. 'K' means match the layout of `a` as closely
         as possible. (Note that this function and :func:`numpy.copy` are very
-        similar, but have different default values for their order=
-        arguments.)
+        similar but have different default values for their order=
+        arguments, and this function always passes sub-classes through.)
 
     See also
     --------
-    numpy.copy
+    numpy.copy : Similar function with different default behavior
     numpy.copyto
+
+    Notes
+    -----
+    This function is the preferred method for creating an array copy.  The
+    function :func:`numpy.copy` is similar, but it defaults to using order 'K',
+    and will not pass sub-classes through by default.
 
     Examples
     --------
@@ -3930,7 +3936,7 @@ add_newdoc('numpy.core.multiarray', 'ndarray', ('sort',
         actual implementation will vary with datatype. The 'mergesort' option
         is retained for backwards compatibility.
 
-        .. versionchanged:: 1.15.0.
+        .. versionchanged:: 1.15.0
            The 'stable' option was added.
 
     order : str or list of str, optional
