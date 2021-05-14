@@ -17,9 +17,21 @@ typedef enum {
      * setup/check. No function should set error flags and ignore them
      * since it would interfere with chaining operations (e.g. casting).
      */
+    /* TODO: Change this into a positive flag */
     NPY_METH_NO_FLOATINGPOINT_ERRORS = 1 << 2,
     /* Whether the method supports unaligned access (not runtime) */
     NPY_METH_SUPPORTS_UNALIGNED = 1 << 3,
+    /*
+     * Private flag for now for *logic* functions.  The logical functions
+     * `logical_or` and `logical_and` can always cast the inputs to booleans
+     * "safely" (because that is how the cast to bool is defined).
+     * @seberg: I am not sure this is the best way to handle this, so its
+     * private for now (also it is very limited anyway).
+     * There is one "exception". NA aware dtypes cannot cast to bool
+     * (hopefully), so the `??->?` loop should error even with this flag.
+     * But a second NA fallback loop will be necessary.
+     */
+    _NPY_METH_FORCE_CAST_INPUTS = 1 << 17,
 
     /* All flags which can change at runtime */
     NPY_METH_RUNTIME_FLAGS = (
@@ -158,17 +170,16 @@ npy_default_get_strided_loop(
         PyArrayMethod_StridedLoop **out_loop, NpyAuxData **out_transferdata,
         NPY_ARRAYMETHOD_FLAGS *flags);
 
-/*
- * TODO: This function will not rely on the current ufunc code after the
- *       ufunc refactor.
- */
-#include "numpy/ufuncobject.h"
+
 NPY_NO_EXPORT int
-PyUFunc_DefaultMaskedInnerLoopSelector(PyUFuncObject *ufunc,
-        PyArray_Descr **dtypes,
-        PyUFuncGenericFunction *out_innerloop,
-        NpyAuxData **out_innerloopdata,
-        int *out_needs_api);
+PyArrayMethod_GetMaskedStridedLoop(
+        PyArrayMethod_Context *context,
+        int aligned,
+        npy_intp *fixed_strides,
+        PyArrayMethod_StridedLoop **out_loop,
+        NpyAuxData **out_transferdata,
+        NPY_ARRAYMETHOD_FLAGS *flags);
+
 
 /*
  * TODO: This function is the internal version, and its error paths may

@@ -164,8 +164,9 @@ class TestUfuncGenericLoops:
                 except AttributeError:
                     return lambda: getattr(np.core.umath, attr)(val)
 
-        num_arr = np.array([val], dtype=np.float64)
-        obj_arr = np.array([MyFloat(val)], dtype="O")
+        # Use 0-D arrays, to ensure the same element call
+        num_arr = np.array(val, dtype=np.float64)
+        obj_arr = np.array(MyFloat(val), dtype="O")
 
         with np.errstate(all="raise"):
             try:
@@ -1699,9 +1700,17 @@ class TestUfunc:
         target = np.array([0, 2, 4], dtype=_rational_tests.rational)
         assert_equal(result, target)
 
-        # no output type should raise TypeError
+        # The new resolution means that we can (usually) find custom loops
+        # as long as they match exactly:
+        result = _rational_tests.test_add(a, b)
+        assert_equal(result, target)
+
+        # But since we use the old type resolver, this may not work
+        # for dtype variations unless the output dtype is given:
+        result = _rational_tests.test_add(a, b.astype(np.uint16), out=c)
+        assert_equal(result, target)
         with assert_raises(TypeError):
-            _rational_tests.test_add(a, b)
+            _rational_tests.test_add(a, b.astype(np.uint16))
 
     def test_operand_flags(self):
         a = np.arange(16, dtype='l').reshape(4, 4)
@@ -2017,8 +2026,7 @@ class TestUfunc:
             np.true_divide, np.floor_divide, np.bitwise_and, np.bitwise_or,
             np.bitwise_xor, np.left_shift, np.right_shift, np.fmax,
             np.fmin, np.fmod, np.hypot, np.logaddexp, np.logaddexp2,
-            np.logical_and, np.logical_or, np.logical_xor, np.maximum,
-            np.minimum, np.mod,
+            np.maximum, np.minimum, np.mod,
             np.greater, np.greater_equal, np.less, np.less_equal,
             np.equal, np.not_equal]
 
@@ -2028,6 +2036,15 @@ class TestUfunc:
         for f in binary_funcs:
             assert_raises(TypeError, f, a, b)
             assert_raises(TypeError, f, c, a)
+
+    @pytest.mark.parametrize("ufunc",
+            [np.logical_and, np.logical_or, np.logical_xor])
+    def test_logical_ufuncs_support_anything(self, ufunc):
+        # The logical ufuncs support even input that can't be promoted:
+        a = np.array('1')
+        c = np.array([1., 2.])
+        assert_array_equal(ufunc(a, c), ufunc([True, True], True))
+        assert ufunc.reduce(a) == True
 
     def test_reduce_noncontig_output(self):
         # Check that reduction deals with non-contiguous output arrays
@@ -2254,7 +2271,7 @@ def test_reduce_casterrors(offset):
     out = np.array(-1, dtype=np.intp)
 
     count = sys.getrefcount(value)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         # This is an unsafe cast, but we currently always allow that:
         np.add.reduce(arr, dtype=np.intp, out=out)
     assert count == sys.getrefcount(value)
@@ -2263,3 +2280,18 @@ def test_reduce_casterrors(offset):
     # if the error happened immediately.
     # This does not define behaviour, the output is invalid and thus undefined
     assert out[()] < value * offset
+
+
+@pytest.mark.parametrize("method",
+        [np.add.accumulate, np.add.reduce,
+         pytest.param(lambda x: np.add.reduceat(x, [0]), id="reduceat")])
+def test_reducelike_floaterrors(method):
+    # adding inf and -inf creates an invalid float and should give a warning
+    arr = np.array([np.inf, 0, -np.inf])
+    with np.errstate(all="warn"):
+        with pytest.warns(RuntimeWarning, match="invalid value"):
+            method(arr)
+
+    with np.errstate(all="raise"):
+        with pytest.raises(FloatingPointError):
+            method(arr)
