@@ -127,7 +127,7 @@ static int
 resolve_implementation_info(PyUFuncObject *ufunc,
         PyArray_DTypeMeta *op_dtypes[], PyObject **out_info)
 {
-    int nargs = ufunc->nargs;
+    int nin = ufunc->nin, nargs = ufunc->nargs;
     /* Use new style type resolution has to happen... */
     Py_ssize_t size = PySequence_Length(ufunc->_loops);
     PyObject *best_dtypes = NULL;
@@ -138,7 +138,6 @@ resolve_implementation_info(PyUFuncObject *ufunc,
         PyObject *resolver_info = PySequence_Fast_GET_ITEM(
                 ufunc->_loops, res_idx);
         PyObject *curr_dtypes = PyTuple_GET_ITEM(resolver_info, 0);
-
         /*
          * Test if the current resolver matches, it could make sense to
          * reorder these checks to avoid the IsSubclass check as much as
@@ -156,8 +155,8 @@ resolve_implementation_info(PyUFuncObject *ufunc,
             PyArray_DTypeMeta *resolver_dtype = (
                     (PyArray_DTypeMeta *)PyTuple_GET_ITEM(curr_dtypes, i));
             assert((PyObject *)given_dtype != Py_None);
-            if (given_dtype == NULL) {
-                /* Not given, anything matches. */
+            if (given_dtype == NULL && i >= nin) {
+                /* Unspecified out always matches (see below for inputs) */
                 continue;
             }
             if (given_dtype == resolver_dtype) {
@@ -166,6 +165,21 @@ resolve_implementation_info(PyUFuncObject *ufunc,
             if (!resolver_dtype->abstract) {
                 matches = NPY_FALSE;
                 break;
+            }
+            if (given_dtype == NULL) {
+                /*
+                 * If the (input) was not specified, this is a reduce-like
+                 * operation.  Some ufuncs may have non-trivial promotion
+                 * (e.g. add/multiply ensure high precision).
+                 * Continuing here matches promoters: those can deal with that.
+                 * If we allow this path for ArrayMethod, the person
+                 * registering will have it works sense for the ufunc, a
+                 * counter example is `(BoolLike, Bool, Bool)` for `add`.
+                 * It should resolve to an integer result (sum the bools)
+                 * in a reduction. But the ArrayMethod cannot work with that
+                 * (NumPy will prevent it to ensure correctness).
+                 */
+                continue;
             }
             int subclass = PyObject_IsSubclass(
                     (PyObject *)given_dtype, (PyObject *)resolver_dtype);
@@ -696,6 +710,24 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
                     (PyObject **)op_dtypes, info, 0) < 0) {
                 return NULL;
             }
+        }
+        else if (op_dtypes[0] == NULL) {
+            /*
+             * If we have a reduction, fill in the unspecified input/array
+             * assuming it should have the same dtype as the operand input.
+             * Then, try again.
+             * Compared to the legacy path, this will choose different loops
+             * for weird reductions like `np.equal.reduce([1, 2])`:
+             * The `ll->?` will be used instead of `??->?` (the boolean result
+             * is safely upcast to `l` for input).  This actually fixes a bug
+             * since using the `??->?` loop would operate on `[True, True]`.
+             * Where it does not (`logical_and` and `logical_or`) we use a
+             * promoter to pick the "better" loop.
+             */
+            assert(ufunc->nin == 2 && ufunc->nout == 1);
+            op_dtypes[0] = op_dtypes[1];
+            return promote_and_get_info_and_ufuncimpl(ufunc,
+                    ops, signature, op_dtypes);
         }
     }
 

@@ -27,13 +27,13 @@
 #define _MULTIARRAYMODULE
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 
+#include <convert_datatype.h>
 #include "Python.h"
 #include "stddef.h"
 
 #include "npy_config.h"
 #include "npy_pycompat.h"
 #include "npy_argparse.h"
-#include "npy_hashtable.h"
 
 #include "numpy/arrayobject.h"
 #include "numpy/ufuncobject.h"
@@ -42,6 +42,7 @@
 #include "ufunc_type_resolution.h"
 #include "reduction.h"
 #include "mem_overlap.h"
+#include "npy_hashtable.h"
 
 #include "ufunc_object.h"
 #include "override.h"
@@ -104,6 +105,12 @@ _get_wrap_prepare_args(ufunc_full_args full_args) {
 
 static PyObject *
 prepare_input_arguments_for_outer(PyObject *args, PyUFuncObject *ufunc);
+
+static int
+resolve_descriptors(int nop,
+        PyUFuncObject *ufunc, PyArrayMethodObject *ufuncimpl,
+        PyArrayObject *operands[], PyArray_Descr *dtypes[],
+        PyArray_DTypeMeta *signature[], NPY_CASTING casting);
 
 
 /*UFUNC_API*/
@@ -2740,42 +2747,56 @@ get_binary_op_function(PyUFuncObject *ufunc, int *otype,
     return -1;
 }
 
-static int
-reduce_type_resolver(PyUFuncObject *ufunc, PyArrayObject *arr,
-                        PyArray_Descr *odtype, PyArray_Descr **out_dtype)
+
+/*
+ * Promote and resolve a reduction like operation.
+ *
+ * @param ufunc
+ * @param arr The operation array (out was never used)
+ * @param signature The DType signature, which may already be set due to the
+ *        dtype passed in by the user, or the special cases (add, multiply).
+ *        (Contains strong references and may be modified.)
+ * @param enforce_uniform If `1` fully uniform dtypes/descriptors are enforced
+ *        as this is the requirement for accumulate and (currently) reduceat.
+ * @param out_result_descr The descriptor to be used for the result and first
+ *        operand (they are identical in a reduction-like).
+ * @param out_descr The descriptor used for the operand (second one passed).
+ * @returns ufuncimpl The `ArrayMethod` implemention to use. Or NULL if an
+ *          error occurred.
+ */
+static PyArrayMethodObject *
+reducelike_promote_and_resolve(PyUFuncObject *ufunc,
+        PyArrayObject *arr, PyArray_DTypeMeta *signature[3],
+        int enforce_uniform_out,
+        PyArray_Descr **out_result_descr, PyArray_Descr **out_descr)
 {
-    int i, retcode;
-    PyArrayObject *op[3] = {arr, arr, NULL};
-    PyArray_Descr *dtypes[3] = {NULL, NULL, NULL};
-    const char *ufunc_name = ufunc_get_name_cstr(ufunc);
-    PyObject *type_tup = NULL;
-
-    *out_dtype = NULL;
-
+    PyArrayObject *ops[3] = {arr, arr, NULL};
     /*
-     * If odtype is specified, make a type tuple for the type
-     * resolution.
+     * TODO: The first DType is skipped here.  It could be provided by
+     *       `initial` (if passed). But before doing that, we should maybe
+     *       first enforce safe-casting of `initial` first, so that the
+     *       result of `np.add.reduce([1, 2, 3, 4], initial=3.4)` changes
+     *       from an "integer" -> "error/warning" -> "float".
      */
-    if (odtype != NULL) {
-        type_tup = PyTuple_Pack(3, odtype, odtype, Py_None);
-        if (type_tup == NULL) {
-            return -1;
-        }
+    PyArray_DTypeMeta *operation_DTypes[3] = {
+            NULL, NPY_DTYPE(PyArray_DESCR(arr)), NULL};
+
+    PyArray_Descr *descrs[3] = {NULL, NULL, NULL};
+    const char *ufunc_name = ufunc_get_name_cstr(ufunc);
+
+    *out_result_descr = NULL;
+    *out_descr = NULL;
+
+    PyArrayMethodObject *ufuncimpl = promote_and_get_ufuncimpl(ufunc,
+            ops, signature, operation_DTypes, 0);
+    if (ufuncimpl == NULL) {
+        return NULL;
     }
 
-    /* Use the type resolution function to find our loop */
-    retcode = ufunc->type_resolver(
-                        ufunc, NPY_UNSAFE_CASTING,
-                        op, type_tup, dtypes);
-    Py_DECREF(type_tup);
-    if (retcode == -1) {
-        return -1;
-    }
-    else if (retcode == -2) {
-        PyErr_Format(PyExc_RuntimeError,
-                "type resolution returned NotImplemented to "
-                "reduce ufunc %s", ufunc_name);
-        return -1;
+    /* Find the correct descriptors for the operation */
+    if (resolve_descriptors(3, ufunc, ufuncimpl,
+            ops, descrs, signature, NPY_UNSAFE_CASTING) < 0) {
+        return NULL;
     }
 
     /*
@@ -2784,22 +2805,37 @@ reduce_type_resolver(PyUFuncObject *ufunc, PyArrayObject *arr,
      * could be different, and it is the return type on which the
      * reduction occurs.
      */
-    if (!PyArray_EquivTypes(dtypes[0], dtypes[1])) {
-        for (i = 0; i < 3; ++i) {
-            Py_DECREF(dtypes[i]);
+    if (!PyArray_EquivTypes(descrs[0], descrs[1])) {
+        for (int i = 0; i < 3; ++i) {
+            Py_DECREF(descrs[i]);
         }
         PyErr_Format(PyExc_RuntimeError,
                 "could not find a type resolution appropriate for "
-                "reduce ufunc %s", ufunc_name);
-        return -1;
+                "reduce-like ufunc %s", ufunc_name);
+        return NULL;
+    }
+    /*
+     * The first operand and output have to be the same array, so they should
+     * be identical.  However, for `np.logical_or.reduce`, we implicitly
+     * allow including the cast-to-bool.
+     */
+    if (enforce_uniform_out && descrs[0] != descrs[2]) {
+        for (int i = 0; i < 3; ++i) {
+            Py_DECREF(descrs[i]);
+        }
+        PyErr_Format(PyExc_TypeError,
+                "The resolved dtypes are not compatible with an accumulate "
+                "or reduceat loop.");
+        return NULL;
     }
 
-    Py_DECREF(dtypes[0]);
-    Py_DECREF(dtypes[1]);
-    *out_dtype = dtypes[2];
+    *out_descr = descrs[1];
+    *out_result_descr = descrs[2];
+    Py_DECREF(descrs[0]);
 
-    return 0;
+    return ufuncimpl;
 }
+
 
 static int
 reduce_loop(NpyIter *iter, char **dataptrs, npy_intp const *strides,
@@ -2950,8 +2986,6 @@ PyUFunc_Reduce(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
     int iaxes, ndim;
     npy_bool reorderable;
     npy_bool axis_flags[NPY_MAXDIMS];
-    PyArray_Descr *dtype;
-    PyArrayObject *result;
     PyObject *identity;
     const char *ufunc_name = ufunc_get_name_cstr(ufunc);
     /* These parameters come from a TLS global */
@@ -3002,20 +3036,22 @@ PyUFunc_Reduce(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
     }
 
     /* Get the reduction dtype */
-    if (reduce_type_resolver(ufunc, arr, odtype, &dtype) < 0) {
+    PyArray_DTypeMeta *signature[3] = {NULL, NPY_DTYPE(odtype), NULL};
+    PyArray_Descr *op_descr, *result_descr;
+    PyArrayMethodObject *ufuncimpl = reducelike_promote_and_resolve(ufunc,
+            arr, signature, 0, &result_descr, &op_descr);
+    if (ufuncimpl == NULL) {
         Py_DECREF(initial);
         return NULL;
     }
 
-    result = PyUFunc_ReduceWrapper(arr, out, wheremask, dtype, dtype,
-                                   NPY_UNSAFE_CASTING,
-                                   axis_flags, reorderable,
-                                   keepdims,
-                                   initial,
-                                   reduce_loop,
-                                   ufunc, buffersize, ufunc_name, errormask);
+    PyArrayObject *result = PyUFunc_ReduceWrapper(arr,
+            out, wheremask, op_descr, result_descr,
+            NPY_UNSAFE_CASTING, axis_flags, reorderable, keepdims,
+            initial, reduce_loop, ufunc, buffersize, ufunc_name, errormask);
 
-    Py_DECREF(dtype);
+    Py_DECREF(op_descr);
+    Py_DECREF(result_descr);
     Py_DECREF(initial);
     return result;
 }
