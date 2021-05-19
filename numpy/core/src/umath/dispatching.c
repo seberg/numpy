@@ -521,6 +521,20 @@ call_promoter_and_recurse(PyUFuncObject *ufunc, PyObject *promoter,
     if (promoter_result < 0) {
         return NULL;
     }
+    /*
+     * If none of the dtypes changes, we would just recurse infinitly. We
+     * cannot find anything, so abort.
+     */
+    int dtypes_changed = 0;
+    for (int i = 0; i < nargs; i++) {
+        if (new_op_dtypes[i] != op_dtypes[i]) {
+            dtypes_changed = 1;
+            break;
+        }
+    }
+    if (!dtypes_changed) {
+        goto finish;
+    }
 
     /*
      * Do a recursive call, the promotion function has to ensure that the
@@ -714,18 +728,28 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
         else if (op_dtypes[0] == NULL) {
             /*
              * If we have a reduction, fill in the unspecified input/array
-             * assuming it should have the same dtype as the operand input.
-             * Then, try again.
-             * Compared to the legacy path, this will choose different loops
-             * for weird reductions like `np.equal.reduce([1, 2])`:
-             * The `ll->?` will be used instead of `??->?` (the boolean result
-             * is safely upcast to `l` for input).  This actually fixes a bug
-             * since using the `??->?` loop would operate on `[True, True]`.
-             * Where it does not (`logical_and` and `logical_or`) we use a
-             * promoter to pick the "better" loop.
+             * assuming it should have the same dtype as the operand input
+             * (or the output one if given).
+             * Then, try again.  In some cases, this will choose different
+             * paths, such as `ll->?` instead of an `??->?` loop for `np.equal`
+             * when the input is `.l->.` (`.` meaning undefined).  This will
+             * then cause an error.  But cast to `?` would always lose
+             * information, and in many cases important information:
+             *
+             * ```python
+             * from operator import eq
+             * from functools import reduce
+             *
+             * reduce(eq, [1, 2, 3]) != reduce(eq, [True, True, True])
+             * ```
+             *
+             * The special cases being `logical_(or|and)` which can always
+             * cast to boolean ahead of time and still give the right answer
+             * (unsafe cast to bool is fine here).  We special case these at
+             * the time of this comment (NumPy 1.21).
              */
             assert(ufunc->nin == 2 && ufunc->nout == 1);
-            op_dtypes[0] = op_dtypes[1];
+            op_dtypes[0] = op_dtypes[2] != NULL ? op_dtypes[2] : op_dtypes[1];
             return promote_and_get_info_and_ufuncimpl(ufunc,
                     ops, signature, op_dtypes);
         }
@@ -746,6 +770,7 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
             if (info == NULL && PyErr_Occurred()) {
                 return NULL;
             }
+            return info;
         }
 
         /*
@@ -867,4 +892,87 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
     }
 
     return method;
+}
+
+
+
+/*
+ * Special promoter for the logical ufuncs.  The logical ufuncs can always
+ * use the ??->? and still get the correct output (as long as the output
+ * is not supposed to be `object`).
+ */
+static int
+logical_ufunc_promoter(PyUFuncObject *NPY_UNUSED(ufunc),
+        PyArray_DTypeMeta *op_dtypes[], PyArray_DTypeMeta *signature[],
+        PyArray_DTypeMeta *new_op_dtypes[])
+{
+    /* If we find any object at all, we currently force to object */
+    int force_object = 0;
+
+    for (int i = 0; i < 3; i++) {
+        PyArray_DTypeMeta *item;
+        if (signature[i] != NULL) {
+            item = signature[i];
+            Py_INCREF(item);
+            if (item->type_num == NPY_OBJECT) {
+                force_object = 1;
+            }
+        }
+        else {
+            /* Always override to boolean */
+            item = PyArray_DTypeFromTypeNum(NPY_BOOL);
+            if (op_dtypes[i] != NULL && op_dtypes[i]->type_num == NPY_OBJECT) {
+                force_object = 1;
+            }
+        }
+        new_op_dtypes[i] = item;
+    }
+    if (!force_object) {
+        return 0;
+    }
+    /* Actually, we have to use the OBJECT loop after all, set all we can
+     * to object (that might not work out, but just try).
+     *
+     * TODO: Change this to check for `op_dtypes[0] == NULL` to STOP
+     *       returning `object` for `np.logical_and.reduce(obj_arr)`
+     *       which will also affect `np.all` and `np.any`!
+     */
+    for (int i = 0; i < 3; i++) {
+        if (signature[i] != NULL) {
+            continue;
+        }
+        Py_SETREF(new_op_dtypes[i], PyArray_DTypeFromTypeNum(NPY_OBJECT));
+    }
+    return 0;
+}
+
+
+NPY_NO_EXPORT int
+install_logical_ufunc_promoter(PyObject *ufunc)
+{
+    if (PyObject_Type(ufunc) != (PyObject *)&PyUFunc_Type) {
+        PyErr_SetString(PyExc_RuntimeError,
+                "internal numpy array, logical ufunc was not a ufunc?!");
+        return -1;
+    }
+    PyObject *dtype_tuple = PyTuple_Pack(3,
+            &PyArrayDescr_Type, &PyArrayDescr_Type, &PyArrayDescr_Type, NULL);
+    if (dtype_tuple == NULL) {
+        return -1;
+    }
+    PyObject *promoter = PyCapsule_New(&logical_ufunc_promoter,
+            "numpy._ufunc_promoter", NULL);
+    if (promoter == NULL) {
+        Py_DECREF(dtype_tuple);
+        return -1;
+    }
+
+    PyObject *info = PyTuple_Pack(2, dtype_tuple, promoter);
+    Py_DECREF(dtype_tuple);
+    Py_DECREF(promoter);
+    if (info == NULL) {
+        return -1;
+    }
+
+    return add_ufunc_loop((PyUFuncObject *)ufunc, info, 0);
 }

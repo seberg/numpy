@@ -30,6 +30,7 @@
 
 #include "numpy/npy_math.h"
 #include "number.h"
+#include "dispatching.h"
 
 static PyUFuncGenericFunction pyfunc_functions[] = {PyUFunc_On_Om};
 
@@ -304,5 +305,33 @@ int initumath(PyObject *m)
         return -1;
     }
 
+    /*
+     * Set up promoters for logical functions
+     * TODO: This should probably be done at a better place, or even in the
+     *       code generator directly.
+     */
+    s = _PyDict_GetItemStringWithError(d, "logical_and");
+    if (s == NULL) {
+        return -1;
+    }
+    if (install_logical_ufunc_promoter(s) < 0) {
+        return -1;
+    }
+
+    s = _PyDict_GetItemStringWithError(d, "logical_or");
+    if (s == NULL) {
+        return -1;
+    }
+    if (install_logical_ufunc_promoter(s) < 0) {
+        return -1;
+    }
+
+    s = _PyDict_GetItemStringWithError(d, "logical_xor");
+    if (s == NULL) {
+        return -1;
+    }
+    if (install_logical_ufunc_promoter(s) < 0) {
+        return -1;
+    }
     return 0;
 }

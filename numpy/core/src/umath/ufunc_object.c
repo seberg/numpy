@@ -1040,11 +1040,12 @@ fail:
  * -1 if there is an error.
  */
 static int
-check_for_trivial_loop(PyUFuncObject *ufunc,
+check_for_trivial_loop(PyArrayMethodObject *ufuncimpl,
         PyArrayObject **op, PyArray_Descr **dtypes,
         NPY_CASTING casting, npy_intp buffersize)
 {
-    npy_intp i, nin = ufunc->nin, nop = nin + ufunc->nout;
+    int force_cast_input = ufuncimpl->flags & _NPY_METH_FORCE_CAST_INPUTS;
+    npy_intp i, nin = ufuncimpl->nin, nop = nin + ufuncimpl->nout;
 
     for (i = 0; i < nop; ++i) {
         /*
@@ -1065,7 +1066,13 @@ check_for_trivial_loop(PyUFuncObject *ufunc,
             }
             if (casting != NPY_NO_CASTING) {
                 must_copy = 1;
-                if (PyArray_MinCastSafety(safety, casting) != casting) {
+                if (force_cast_input && i < nin) {
+                    /*
+                     * ArrayMethod flagged to ignore casting (logical funcs
+                     * can  force cast to bool)
+                     */
+                }
+                else if (PyArray_MinCastSafety(safety, casting) != casting) {
                     return 0;  /* the cast is not safe enough */
                 }
             }
@@ -1333,6 +1340,30 @@ try_trivial_single_output_loop(PyArrayMethod_Context *context,
 
 
 /*
+ * Check casting: It would be nice to just move this into the iterator
+ * or pass in the full cast information.  But this can special case
+ * the logical functions and prints a better error message.
+ */
+static NPY_INLINE int
+validate_casting(PyArrayMethodObject *method, PyUFuncObject *ufunc,
+        PyArrayObject *ops[], PyArray_Descr *descriptors[],
+        NPY_CASTING casting)
+{
+    if (method->flags & _NPY_METH_FORCE_CAST_INPUTS) {
+        if (PyUFunc_ValidateOutCasting(ufunc, casting, ops, descriptors) < 0) {
+            return -1;
+        }
+    }
+    else {
+        if (PyUFunc_ValidateCasting(ufunc, casting, ops, descriptors) < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+
+/*
  * The ufunc loop implementation for both normal ufunc calls and masked calls
  * when the iterator has to be used.
  *
@@ -1350,11 +1381,8 @@ execute_ufunc_loop(PyArrayMethod_Context *context, int masked,
     int nin = context->method->nin, nout = context->method->nout;
     int nop = nin + nout;
 
-    if (PyUFunc_ValidateCasting(ufunc, casting, op, context->descriptors) < 0) {
-        /*
-         * Would be nice to just move this into the iterator, but this prints
-         * a better error message.
-         */
+    if (validate_casting(context->method,
+            ufunc, op, context->descriptors, casting) < 0) {
         return -1;
     }
 
@@ -2084,11 +2112,8 @@ PyUFunc_GeneralizedFunctionInternal(PyUFuncObject *ufunc,
 
     NPY_UF_DBG_PRINT1("\nEvaluating ufunc %s\n", ufunc_name);
 
-    if (PyUFunc_ValidateCasting(ufunc, casting, op, operation_descrs) < 0) {
-        /*
-         * Would be nice to just move this into the iterator, but this prints
-         * a better error message.
-         */
+    if (validate_casting(ufuncimpl,
+            ufunc, op, operation_descrs, casting) < 0) {
         return -1;
     }
 
@@ -2795,7 +2820,7 @@ reducelike_promote_and_resolve(PyUFuncObject *ufunc,
 
     /* Find the correct descriptors for the operation */
     if (resolve_descriptors(3, ufunc, ufuncimpl,
-            ops, descrs, signature, NPY_UNSAFE_CASTING) < 0) {
+            ops, descrs, signature, NPY_DEFAULT_ASSIGN_CASTING) < 0) {
         return NULL;
     }
 
@@ -2826,6 +2851,10 @@ reducelike_promote_and_resolve(PyUFuncObject *ufunc,
         PyErr_Format(PyExc_TypeError,
                 "The resolved dtypes are not compatible with an accumulate "
                 "or reduceat loop.");
+        return NULL;
+    }
+    if (validate_casting(ufuncimpl,
+            ufunc, ops, descrs, NPY_DEFAULT_ASSIGN_CASTING) < 0) {
         return NULL;
     }
 
@@ -3036,7 +3065,8 @@ PyUFunc_Reduce(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
     }
 
     /* Get the reduction dtype */
-    PyArray_DTypeMeta *signature[3] = {NULL, NPY_DTYPE(odtype), NULL};
+    PyArray_DTypeMeta *signature[3] = {
+            NULL, odtype != NULL ? NPY_DTYPE(odtype) : NULL, NULL};
     PyArray_Descr *op_descr, *result_descr;
     PyArrayMethodObject *ufuncimpl = reducelike_promote_and_resolve(ufunc,
             arr, signature, 0, &result_descr, &op_descr);
@@ -4132,14 +4162,10 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
     }
 
      /*
-      * If out is specified it determines otype
-      * unless otype already specified.
+      * If no dtype is specified and out is not specified, we override the
+      * integer and bool dtype used for add and multiply:
       */
     if (otype == NULL && out != NULL) {
-        otype = PyArray_DESCR(out);
-        Py_INCREF(otype);
-    }
-    if (otype == NULL) {
         /*
          * For integer types --- make sure at least a long
          * is used for add and multiply reduction to avoid overflow
@@ -4199,7 +4225,7 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
         break;
     }
     Py_DECREF(mp);
-    Py_DECREF(otype);
+    Py_XDECREF(otype);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
 
