@@ -2781,36 +2781,39 @@ get_binary_op_function(PyUFuncObject *ufunc, int *otype,
  * @param signature The DType signature, which may already be set due to the
  *        dtype passed in by the user, or the special cases (add, multiply).
  *        (Contains strong references and may be modified.)
- * @param enforce_uniform If `1` fully uniform dtypes/descriptors are enforced
- *        as this is the requirement for accumulate and (currently) reduceat.
- * @param out_result_descr The descriptor to be used for the result and first
- *        operand (they are identical in a reduction-like).
- * @param out_descr The descriptor used for the operand (second one passed).
+ * @param enforce_uniform_args If `1` fully uniform dtypes/descriptors are
+ *        enforced as required for accumulate and (currently) reduceat.
+ * @param out_descrs New references to the resolved descriptors (on success).
+
  * @returns ufuncimpl The `ArrayMethod` implemention to use. Or NULL if an
  *          error occurred.
  */
 static PyArrayMethodObject *
 reducelike_promote_and_resolve(PyUFuncObject *ufunc,
-        PyArrayObject *arr, PyArray_DTypeMeta *signature[3],
-        int enforce_uniform_out,
-        PyArray_Descr **out_result_descr, PyArray_Descr **out_descr)
+        PyArrayObject *arr, PyArrayObject *out,
+        PyArray_DTypeMeta *signature[3],
+        int enforce_uniform_args, PyArray_Descr *out_descrs[3])
 {
+    /*
+     * Note that the `ops` is not realy correct.  But legacy resolution
+     * cannot quite handle the correct ops (e.g. a NULL first item if `out`
+     * is NULL), and it should only matter in very strange cases.
+     */
     PyArrayObject *ops[3] = {arr, arr, NULL};
     /*
-     * TODO: The first DType is skipped here.  It could be provided by
-     *       `initial` (if passed). But before doing that, we should maybe
-     *       first enforce safe-casting of `initial` first, so that the
-     *       result of `np.add.reduce([1, 2, 3, 4], initial=3.4)` changes
-     *       from an "integer" -> "error/warning" -> "float".
+     * TODO: If `out` is not provided, arguably `initial` could define
+     *       the first DType (and maybe also the out one), that way
+     *       `np.add.reduce([1, 2, 3], initial=3.4)` would return a float
+     *       value.  As of 1.20, it returned an integer, so that should
+     *       probably go to an error/warning first.
      */
     PyArray_DTypeMeta *operation_DTypes[3] = {
             NULL, NPY_DTYPE(PyArray_DESCR(arr)), NULL};
 
-    PyArray_Descr *descrs[3] = {NULL, NULL, NULL};
-    const char *ufunc_name = ufunc_get_name_cstr(ufunc);
-
-    *out_result_descr = NULL;
-    *out_descr = NULL;
+    if (out != NULL) {
+        operation_DTypes[0] = NPY_DTYPE(PyArray_DESCR(out));
+        operation_DTypes[2] = operation_DTypes[0];
+    }
 
     PyArrayMethodObject *ufuncimpl = promote_and_get_ufuncimpl(ufunc,
             ops, signature, operation_DTypes, 0);
@@ -2820,85 +2823,60 @@ reducelike_promote_and_resolve(PyUFuncObject *ufunc,
 
     /* Find the correct descriptors for the operation */
     if (resolve_descriptors(3, ufunc, ufuncimpl,
-            ops, descrs, signature, NPY_DEFAULT_ASSIGN_CASTING) < 0) {
+            ops, out_descrs, signature, NPY_DEFAULT_ASSIGN_CASTING) < 0) {
         return NULL;
     }
 
     /*
-     * The first two type should be equivalent. Because of how
-     * reduce has historically behaved in NumPy, the return type
-     * could be different, and it is the return type on which the
-     * reduction occurs.
+     * The first operand and output be the same array, so they should
+     * be identical.  The second argument can be different for reductions,
+     * but is checked to be identical for accumulate and reduceat.
      */
-    if (!PyArray_EquivTypes(descrs[0], descrs[1])) {
-        for (int i = 0; i < 3; ++i) {
-            Py_DECREF(descrs[i]);
-        }
-        PyErr_Format(PyExc_RuntimeError,
-                "could not find a type resolution appropriate for "
-                "reduce-like ufunc %s", ufunc_name);
-        return NULL;
-    }
-    /*
-     * The first operand and output have to be the same array, so they should
-     * be identical.  However, for `np.logical_or.reduce`, we implicitly
-     * allow including the cast-to-bool.
-     */
-    if (enforce_uniform_out && descrs[0] != descrs[2]) {
-        for (int i = 0; i < 3; ++i) {
-            Py_DECREF(descrs[i]);
-        }
+    if (out_descrs[0] != out_descrs[2] || (
+            enforce_uniform_args && out_descrs[0] != out_descrs[1])) {
         PyErr_Format(PyExc_TypeError,
                 "The resolved dtypes are not compatible with an accumulate "
                 "or reduceat loop.");
-        return NULL;
+        goto fail;
     }
     if (validate_casting(ufuncimpl,
-            ufunc, ops, descrs, NPY_DEFAULT_ASSIGN_CASTING) < 0) {
-        return NULL;
+            ufunc, ops, out_descrs, NPY_DEFAULT_ASSIGN_CASTING) < 0) {
+        goto fail;
     }
 
-    *out_descr = descrs[1];
-    *out_result_descr = descrs[2];
-    Py_DECREF(descrs[0]);
-
     return ufuncimpl;
+
+  fail:
+    for (int i = 0; i < 3; ++i) {
+        Py_DECREF(out_descrs[i]);
+    }
+    return NULL;
 }
 
 
 static int
-reduce_loop(NpyIter *iter, char **dataptrs, npy_intp const *strides,
-            npy_intp const *countptr, NpyIter_IterNextFunc *iternext,
-            int needs_api, npy_intp skip_first_count, void *data)
+reduce_loop(PyArrayMethod_Context *context,
+        PyArrayMethod_StridedLoop *strided_loop, NpyAuxData *auxdata,
+        NpyIter *iter, char **dataptrs, npy_intp const *strides,
+        npy_intp const *countptr, NpyIter_IterNextFunc *iternext,
+        int needs_api, npy_intp skip_first_count)
 {
-    PyArray_Descr *dtypes[3], **iter_dtypes;
-    PyUFuncObject *ufunc = (PyUFuncObject *)data;
-    char *dataptrs_copy[3];
-    npy_intp strides_copy[3];
+    int retval;
+    char *dataptrs_copy[4];
+    npy_intp strides_copy[4];
     npy_bool masked;
-
-    /* The normal selected inner loop */
-    PyUFuncGenericFunction innerloop = NULL;
-    void *innerloopdata = NULL;
 
     NPY_BEGIN_THREADS_DEF;
     /* Get the number of operands, to determine whether "where" is used */
     masked = (NpyIter_GetNOp(iter) == 3);
 
-    /* Get the inner loop */
-    iter_dtypes = NpyIter_GetDescrArray(iter);
-    dtypes[0] = iter_dtypes[0];
-    dtypes[1] = iter_dtypes[1];
-    dtypes[2] = iter_dtypes[0];
-    if (ufunc->legacy_inner_loop_selector(ufunc, dtypes,
-                            &innerloop, &innerloopdata, &needs_api) < 0) {
-        return -1;
+    if (needs_api) {
+        NPY_BEGIN_THREADS_THRESHOLDED(NpyIter_GetIterSize(iter));
     }
 
-    NPY_BEGIN_THREADS_NDITER(iter);
-
     if (skip_first_count > 0) {
-        do {
+        assert(!masked);  /* Path currently not available for masked */
+        while (1) {
             npy_intp count = *countptr;
 
             /* Skip any first-visit elements */
@@ -2921,27 +2899,23 @@ reduce_loop(NpyIter *iter, char **dataptrs, npy_intp const *strides,
             strides_copy[0] = strides[0];
             strides_copy[1] = strides[1];
             strides_copy[2] = strides[0];
-            innerloop(dataptrs_copy, &count,
-                        strides_copy, innerloopdata);
 
-            if (needs_api && PyErr_Occurred()) {
+            retval = strided_loop(context,
+                    dataptrs_copy, &count, strides_copy, auxdata);
+            if (retval < 0) {
                 goto finish_loop;
             }
 
-            /* Jump to the faster loop when skipping is done */
-            if (skip_first_count == 0) {
-                if (iternext(iter)) {
-                    break;
-                }
-                else {
-                    goto finish_loop;
-                }
+            /* Advance loop, and abort on error (or finish) */
+            if (!iternext(iter)) {
+                goto finish_loop;
             }
-        } while (iternext(iter));
-    }
 
-    if (needs_api && PyErr_Occurred()) {
-        goto finish_loop;
+            /* When skipping is done break and continue with faster loop */
+            if (skip_first_count == 0) {
+                break;
+            }
+        }
     }
 
     do {
@@ -2952,42 +2926,27 @@ reduce_loop(NpyIter *iter, char **dataptrs, npy_intp const *strides,
         strides_copy[0] = strides[0];
         strides_copy[1] = strides[1];
         strides_copy[2] = strides[0];
+        if (masked) {
+            /*
+             * TODO: This code had a broadcasted-mask optimization that may
+             *       make sense in the array-method masked strided loop code.
+             */
+            dataptrs_copy[3] = dataptrs[2];
+            strides_copy[3] = strides[2];
+        }
 
-        if (!masked) {
-            innerloop(dataptrs_copy, countptr,
-                      strides_copy, innerloopdata);
+        retval = strided_loop(context,
+                dataptrs_copy, countptr, strides_copy, auxdata);
+        if (retval < 0) {
+            goto finish_loop;
         }
-        else {
-            npy_intp count = *countptr;
-            char *maskptr = dataptrs[2];
-            npy_intp mask_stride = strides[2];
-            /* Optimization for when the mask is broadcast */
-            npy_intp n = mask_stride == 0 ? count : 1;
-            while (count) {
-                char mask = *maskptr;
-                maskptr += mask_stride;
-                while (n < count && mask == *maskptr) {
-                    n++;
-                    maskptr += mask_stride;
-                }
-                /* If mask set, apply inner loop on this contiguous region */
-                if (mask) {
-                    innerloop(dataptrs_copy, &n,
-                              strides_copy, innerloopdata);
-                }
-                dataptrs_copy[0] += n * strides[0];
-                dataptrs_copy[1] += n * strides[1];
-                dataptrs_copy[2] = dataptrs_copy[0];
-                count -= n;
-                n = 1;
-            }
-        }
-    } while (!(needs_api && PyErr_Occurred()) && iternext(iter));
+
+    } while (iternext(iter));
 
 finish_loop:
     NPY_END_THREADS;
 
-    return (needs_api && PyErr_Occurred()) ? -1 : 0;
+    return retval;
 }
 
 /*
@@ -3041,6 +3000,7 @@ PyUFunc_Reduce(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
     }
 
     /* Get the identity */
+    /* TODO: Both of these must be provided by the ArrayMethod! */
     identity = _get_identity(ufunc, &reorderable);
     if (identity == NULL) {
         return NULL;
@@ -3067,21 +3027,28 @@ PyUFunc_Reduce(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
     /* Get the reduction dtype */
     PyArray_DTypeMeta *signature[3] = {
             NULL, odtype != NULL ? NPY_DTYPE(odtype) : NULL, NULL};
-    PyArray_Descr *op_descr, *result_descr;
+
+    PyArray_Descr *descrs[3];
     PyArrayMethodObject *ufuncimpl = reducelike_promote_and_resolve(ufunc,
-            arr, signature, 0, &result_descr, &op_descr);
+            arr, out, signature, 0, descrs);
     if (ufuncimpl == NULL) {
         Py_DECREF(initial);
         return NULL;
     }
 
-    PyArrayObject *result = PyUFunc_ReduceWrapper(arr,
-            out, wheremask, op_descr, result_descr,
-            NPY_UNSAFE_CASTING, axis_flags, reorderable, keepdims,
+    PyArrayMethod_Context context = {
+        .caller = (PyObject *)ufunc,
+        .method = ufuncimpl,
+        .descriptors = descrs,
+    };
+
+    PyArrayObject *result = PyUFunc_ReduceWrapper(&context,
+            arr, out, wheremask, axis_flags, reorderable, keepdims,
             initial, reduce_loop, ufunc, buffersize, ufunc_name, errormask);
 
-    Py_DECREF(op_descr);
-    Py_DECREF(result_descr);
+    for (int i = 0; i < 3; i++) {
+        Py_DECREF(descrs[i]);
+    }
     Py_DECREF(initial);
     return result;
 }

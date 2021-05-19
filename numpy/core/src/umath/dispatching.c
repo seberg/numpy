@@ -743,9 +743,9 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
              * reduce(eq, [1, 2, 3]) != reduce(eq, [True, True, True])
              * ```
              *
-             * The special cases being `logical_(or|and)` which can always
+             * The special cases being `logical_(and|or|xor)` which can always
              * cast to boolean ahead of time and still give the right answer
-             * (unsafe cast to bool is fine here).  We special case these at
+             * (unsafe cast to bool is fine here). We special case these at
              * the time of this comment (NumPy 1.21).
              */
             assert(ufunc->nin == 2 && ufunc->nout == 1);
