@@ -5200,7 +5200,7 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
     }
 
     char *curr_types = ufunc->types;
-    for (int i = 0; i < ntypes; i += nin + nout) {
+    for (int i = 0; i < ntypes * 3; i += nin + nout) {
         /*
          * Add all legacy wrapping loops here. This is normally necessary, but
          * makes sense.  It could also help/be needed to avoid issues with
