@@ -2780,7 +2780,7 @@ reduce_loop(PyArrayMethod_Context *context,
     /* Get the number of operands, to determine whether "where" is used */
     masked = (NpyIter_GetNOp(iter) == 3);
 
-    if (needs_api) {
+    if (!needs_api) {
         NPY_BEGIN_THREADS_THRESHOLDED(NpyIter_GetIterSize(iter));
     }
 
