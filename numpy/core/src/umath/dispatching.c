@@ -719,7 +719,13 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
         if (resolve_implementation_info(ufunc, op_dtypes, &info) < 0) {
             return NULL;
         }
-        if (info != NULL) {
+        if (info != NULL && !PyObject_TypeCheck(
+                PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
+            /*
+             * Cache the new one.  NOTE: If we allow a promoter to return
+             * a new ArrayMethod, we should also cache such a promoter
+             * (instead of the method in that case).
+             */
             if (PyArrayIdentityHash_SetItem(ufunc->_dispatch_cache,
                     (PyObject **)op_dtypes, info, 0) < 0) {
                 return NULL;
