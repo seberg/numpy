@@ -2999,6 +2999,9 @@ PyUFunc_Accumulate(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
         return NULL;
     }
 
+    /* Take a reference to out for later returning */
+    Py_XINCREF(out);
+
     PyArray_DTypeMeta *signature[3] = {NULL, out_DType, NULL};
     PyArray_Descr *descrs[3];
     PyArrayMethodObject *ufuncimpl = reducelike_promote_and_resolve(ufunc,
@@ -3105,10 +3108,7 @@ PyUFunc_Accumulate(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
     }
 
     /* Get the output from the iterator if it was allocated */
-    if (out != NULL) {
-        Py_INCREF(out);
-    }
-    else {
+    if (out == NULL) {
         if (iter) {
             op[0] = out = NpyIter_GetOperandArray(iter)[0];
             Py_INCREF(out);
@@ -3414,6 +3414,9 @@ PyUFunc_Reduceat(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *ind,
         return NULL;
     }
 
+    /* Take a reference to out for later returning */
+    Py_XINCREF(out);
+
     PyArray_DTypeMeta *signature[3] = {NULL, out_DType, NULL};
     PyArray_Descr *descrs[3];
     PyArrayMethodObject *ufuncimpl = reducelike_promote_and_resolve(ufunc,
@@ -3539,9 +3542,6 @@ PyUFunc_Reduceat(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *ind,
         if (out == NULL) {
             goto fail;
         }
-    }
-    else {
-        Py_INCREF(out);
     }
 
     npy_intp fixed_strides[3];
