@@ -265,6 +265,7 @@ PyUFunc_ValidateOutCasting(PyUFuncObject *ufunc,
                     ufunc, casting, dtypes[i], PyArray_DESCR(operands[i]), i);
         }
     }
+    return 0;
 }
 
 /*UFUNC_API
