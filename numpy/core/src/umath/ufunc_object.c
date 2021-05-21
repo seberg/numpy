@@ -2731,9 +2731,10 @@ reducelike_promote_and_resolve(PyUFuncObject *ufunc,
         return NULL;
     }
 
+    // TODO: This really should _not_ be unsafe casting!
     /* Find the correct descriptors for the operation */
     if (resolve_descriptors(3, ufunc, ufuncimpl,
-            ops, out_descrs, signature, NPY_DEFAULT_ASSIGN_CASTING) < 0) {
+            ops, out_descrs, signature, NPY_UNSAFE_CASTING) < 0) {
         return NULL;
     }
 
@@ -2750,7 +2751,7 @@ reducelike_promote_and_resolve(PyUFuncObject *ufunc,
         goto fail;
     }
     if (validate_casting(ufuncimpl,
-            ufunc, ops, out_descrs, NPY_DEFAULT_ASSIGN_CASTING) < 0) {
+            ufunc, ops, out_descrs, NPY_UNSAFE_CASTING) < 0) {
         goto fail;
     }
 
