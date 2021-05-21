@@ -2879,7 +2879,7 @@ finish_loop:
 static PyArrayObject *
 PyUFunc_Reduce(PyUFuncObject *ufunc,
         PyArrayObject *arr, PyArrayObject *out,
-        int naxes, int *axes, PyArray_DTypeMeta *odtype, int keepdims,
+        int naxes, int *axes, PyArray_DTypeMeta *signature[3], int keepdims,
         PyObject *initial, PyArrayObject *wheremask)
 {
     int iaxes, ndim;
@@ -2935,9 +2935,6 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
         Py_INCREF(initial);  /* match the reference count in the if above */
     }
 
-    /* Get the reduction dtype */
-    PyArray_DTypeMeta *signature[3] = {NULL, odtype, NULL};
-
     PyArray_Descr *descrs[3];
     PyArrayMethodObject *ufuncimpl = reducelike_promote_and_resolve(ufunc,
             arr, out, signature, 0, descrs, "reduce");
@@ -2966,7 +2963,7 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
 
 static PyObject *
 PyUFunc_Accumulate(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
-                   int axis, PyArray_DTypeMeta *out_DType)
+                   int axis, PyArray_DTypeMeta *signature[3])
 {
     PyArrayObject *op[2];
     int op_axes_arrays[2][NPY_MAXDIMS];
@@ -3002,7 +2999,6 @@ PyUFunc_Accumulate(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
     /* Take a reference to out for later returning */
     Py_XINCREF(out);
 
-    PyArray_DTypeMeta *signature[3] = {NULL, out_DType, NULL};
     PyArray_Descr *descrs[3];
     PyArrayMethodObject *ufuncimpl = reducelike_promote_and_resolve(ufunc,
             arr, out, signature, 1, descrs, "accumulate");
@@ -3358,7 +3354,7 @@ fail:
  */
 static PyObject *
 PyUFunc_Reduceat(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *ind,
-                 PyArrayObject *out, int axis, PyArray_DTypeMeta *out_DType)
+                 PyArrayObject *out, int axis, PyArray_DTypeMeta *signature[3])
 {
     PyArrayObject *op[3];
     int op_axes_arrays[3][NPY_MAXDIMS];
@@ -3417,7 +3413,6 @@ PyUFunc_Reduceat(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *ind,
     /* Take a reference to out for later returning */
     Py_XINCREF(out);
 
-    PyArray_DTypeMeta *signature[3] = {NULL, out_DType, NULL};
     PyArray_Descr *descrs[3];
     PyArrayMethodObject *ufuncimpl = reducelike_promote_and_resolve(ufunc,
             arr, out, signature, 1, descrs, "accumulate");
@@ -3844,7 +3839,7 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
     PyArrayObject *mp = NULL, *wheremask = NULL, *ret = NULL;
     PyObject *op = NULL;
     PyArrayObject *indices = NULL;
-    PyArray_DTypeMeta *out_DType = NULL;
+    PyArray_DTypeMeta *signature[3] = {NULL, NULL, NULL};
     PyArrayObject *out = NULL;
     int keepdims = 0;
     PyObject *initial = NULL;
@@ -3988,8 +3983,8 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
     }
     if (otype_obj && otype_obj != Py_None) {
         /* Use `_get_dtype` because `dtype` is a DType and not the instance */
-        out_DType = _get_dtype(otype_obj);
-        if (out_DType == NULL) {
+        signature[0] = _get_dtype(otype_obj);
+        if (signature[0] == NULL) {
             goto fail;
         }
     }
@@ -4078,15 +4073,15 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
       *
       * TODO: The following should be handled by a promoter!
       */
-    if (out_DType == NULL && out != NULL) {
+    if (signature[0] == NULL && out == NULL) {
         /*
          * For integer types --- make sure at least a long
          * is used for add and multiply reduction to avoid overflow
          */
         int typenum = PyArray_TYPE(mp);
         if ((PyTypeNum_ISBOOL(typenum) || PyTypeNum_ISINTEGER(typenum))
-            && ((strcmp(ufunc->name,"add") == 0)
-                || (strcmp(ufunc->name,"multiply") == 0))) {
+                && ((strcmp(ufunc->name,"add") == 0)
+                    || (strcmp(ufunc->name,"multiply") == 0))) {
             if (PyTypeNum_ISBOOL(typenum)) {
                 typenum = NPY_LONG;
             }
@@ -4098,16 +4093,18 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
                     typenum = NPY_LONG;
                 }
             }
+            signature[0] = PyArray_DTypeFromTypeNum(typenum);
         }
-        out_DType = PyArray_DTypeFromTypeNum(typenum);
     }
+    Py_XINCREF(signature[0]);
+    signature[2] = signature[0];
 
 
     switch(operation) {
     case UFUNC_REDUCE:
         ret = PyUFunc_Reduce(ufunc,
-                mp, out, naxes, axes, out_DType, keepdims, initial, wheremask);
-        Py_XDECREF(wheremask);
+                mp, out, naxes, axes, signature, keepdims, initial, wheremask);
+        Py_XSETREF(wheremask, NULL);
         break;
     case UFUNC_ACCUMULATE:
         if (ndim == 0) {
@@ -4120,7 +4117,7 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
             goto fail;
         }
         ret = (PyArrayObject *)PyUFunc_Accumulate(ufunc,
-                mp, out, axes[0], out_DType);
+                mp, out, axes[0], signature);
         break;
     case UFUNC_REDUCEAT:
         if (ndim == 0) {
@@ -4133,18 +4130,21 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
             goto fail;
         }
         ret = (PyArrayObject *)PyUFunc_Reduceat(ufunc, mp, indices, out,
-                                            axes[0], out_DType);
-        Py_DECREF(indices);
+                                            axes[0], signature);
+        Py_SETREF(indices, NULL);
         break;
     }
+    if (ret == NULL) {
+        goto fail;
+    }
+
+    Py_DECREF(signature[0]);
+    Py_DECREF(signature[1]);
+    Py_DECREF(signature[2]);
+
     Py_DECREF(mp);
-    Py_XDECREF(out_DType);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
-
-    if (ret == NULL) {
-        return NULL;
-    }
 
     /* Wrap and return the output */
     {
@@ -4173,9 +4173,13 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
     }
 
 fail:
-    Py_XDECREF(out_DType);
+    Py_XDECREF(signature[0]);
+    Py_XDECREF(signature[1]);
+    Py_XDECREF(signature[2]);
+
     Py_XDECREF(mp);
     Py_XDECREF(wheremask);
+    Py_XDECREF(indices);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
     return NULL;
