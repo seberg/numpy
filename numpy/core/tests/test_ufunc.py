@@ -2026,8 +2026,7 @@ class TestUfunc:
             np.true_divide, np.floor_divide, np.bitwise_and, np.bitwise_or,
             np.bitwise_xor, np.left_shift, np.right_shift, np.fmax,
             np.fmin, np.fmod, np.hypot, np.logaddexp, np.logaddexp2,
-            np.logical_and, np.logical_or, np.logical_xor, np.maximum,
-            np.minimum, np.mod,
+            np.maximum, np.minimum, np.mod,
             np.greater, np.greater_equal, np.less, np.less_equal,
             np.equal, np.not_equal]
 
@@ -2037,6 +2036,15 @@ class TestUfunc:
         for f in binary_funcs:
             assert_raises(TypeError, f, a, b)
             assert_raises(TypeError, f, c, a)
+
+    @pytest.mark.parametrize("ufunc",
+            [np.logical_and, np.logical_or, np.logical_xor])
+    def test_logical_ufuncs_support_anything(self, ufunc):
+        # The logical ufuncs support even input that can't be promoted:
+        a = np.array('1')
+        c = np.array([1., 2.])
+        assert_array_equal(ufunc(a, c), ufunc([True, True], True))
+        assert ufunc.reduce(a) == True
 
     def test_reduce_noncontig_output(self):
         # Check that reduction deals with non-contiguous output arrays
@@ -2263,7 +2271,7 @@ def test_reduce_casterrors(offset):
     out = np.array(-1, dtype=np.intp)
 
     count = sys.getrefcount(value)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         # This is an unsafe cast, but we currently always allow that:
         np.add.reduce(arr, dtype=np.intp, out=out)
     assert count == sys.getrefcount(value)
@@ -2272,3 +2280,4 @@ def test_reduce_casterrors(offset):
     # if the error happened immediately.
     # This does not define behaviour, the output is invalid and thus undefined
     assert out[()] < value * offset
+
