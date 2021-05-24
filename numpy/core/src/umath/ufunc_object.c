@@ -1349,6 +1349,13 @@ validate_casting(PyArrayMethodObject *method, PyUFuncObject *ufunc,
         PyArrayObject *ops[], PyArray_Descr *descriptors[],
         NPY_CASTING casting)
 {
+    if (method->resolve_descriptors == &wrapped_legacy_resolve_descriptors) {
+        /*
+         * In this case the legacy type resolution was definitely called
+         * and we do not need to check (astropy/pyerfa relied on this).
+         */
+        return 0;
+    }
     if (method->flags & _NPY_METH_FORCE_CAST_INPUTS) {
         if (PyUFunc_ValidateOutCasting(ufunc, casting, ops, descriptors) < 0) {
             return -1;
@@ -2731,7 +2738,6 @@ reducelike_promote_and_resolve(PyUFuncObject *ufunc,
         return NULL;
     }
 
-    // TODO: This really should _not_ be unsafe casting!
     /* Find the correct descriptors for the operation */
     if (resolve_descriptors(3, ufunc, ufuncimpl,
             ops, out_descrs, signature, NPY_UNSAFE_CASTING) < 0) {
@@ -2750,6 +2756,7 @@ reducelike_promote_and_resolve(PyUFuncObject *ufunc,
                 "or reduceat loop.");
         goto fail;
     }
+    /* TODO: This really should _not_ be unsafe casting (same above)! */
     if (validate_casting(ufuncimpl,
             ufunc, ops, out_descrs, NPY_UNSAFE_CASTING) < 0) {
         goto fail;
