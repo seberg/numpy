@@ -978,7 +978,7 @@ PyArray_FindConcatenationDescriptor(
         npy_intp n, PyArrayObject **arrays, PyObject *requested_dtype)
 {
     if (requested_dtype == NULL) {
-        return PyArray_LegacyResultType(n, arrays, 0, NULL);
+        return PyArray_ResultType(n, arrays, 0, NULL);
     }
 
     PyArray_DTypeMeta *common_dtype;
@@ -3154,10 +3154,25 @@ can_cast_fields_safety(PyArray_Descr *from, PyArray_Descr *to)
 {
     NPY_CASTING casting = NPY_NO_CASTING | _NPY_CAST_IS_VIEW;
 
+    /*
+     * If the itemsize (includes padding at the end) does not match, consider
+     * this a SAFE cast only.  A view may be OK if we shrink.
+     */
+    if (from->elsize > to->elsize) {
+        /*
+         * The itemsize may mismatch even if all fields and formats match
+         * (due to additional padding).
+         */
+        casting = PyArray_MinCastSafety(
+                casting, NPY_EQUIV_CASTING | _NPY_CAST_IS_VIEW);
+    }
+    else if (from->elsize < to->elsize) {
+        casting = PyArray_MinCastSafety(casting, NPY_EQUIV_CASTING);
+    }
+
     Py_ssize_t field_count = PyTuple_Size(from->names);
     if (field_count != PyTuple_Size(to->names)) {
-        /* TODO: This should be rejected! */
-        return NPY_UNSAFE_CASTING;
+        return -1;
     }
     for (Py_ssize_t i = 0; i < field_count; i++) {
         PyObject *from_key = PyTuple_GET_ITEM(from->names, i);
@@ -3167,56 +3182,69 @@ can_cast_fields_safety(PyArray_Descr *from, PyArray_Descr *to)
         }
         PyArray_Descr *from_base = (PyArray_Descr*)PyTuple_GET_ITEM(from_tup, 0);
 
-        /*
-         * TODO: This should use to_key (order), compare gh-15509 by
-         *       by Allan Haldane.  And raise an error on failure.
-         *       (Fixing that may also requires fixing/changing promotion.)
-         */
-        PyObject *to_tup = PyDict_GetItem(to->fields, from_key);
+        PyObject *to_key = PyTuple_GET_ITEM(to->names, i);
+        PyObject *to_tup = PyDict_GetItem(to->fields, to_key);
         if (to_tup == NULL) {
-            return NPY_UNSAFE_CASTING;
+            return give_bad_field_error(from_key);
         }
         PyArray_Descr *to_base = (PyArray_Descr*)PyTuple_GET_ITEM(to_tup, 0);
 
+        int cmp = PyUnicode_Compare(from_key, to_key);
+        if (error_converting(cmp)) {
+            return -1;
+        }
+        if (cmp != 0) {
+            /*
+             * Field name mismatch, consider this at most SAFE.
+             */
+            casting = PyArray_MinCastSafety(
+                    casting, NPY_SAFE_CASTING | _NPY_CAST_IS_VIEW);
+        }
         NPY_CASTING field_casting = PyArray_GetCastSafety(from_base, to_base, NULL);
         if (field_casting < 0) {
             return -1;
         }
         casting = PyArray_MinCastSafety(casting, field_casting);
+        if (casting & _NPY_CAST_IS_VIEW) {
+            /*
+             * Unset cast-is-view (and use at most equivalent casting) if the
+             * field offsets do not match. (not no-casting)
+             */
+            PyObject *from_offset = PyTuple_GET_ITEM(from_tup, 1);
+            PyObject *to_offset = PyTuple_GET_ITEM(to_tup, 1);
+            cmp = PyObject_RichCompareBool(from_offset, to_offset, Py_EQ);
+            if (error_converting(cmp)) {
+                assert(0);  /* Both are longs, this should never fail */
+                return -1;
+            }
+            if (!cmp) {
+                casting = PyArray_MinCastSafety(casting, NPY_EQUIV_CASTING);
+            }
+        }
+
+        /* Also check the title (denote mismatch as SAFE only) */
+        PyObject *from_title = from_key;
+        PyObject *to_title = to_key;
+        if (PyTuple_GET_SIZE(from_tup) > 2) {
+            from_title = PyTuple_GET_ITEM(from_tup, 2);
+        }
+        if (PyTuple_GET_SIZE(to_tup) > 2) {
+            to_title = PyTuple_GET_ITEM(to_tup, 2);
+        }
+        cmp = PyObject_RichCompareBool(from_title, to_title, Py_EQ);
+        if (error_converting(cmp)) {
+            return -1;
+        }
+        if (!cmp) {
+            casting = PyArray_MinCastSafety(
+                    casting, NPY_SAFE_CASTING | _NPY_CAST_IS_VIEW);
+        }
+
     }
     if (!(casting & _NPY_CAST_IS_VIEW)) {
         assert((casting & ~_NPY_CAST_IS_VIEW) != NPY_NO_CASTING);
-        return casting;
     }
 
-    /*
-     * If the itemsize (includes padding at the end), fields, or names
-     * do not match, this cannot be a view and also not a "no" cast
-     * (identical dtypes).
-     * It may be possible that this can be relaxed in some cases.
-     */
-    if (from->elsize != to->elsize) {
-        /*
-         * The itemsize may mismatch even if all fields and formats match
-         * (due to additional padding).
-         */
-        return PyArray_MinCastSafety(casting, NPY_EQUIV_CASTING);
-    }
-
-    int cmp = PyObject_RichCompareBool(from->fields, to->fields, Py_EQ);
-    if (cmp != 1) {
-        if (cmp == -1) {
-            PyErr_Clear();
-        }
-        return PyArray_MinCastSafety(casting, NPY_EQUIV_CASTING);
-    }
-    cmp = PyObject_RichCompareBool(from->names, to->names, Py_EQ);
-    if (cmp != 1) {
-        if (cmp == -1) {
-            PyErr_Clear();
-        }
-        return PyArray_MinCastSafety(casting, NPY_EQUIV_CASTING);
-    }
     return casting;
 }
 
