@@ -897,22 +897,6 @@ promote_types(PyArray_Descr *type1, PyArray_Descr *type2,
 
 }
 
-/*
- * Returns a new reference to type if it is already NBO, otherwise
- * returns a copy converted to NBO.
- */
-NPY_NO_EXPORT PyArray_Descr *
-ensure_dtype_nbo(PyArray_Descr *type)
-{
-    if (PyArray_ISNBO(type->byteorder)) {
-        Py_INCREF(type);
-        return type;
-    }
-    else {
-        return PyArray_DescrNewByteorder(type, NPY_NATIVE);
-    }
-}
-
 
 /**
  * This function should possibly become public API eventually.  At this
@@ -1571,7 +1555,7 @@ PyArray_ResultType(
                     "no arrays or types available to calculate result type");
             return NULL;
         }
-        return ensure_dtype_nbo(result);
+        return ensure_dtype_canonical(result);
     }
 
     void **info_on_heap = NULL;
@@ -2261,7 +2245,7 @@ legacy_same_dtype_resolve_descriptors(
     loop_descrs[0] = given_descrs[0];
 
     if (given_descrs[1] == NULL) {
-        loop_descrs[1] = ensure_dtype_nbo(loop_descrs[0]);
+        loop_descrs[1] = ensure_dtype_canonical(loop_descrs[0]);
         if (loop_descrs[1] == NULL) {
             Py_DECREF(loop_descrs[0]);
             return -1;
@@ -2324,12 +2308,12 @@ simple_cast_resolve_descriptors(
 {
     assert(dtypes[0]->legacy && dtypes[1]->legacy);
 
-    loop_descrs[0] = ensure_dtype_nbo(given_descrs[0]);
+    loop_descrs[0] = ensure_dtype_canonical(given_descrs[0]);
     if (loop_descrs[0] == NULL) {
         return -1;
     }
     if (given_descrs[1] != NULL) {
-        loop_descrs[1] = ensure_dtype_nbo(given_descrs[1]);
+        loop_descrs[1] = ensure_dtype_canonical(given_descrs[1]);
         if (loop_descrs[1] == NULL) {
             Py_DECREF(loop_descrs[0]);
             return -1;
@@ -2613,14 +2597,14 @@ cast_to_string_resolve_descriptors(
     }
     else {
         /* The legacy loop can handle mismatching itemsizes */
-        loop_descrs[1] = ensure_dtype_nbo(given_descrs[1]);
+        loop_descrs[1] = ensure_dtype_canonical(given_descrs[1]);
         if (loop_descrs[1] == NULL) {
             return -1;
         }
     }
 
     /* Set the input one as well (late for easier error management) */
-    loop_descrs[0] = ensure_dtype_nbo(given_descrs[0]);
+    loop_descrs[0] = ensure_dtype_canonical(given_descrs[0]);
     if (loop_descrs[0] == NULL) {
         return -1;
     }
@@ -2694,7 +2678,7 @@ string_to_string_resolve_descriptors(
     loop_descrs[0] = given_descrs[0];
 
     if (given_descrs[1] == NULL) {
-        loop_descrs[1] = ensure_dtype_nbo(loop_descrs[0]);
+        loop_descrs[1] = ensure_dtype_canonical(loop_descrs[0]);
         if (loop_descrs[1] == NULL) {
             return -1;
         }

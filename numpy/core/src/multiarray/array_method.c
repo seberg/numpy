@@ -69,7 +69,7 @@ default_resolve_descriptors(
             continue;
         }
         if (NPY_DTYPE(input_descrs[i]) == dtype) {
-            output_descrs[i] = ensure_dtype_nbo(input_descrs[i]);
+            output_descrs[i] = ensure_dtype_canonical(input_descrs[i]);
         }
         else {
             output_descrs[i] = dtype->default_descr(dtype);
@@ -103,7 +103,7 @@ default_resolve_descriptors(
             continue;
         }
         if (NPY_DTYPE(input_descrs[i]) == common_dtype) {
-            output_descrs[i] = ensure_dtype_nbo(input_descrs[i]);
+            output_descrs[i] = ensure_dtype_canonical(input_descrs[i]);
         }
         else {
             output_descrs[i] = common_dtype->default_descr(common_dtype);

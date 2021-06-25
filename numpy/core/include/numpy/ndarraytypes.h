@@ -1884,6 +1884,7 @@ typedef void (PyDataMem_EventHookFunc)(void *inp, void *outp, size_t size,
         PyArray_DTypeMeta *dtype1, PyArray_DTypeMeta *dtyep2, PyObject *value);
     typedef PyArray_Descr *(common_instance_function)(
             PyArray_Descr *dtype1, PyArray_Descr *dtyep2);
+    typedef PyArray_Descr *(ensure_canonical_function)(PyArray_Descr *dtype);
 
     /*
      * While NumPy DTypes would not need to be heap types the plan is to
@@ -1940,8 +1941,8 @@ typedef void (PyDataMem_EventHookFunc)(void *inp, void *outp, size_t size,
         is_known_scalar_type_function *is_known_scalar_type;
         default_descr_function *default_descr;
         common_dtype_function *common_dtype;
-        common_dtype_with_value_function *common_dtype_with_value;
         common_instance_function *common_instance;
+        ensure_canonical_function *ensure_canonical;
         /*
          * The casting implementation (ArrayMethod) to convert between two
          * instances of this DType, stored explicitly for fast access:

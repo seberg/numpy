@@ -19,6 +19,23 @@ PyArray_DTypeFromTypeNum(int typenum)
 }
 
 
+/*
+ * Returns a new reference to type if it is already NBO, otherwise
+ * returns a copy converted to NBO.
+ * For non-builtin types (and void) this is not necessarily byte-order only,
+ * but a general "canonical" property.
+ */
+static NPY_INLINE PyArray_Descr *
+ensure_dtype_canonical(PyArray_Descr *type)
+{
+    /*
+     * It would be nice to add a flag to the DType, instead of always
+     * calling the actual function.
+     */
+    return NPY_DTYPE(type)->ensure_canonical(type);
+}
+
+
 NPY_NO_EXPORT int
 dtypemeta_wrap_legacy_descriptor(PyArray_Descr *dtypem);
 

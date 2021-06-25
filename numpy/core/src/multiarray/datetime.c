@@ -3751,7 +3751,7 @@ time_to_time_resolve_descriptors(
     Py_INCREF(given_descrs[0]);
     loop_descrs[0] = given_descrs[0];
     if (given_descrs[1] == NULL) {
-        loop_descrs[1] = ensure_dtype_nbo(given_descrs[0]);
+        loop_descrs[1] = ensure_dtype_canonical(given_descrs[0]);
     }
     else {
         Py_INCREF(given_descrs[1]);
@@ -3856,8 +3856,8 @@ time_to_time_get_loop(
         return 0;
     }
 
-    PyArray_Descr *src_wrapped_dtype = ensure_dtype_nbo(descrs[0]);
-    PyArray_Descr *dst_wrapped_dtype = ensure_dtype_nbo(descrs[1]);
+    PyArray_Descr *src_wrapped_dtype = ensure_dtype_canonical(descrs[0]);
+    PyArray_Descr *dst_wrapped_dtype = ensure_dtype_canonical(descrs[1]);
 
     int needs_api = 0;
     int res = wrap_aligned_transferfunction(
@@ -3882,7 +3882,7 @@ datetime_to_timedelta_resolve_descriptors(
         PyArray_Descr *given_descrs[2],
         PyArray_Descr *loop_descrs[2])
 {
-    loop_descrs[0] = ensure_dtype_nbo(given_descrs[0]);
+    loop_descrs[0] = ensure_dtype_canonical(given_descrs[0]);
     if (loop_descrs[0] == NULL) {
         return -1;
     }
@@ -3892,7 +3892,7 @@ datetime_to_timedelta_resolve_descriptors(
         loop_descrs[1] = create_datetime_dtype(dtypes[1]->type_num, meta);
     }
     else {
-        loop_descrs[1] = ensure_dtype_nbo(given_descrs[1]);
+        loop_descrs[1] = ensure_dtype_canonical(given_descrs[1]);
     }
     if (loop_descrs[1] == NULL) {
         Py_DECREF(loop_descrs[0]);
@@ -3948,7 +3948,7 @@ time_to_string_resolve_descriptors(
         loop_descrs[1]->elsize = size;
     }
 
-    loop_descrs[0] = ensure_dtype_nbo(given_descrs[0]);
+    loop_descrs[0] = ensure_dtype_canonical(given_descrs[0]);
     if (loop_descrs[0] == NULL) {
         Py_DECREF(loop_descrs[1]);
         return -1;
@@ -4002,7 +4002,7 @@ string_to_datetime_cast_resolve_descriptors(
         }
     }
     else {
-        loop_descrs[1] = ensure_dtype_nbo(given_descrs[1]);
+        loop_descrs[1] = ensure_dtype_canonical(given_descrs[1]);
         if (loop_descrs[1] == NULL) {
             return -1;
         }
