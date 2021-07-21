@@ -11,6 +11,9 @@ typedef int promoter_function(PyUFuncObject *ufunc,
         PyArray_DTypeMeta *op_dtypes[], PyArray_DTypeMeta *signature[],
         PyArray_DTypeMeta *new_op_dtypes[]);
 
+NPY_NO_EXPORT int
+PyUFunc_AddLoop(PyUFuncObject *ufunc, PyObject *info, int ignore_duplicate);
+
 NPY_NO_EXPORT PyArrayMethodObject *
 promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
         PyArrayObject *const ops[], PyArray_DTypeMeta *signature[],

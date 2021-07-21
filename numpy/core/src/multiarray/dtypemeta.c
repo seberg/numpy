@@ -665,6 +665,8 @@ dtypemeta_wrap_legacy_descriptor(PyArray_Descr *descr)
  * preliminary (the flags should also return bools).
  */
 static PyMemberDef dtypemeta_members[] = {
+    {"_legacy",
+            T_BYTE, offsetof(PyArray_DTypeMeta, legacy), READONLY, NULL},
     {"_abstract",
         T_BYTE, offsetof(PyArray_DTypeMeta, abstract), READONLY, NULL},
     {"type",
