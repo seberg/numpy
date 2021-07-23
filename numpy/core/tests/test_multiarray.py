@@ -67,7 +67,7 @@ def _aligned_zeros(shape, dtype=float, order="C", align=None):
     # data pointer --- so we use and allocate size+1
     buf = buf[offset:offset+size+1][:-1]
     data = np.ndarray(shape, dtype, buf, order=order)
-    data.fill(0)
+    data.fill(np.uint8(0))
     return data
 
 

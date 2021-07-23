@@ -19,6 +19,7 @@
 #include "array_assign.h"
 
 #include "convert.h"
+#include "array_coercion.h"
 
 int
 fallocate(int fd, int mode, off_t offset, off_t len);
@@ -357,151 +358,28 @@ PyArray_ToString(PyArrayObject *self, NPY_ORDER order)
 NPY_NO_EXPORT int
 PyArray_FillWithScalar(PyArrayObject *arr, PyObject *obj)
 {
-    PyArray_Descr *dtype = NULL;
-    npy_longlong value_buffer[4];
-    char *value = NULL;
-    int retcode = 0;
+    npy_longlong value_buffer_stack[4];
+    char *value_buffer_heap = NULL;
+    char *buf = (char *)value_buffer_stack;
 
-    /*
-     * If 'arr' is an object array, copy the object as is unless
-     * 'obj' is a zero-dimensional array, in which case we copy
-     * the element in that array instead.
-     */
-    if (PyArray_DESCR(arr)->type_num == NPY_OBJECT &&
-                        !(PyArray_Check(obj) &&
-                          PyArray_NDIM((PyArrayObject *)obj) == 0)) {
-        value = (char *)&obj;
-
-        dtype = PyArray_DescrFromType(NPY_OBJECT);
-        if (dtype == NULL) {
-            return -1;
-        }
+    if ((size_t)PyArray_ITEMSIZE(arr) > sizeof(value_buffer_stack)) {
+        value_buffer_heap = PyMem_MALLOC(PyArray_ITEMSIZE(arr));
+        buf = value_buffer_heap;
     }
-    /* NumPy scalar */
-    else if (PyArray_IsScalar(obj, Generic)) {
-        dtype = PyArray_DescrFromScalar(obj);
-        if (dtype == NULL) {
-            return -1;
-        }
-        value = scalar_value(obj, dtype);
-        if (value == NULL) {
-            Py_DECREF(dtype);
-            return -1;
-        }
-    }
-    /* Python boolean */
-    else if (PyBool_Check(obj)) {
-        value = (char *)value_buffer;
-        *value = (obj == Py_True);
-
-        dtype = PyArray_DescrFromType(NPY_BOOL);
-        if (dtype == NULL) {
-            return -1;
-        }
-    }
-    /* Python integer */
-    else if (PyLong_Check(obj)) {
-        /* Try long long before unsigned long long */
-        npy_longlong ll_v = PyLong_AsLongLong(obj);
-        if (error_converting(ll_v)) {
-            /* Long long failed, try unsigned long long */
-            npy_ulonglong ull_v;
-            PyErr_Clear();
-            ull_v = PyLong_AsUnsignedLongLong(obj);
-            if (ull_v == (unsigned long long)-1 && PyErr_Occurred()) {
-                return -1;
-            }
-            value = (char *)value_buffer;
-            *(npy_ulonglong *)value = ull_v;
-
-            dtype = PyArray_DescrFromType(NPY_ULONGLONG);
-            if (dtype == NULL) {
-                return -1;
-            }
-        }
-        else {
-            /* Long long succeeded */
-            value = (char *)value_buffer;
-            *(npy_longlong *)value = ll_v;
-
-            dtype = PyArray_DescrFromType(NPY_LONGLONG);
-            if (dtype == NULL) {
-                return -1;
-            }
-        }
-    }
-    /* Python float */
-    else if (PyFloat_Check(obj)) {
-        npy_double v = PyFloat_AsDouble(obj);
-        if (error_converting(v)) {
-            return -1;
-        }
-        value = (char *)value_buffer;
-        *(npy_double *)value = v;
-
-        dtype = PyArray_DescrFromType(NPY_DOUBLE);
-        if (dtype == NULL) {
-            return -1;
-        }
-    }
-    /* Python complex */
-    else if (PyComplex_Check(obj)) {
-        npy_double re, im;
-
-        re = PyComplex_RealAsDouble(obj);
-        if (error_converting(re)) {
-            return -1;
-        }
-        im = PyComplex_ImagAsDouble(obj);
-        if (error_converting(im)) {
-            return -1;
-        }
-        value = (char *)value_buffer;
-        ((npy_double *)value)[0] = re;
-        ((npy_double *)value)[1] = im;
-
-        dtype = PyArray_DescrFromType(NPY_CDOUBLE);
-        if (dtype == NULL) {
-            return -1;
-        }
+    if (PyArray_DESCR(arr)->flags & NPY_NEEDS_INIT) {
+        memset(buf, '\0', PyArray_DESCR(arr)->elsize);
     }
 
-    /* Use the value pointer we got if possible */
-    if (value != NULL) {
-        /* TODO: switch to SAME_KIND casting */
-        retcode = PyArray_AssignRawScalar(arr, dtype, value,
-                                NULL, NPY_UNSAFE_CASTING);
-        Py_DECREF(dtype);
-        return retcode;
+    /* NOTE: PyArray_Pack effectively uses unsafe casting. */
+    if (PyArray_Pack(PyArray_DESCR(arr), buf, obj) < 0) {
+        PyMem_FREE(value_buffer_heap);
+        return -1;
     }
-    /* Otherwise convert to an array to do the assignment */
-    else {
-        PyArrayObject *src_arr;
 
-        /**
-         * The dtype of the destination is used when converting
-         * from the pyobject, so that for example a tuple gets
-         * recognized as a struct scalar of the required type.
-         */
-        Py_INCREF(PyArray_DTYPE(arr));
-        src_arr = (PyArrayObject *)PyArray_FromAny(obj,
-                        PyArray_DTYPE(arr), 0, 0, 0, NULL);
-        if (src_arr == NULL) {
-            return -1;
-        }
-
-        if (PyArray_NDIM(src_arr) != 0) {
-            PyErr_SetString(PyExc_ValueError,
-                    "Input object to FillWithScalar is not a scalar");
-            Py_DECREF(src_arr);
-            return -1;
-        }
-
-        retcode = PyArray_CopyInto(arr, src_arr);
-
-        Py_DECREF(src_arr);
-        return retcode;
-    }
+    int res = PyArray_AssignRawScalar(
+            arr, PyArray_DESCR(arr), buf, NULL, NPY_UNSAFE_CASTING);
+    PyMem_FREE(value_buffer_heap);
+    return res;
 }
 
 /*
