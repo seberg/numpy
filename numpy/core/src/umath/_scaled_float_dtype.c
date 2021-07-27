@@ -591,7 +591,8 @@ add_sfloats_resolve_descriptors(
 
 
 static int
-add_loop(const char *ufunc_name, PyBoundArrayMethodObject *bmeth)
+add_loop(const char *ufunc_name,
+        PyArray_DTypeMeta *dtypes[3], PyObject *meth_or_promoter)
 {
     PyObject *mod = PyImport_ImportModule("numpy");
     if (mod == NULL) {
@@ -605,13 +606,12 @@ add_loop(const char *ufunc_name, PyBoundArrayMethodObject *bmeth)
                 "numpy.%s was not a ufunc!", ufunc_name);
         return -1;
     }
-    PyObject *dtype_tup = PyArray_TupleFromItems(
-            3, (PyObject **)bmeth->dtypes, 0);
+    PyObject *dtype_tup = PyArray_TupleFromItems(3, (PyObject **)dtypes, 1);
     if (dtype_tup == NULL) {
         Py_DECREF(ufunc);
         return -1;
     }
-    PyObject *info = PyTuple_Pack(2, dtype_tup, bmeth->method);
+    PyObject *info = PyTuple_Pack(2, dtype_tup, meth_or_promoter);
     Py_DECREF(dtype_tup);
     if (info == NULL) {
         Py_DECREF(ufunc);
@@ -621,6 +621,28 @@ add_loop(const char *ufunc_name, PyBoundArrayMethodObject *bmeth)
     Py_DECREF(ufunc);
     Py_DECREF(info);
     return res;
+}
+
+
+
+/*
+ * We add some very basic promoters to allow multiplying normal and scaled
+ */
+static int
+promote_to_sfloat(PyUFuncObject *NPY_UNUSED(ufunc),
+        PyArray_DTypeMeta *const NPY_UNUSED(dtypes[3]),
+        PyArray_DTypeMeta *const signature[3],
+        PyArray_DTypeMeta *new_dtypes[3])
+{
+    for (int i = 0; i < 3; i++) {
+        PyArray_DTypeMeta *new = &PyArray_SFloatDType;
+        if (signature[i] != NULL) {
+            new = signature[i];
+        }
+        Py_INCREF(new);
+        new_dtypes[i] = new;
+    }
+    return 0;
 }
 
 
@@ -650,7 +672,8 @@ init_ufuncs(void) {
     if (bmeth == NULL) {
         return -1;
     }
-    int res = add_loop("multiply", bmeth);
+    int res = add_loop("multiply",
+            bmeth->dtypes, (PyObject *)bmeth->method);
     Py_DECREF(bmeth);
     if (res < 0) {
         return -1;
@@ -667,11 +690,40 @@ init_ufuncs(void) {
     if (bmeth == NULL) {
         return -1;
     }
-    res = add_loop("add", bmeth);
+    res = add_loop("add",
+            bmeth->dtypes, (PyObject *)bmeth->method);
     Py_DECREF(bmeth);
     if (res < 0) {
         return -1;
     }
+
+    /*
+     * Add a promoter for both directions of multiply with double.
+     */
+    PyArray_DTypeMeta *double_DType = PyArray_DTypeFromTypeNum(NPY_DOUBLE);
+    Py_DECREF(double_DType);  /* immortal anyway */
+
+    PyArray_DTypeMeta *promoter_dtypes[3] = {
+            &PyArray_SFloatDType, double_DType, NULL};
+
+    PyObject *promoter = PyCapsule_New(
+            &promote_to_sfloat, "numpy._ufunc_promoter", NULL);
+    if (promoter == NULL) {
+        return -1;
+    }
+    res = add_loop("multiply", promoter_dtypes, promoter);
+    if (res < 0) {
+        Py_DECREF(promoter);
+        return -1;
+    }
+    promoter_dtypes[0] = double_DType;
+    promoter_dtypes[1] = &PyArray_SFloatDType;
+    res = add_loop("multiply", promoter_dtypes, promoter);
+    Py_DECREF(promoter);
+    if (res < 0) {
+        return -1;
+    }
+
     return 0;
 }
 
