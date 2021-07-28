@@ -145,3 +145,18 @@ class TestSFloat:
         # Check that casting the output fails also (done by the ufunc here)
         with pytest.raises(TypeError):
             np.add(a, a, out=c, casting="safe")
+
+    def test_addition_promotion(self):
+        float_a = np.array([1., 2., 3.])
+        b = self._get_array(2.)
+
+        res1 = b + float_a
+        res2 = float_a + b
+        assert res1.dtype == res2.dtype == SF(2.)
+        expected_view = float_a / 2. + b.view(np.float64)
+        assert_array_equal(res1.view(np.float64), expected_view)
+        assert_array_equal(res2.view(np.float64), expected_view)
+
+        with pytest.raises(TypeError):
+            # Integer and SF common DType is undefined and thus raises:
+            b + np.array([1, 2, 3])

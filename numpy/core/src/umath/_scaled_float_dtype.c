@@ -24,6 +24,7 @@
 #include "convert_datatype.h"
 #include "dtypemeta.h"
 #include "dispatching.h"
+#include "common_dtype.h"
 
 
 typedef struct {
@@ -647,6 +648,49 @@ promote_to_sfloat(PyUFuncObject *NPY_UNUSED(ufunc),
 
 
 /*
+ * NOTE: This will probably be the default for most ufuncs.  Currently, many
+ * ufuncs effectively use this (e.g. addition, multiplication, etc.), although
+ * some need additional logic (e.g. multiplication for timedelta and number)
+ * or should not (usually) use it, e.g. the logical functions.
+ */
+static int
+promote_using_common_dtype(PyUFuncObject *NPY_UNUSED(ufunc),
+        PyArray_DTypeMeta *const dtypes[3],
+        PyArray_DTypeMeta *const signature[3],
+        PyArray_DTypeMeta *new_dtypes[3])
+{
+    PyArray_DTypeMeta *to_promote[3];
+    to_promote[0] = dtypes[0];
+    int n_promote = 1;
+    if (dtypes[1] != NULL) {
+        to_promote[n_promote] = dtypes[1];
+        n_promote += 1;
+    }
+    if (dtypes[2] != NULL) {
+        to_promote[n_promote] = dtypes[2];
+        n_promote += 1;
+    }
+
+    PyArray_DTypeMeta *common = PyArray_PromoteDTypeSequence(
+            n_promote, to_promote);
+    if (common == NULL) {
+        return -1;
+    }
+
+    for (int i = 0; i < 3; i++) {
+        PyArray_DTypeMeta *new = common;
+        if (signature[i] != NULL) {
+            new = signature[i];
+        }
+        Py_INCREF(new);
+        new_dtypes[i] = new;
+    }
+    Py_DECREF(common);
+    return 0;
+}
+
+
+/*
  * Add new ufunc loops (this is somewhat clumsy as of writing it, but should
  * get less so with the introduction of public API).
  */
@@ -719,6 +763,31 @@ init_ufuncs(void) {
     promoter_dtypes[0] = double_DType;
     promoter_dtypes[1] = &PyArray_SFloatDType;
     res = add_loop("multiply", promoter_dtypes, promoter);
+    Py_DECREF(promoter);
+    if (res < 0) {
+        return -1;
+    }
+
+    /*
+     * Add promoter for addition, but this time, we accept any dtype for
+     * second argument by using `np.dtype` as base.
+     */
+    promoter = PyCapsule_New(
+            &promote_using_common_dtype, "numpy._ufunc_promoter", NULL);
+    if (promoter == NULL) {
+        return -1;
+    }
+    promoter_dtypes[0] = &PyArray_SFloatDType;
+    promoter_dtypes[1] = (PyArray_DTypeMeta *)&PyArrayDescr_Type;
+
+    res = add_loop("add", promoter_dtypes, promoter);
+    if (res < 0) {
+        Py_DECREF(promoter);
+        return -1;
+    }
+    promoter_dtypes[0] = (PyArray_DTypeMeta *)&PyArrayDescr_Type;
+    promoter_dtypes[1] = &PyArray_SFloatDType;
+    res = add_loop("add", promoter_dtypes, promoter);
     Py_DECREF(promoter);
     if (res < 0) {
         return -1;
