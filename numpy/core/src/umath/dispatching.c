@@ -252,6 +252,10 @@ resolve_implementation_info(PyUFuncObject *ufunc,
             for (Py_ssize_t i = 0; i < nargs; i++) {
                 int best;
 
+                /* Whether this (normally output) dtype was specified at all */
+                int is_not_specified = (
+                        op_dtypes[i] == (PyArray_DTypeMeta *)Py_None);
+
                 PyObject *prev_dtype = PyTuple_GET_ITEM(best_dtypes, i);
                 PyObject *new_dtype = PyTuple_GET_ITEM(curr_dtypes, i);
 
@@ -259,14 +263,37 @@ resolve_implementation_info(PyUFuncObject *ufunc,
                     /* equivalent, so this entry does not matter */
                     continue;
                 }
-                /*
-                 * TODO: Even if the input is not specified, if we have
-                 *       abstract DTypes and one is a subclass of the other,
-                 *       the subclass should be considered a better match
-                 *       (subclasses are always more specific).
-                 */
+                if (is_not_specified) {
+                    /*
+                     * When DType is completely unspecified, prefer abstract
+                     * over concrete, assuming it will resolve.
+                     * Furthermore, we cannot decide which abstract/None
+                     * is "better", only concrete ones which are subclasses
+                     * of Abstract ones are defined as worse.
+                     */
+                    int prev_is_concrete = 0, new_is_concrete = 0;
+                    if ((prev_dtype != Py_None) &&
+                        (!((PyArray_DTypeMeta *)prev_dtype)->abstract)) {
+                        prev_is_concrete = 1;
+                    }
+                    if ((new_dtype != Py_None) &&
+                        (!((PyArray_DTypeMeta *)new_dtype)->abstract)) {
+                        new_is_concrete = 1;
+                    }
+                    if (prev_is_concrete == new_is_concrete) {
+                        best = -1;
+                    }
+                    else if (prev_is_concrete) {
+                        unambiguously_equally_good = 0;
+                        best = 1;
+                    }
+                    else {
+                        unambiguously_equally_good = 0;
+                        best = 0;
+                    }
+                }
                 /* If either is None, the other is strictly more specific */
-                if (prev_dtype == Py_None) {
+                else if (prev_dtype == Py_None) {
                     unambiguously_equally_good = 0;
                     best = 1;
                 }
@@ -287,13 +314,32 @@ resolve_implementation_info(PyUFuncObject *ufunc,
                      */
                     best = -1;
                 }
+                else if (!((PyArray_DTypeMeta *)prev_dtype)->abstract) {
+                    /* old is not abstract, so better (both not possible) */
+                    unambiguously_equally_good = 0;
+                    best = 0;
+                }
+                else if (!((PyArray_DTypeMeta *)new_dtype)->abstract) {
+                    /* new is not abstract, so better (both not possible) */
+                    unambiguously_equally_good = 0;
+                    best = 1;
+                }
                 /*
-                 * TODO: Unreachable, but we will need logic for abstract
-                 *       DTypes to decide if one is a subclass of the other
-                 *       (And their subclass relation is well defined.)
+                 * Both are abstract DTypes, there is a clear order if
+                 * one of them is a subclass of the other.
+                 * If this fails, reject it completely (could be changed).
+                 * The case that it is the same dtype is already caught.
                  */
                 else {
-                    assert(0);
+                    /*
+                     * TODO: If one is a subclass of the other (and not vice
+                     *       versa), we can prefer the subclass.
+                     */
+                    PyErr_SetString(PyExc_NotImplementedError,
+                            "UFunc dispatching cannot yet deal with two "
+                            "abstract base classes (resolving the better one "
+                            "using subclass relation).");
+                    return -1;
                 }
 
                 if ((current_best != -1) && (current_best != best)) {
