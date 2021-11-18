@@ -41,6 +41,7 @@ typedef enum {
 
 
 struct PyArrayMethodObject_tag;
+struct PyBoundArrayMethodObject_tag;
 
 /*
  * This struct is specific to an individual (possibly repeated) call of
@@ -81,6 +82,9 @@ typedef int (get_loop_function)(
         NpyAuxData **out_transferdata,
         NPY_ARRAYMETHOD_FLAGS *flags);
 
+typedef int (replace_descrs_function)(
+        PyArray_Descr *descrs[],
+        PyArray_Descr *new_descrs[]);
 
 /*
  * This struct will be public and necessary for creating a new ArrayMethod
@@ -124,6 +128,21 @@ typedef struct PyArrayMethodObject_tag {
     PyArrayMethod_StridedLoop *contiguous_loop;
     PyArrayMethod_StridedLoop *unaligned_strided_loop;
     PyArrayMethod_StridedLoop *unaligned_contiguous_loop;
+    /*
+     * Methods used to wrap existing loops with different dtypes, this is in
+     * NumPy but currently "just" sets a special `get_strided_loop` and
+     * `resolve_descriptors`.  If more of this becomes public, this
+     * functionality may be pushed out of NumPy proper.
+     * This allows a Unit function to reuse a normal ufunc by replacing the
+     * descriptors used for the inner-loop.
+     * NOTE: Currently works on the inner-loop level in order to keep the main
+     *       ufunc machinery unmodified.  This could be pushed to the "outer"
+     *       level (into ufuncobject.c), which would avoid the need for
+     *       wrapping the inner-loop in order to pass in the original descrs.
+     */
+    struct PyBoundArrayMethodObject_tag *wrapped;
+    replace_descrs_function *view_input_descrs;
+    replace_descrs_function *wrap_output_descrs;
 } PyArrayMethodObject;
 
 
@@ -137,7 +156,7 @@ typedef struct PyArrayMethodObject_tag {
  * which is also stored on the ufunc (and thus does not need to be repeated
  * on the `ArrayMethod` itself.
  */
-typedef struct {
+typedef struct PyBoundArrayMethodObject_tag {
     PyObject_HEAD
     PyArray_DTypeMeta **dtypes;
     PyArrayMethodObject *method;
@@ -158,6 +177,9 @@ extern NPY_NO_EXPORT PyTypeObject PyBoundArrayMethod_Type;
 #define NPY_METH_contiguous_loop 4
 #define NPY_METH_unaligned_strided_loop 5
 #define NPY_METH_unaligned_contiguous_loop 6
+#define NPY_METH_wrapped_arraymethod 7
+#define NPY_METH_view_input_descrs 8
+#define NPY_METH_wrap_output_descrs 9
 
 
 /*

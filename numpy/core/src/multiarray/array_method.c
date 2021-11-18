@@ -29,6 +29,7 @@
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 #define _MULTIARRAYMODULE
 
+#include <Python.h>
 #include <npy_pycompat.h>
 #include "arrayobject.h"
 #include "array_method.h"
@@ -149,6 +150,130 @@ npy_default_get_strided_loop(
 }
 
 
+/*
+ * Implementations for wrapping an existing ArrayMethod for the use with
+ * different dtypes.
+ */
+
+/*
+ * This function calls the wrapped (Bound)ArrayMethods resolve_descriptors.
+ *
+ * To do this, it has to first replace the input descrs with the correct
+ * ones expected by its `resolve_descriptors`.
+ * After calling it, it then needs to replace the result to wrap it into the
+ * correct descrs for allocation.
+ *
+ * (Due to handling this here, and not in the ufunc core, `get_strided_loop`
+ * will have to unwrap the result once more.)
+ */
+static NPY_CASTING
+wrapped_resolve_descriptors(
+        PyArrayMethodObject *method,
+        PyArray_DTypeMeta **NPY_UNUSED(dtypes),
+        PyArray_Descr **input_descrs,
+        PyArray_Descr **output_descrs)
+{
+    PyArray_Descr *wrapped_descrs[NPY_MAXARGS];
+    PyArray_Descr *wrapped_out_descrs[NPY_MAXARGS];
+
+    if (method->view_input_descrs(input_descrs, wrapped_descrs) < 0) {
+        return -1;
+    }
+    NPY_CASTING res = method->wrapped->method->resolve_descriptors(
+            method->wrapped->method,
+            method->wrapped->dtypes, wrapped_descrs, wrapped_out_descrs);
+    for (int i = 0; i < method->nin + method->nout; i++) {
+        Py_XDECREF(wrapped_descrs[i]);
+    }
+    if (res < 0) {
+        return -1;
+    }
+
+    if (method->wrap_output_descrs(wrapped_out_descrs, output_descrs) < 0) {
+        res = -1;
+    }
+    for (int i = 0; i < method->nin + method->nout; i++) {
+        Py_XDECREF(wrapped_out_descrs[i]);
+    }
+    return res;
+}
+
+
+typedef  struct {
+    NpyAuxData base;
+    PyArrayMethod_Context wrapped_context;
+    PyArrayMethod_StridedLoop *wrapped_loop;
+    NpyAuxData *wrapped_auxdata;
+    int nargs;  /* only for simpler cleanup */
+    PyArray_Descr *descrs[];  /* to use for the wrapped context. */
+} wrapped_context_auxdata;
+
+
+static void
+wrapped_context_auxdata_free(NpyAuxData *auxdata)
+{
+    wrapped_context_auxdata *data = (wrapped_context_auxdata *)auxdata;
+    NPY_AUXDATA_FREE(data->wrapped_auxdata);
+    for (int i = 0; i < data->nargs; i++) {
+        Py_XDECREF(data->descrs[i]);
+    }
+    PyMem_Free(data);
+}
+
+
+static int
+wrapped_strided_loop(PyArrayMethod_Context *NPY_UNUSED(context),
+        char *const *data, const npy_intp *dimensions, const npy_intp *strides,
+        NpyAuxData *auxdata)
+{
+    wrapped_context_auxdata *wrapped_aux = (wrapped_context_auxdata *)auxdata;
+
+    return wrapped_aux->wrapped_loop(&wrapped_aux->wrapped_context,
+            data, dimensions, strides, wrapped_aux->wrapped_auxdata);
+}
+
+
+static int
+wrapped_get_strided_loop(
+        PyArrayMethod_Context *context,
+        int aligned, int move_references, npy_intp *strides,
+        PyArrayMethod_StridedLoop **out_loop, NpyAuxData **out_transferdata,
+        NPY_ARRAYMETHOD_FLAGS *flags)
+{
+    int nargs = context->method->nin + context->method->nout;
+
+    wrapped_context_auxdata *auxdata = PyMem_Calloc(
+            sizeof(wrapped_context_auxdata) + sizeof(PyArray_Descr *) * nargs, 1);
+    if (auxdata == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+
+    if (context->method->view_input_descrs(
+            context->descriptors, auxdata->descrs) < 0) {
+        return -1;
+    }
+
+    /* Finalize auxdata (now that we have the correct descriptors) */
+    auxdata->base.free = &wrapped_context_auxdata_free;
+    /* Copy the context (currently only caller is relevant) */
+    auxdata->wrapped_context = *context;
+    /* replace the method and descrs */
+    auxdata->wrapped_context.method = context->method->wrapped->method;
+    auxdata->wrapped_context.descriptors = auxdata->descrs;
+
+    if (context->method->wrapped->method->get_strided_loop(
+            &auxdata->wrapped_context, aligned, move_references, strides,
+            &auxdata->wrapped_loop, &auxdata->wrapped_auxdata, flags) < 0) {
+        NPY_AUXDATA_FREE((NpyAuxData *)auxdata);
+        return -1;
+    }
+    *out_loop = wrapped_strided_loop;
+    *out_transferdata = (NpyAuxData *)auxdata;
+    return 0;
+}
+
+
 /**
  * Validate that the input is usable to create a new ArrayMethod.
  *
@@ -265,6 +390,15 @@ fill_arraymethod_from_slots(
             case NPY_METH_unaligned_contiguous_loop:
                 meth->unaligned_contiguous_loop = slot->pfunc;
                 continue;
+            case NPY_METH_wrapped_arraymethod:
+                meth->wrapped = slot->pfunc;
+                continue;
+            case NPY_METH_view_input_descrs:
+                meth->view_input_descrs = slot->pfunc;
+                continue;
+            case NPY_METH_wrap_output_descrs:
+                meth->wrap_output_descrs = slot->pfunc;
+                continue;
             default:
                 break;
         }
@@ -307,6 +441,57 @@ fill_arraymethod_from_slots(
                         spec->name);
                 return -1;
             }
+        }
+    }
+    if (meth->wrapped != NULL) {
+        if (!PyObject_TypeCheck(meth->wrapped, &PyBoundArrayMethod_Type)) {
+            PyErr_Format(PyExc_TypeError,
+                    "wrapped method is not a PyBoundArrayMethod! (method: %s)",
+                    spec->name);
+            return -1;
+        }
+        if (meth->wrap_output_descrs == NULL
+                || meth->view_input_descrs == NULL) {
+            PyErr_Format(PyExc_TypeError,
+                    "if wrapping an existing method, must provide "
+                    "`wrap_output_descrs` and `view_input`descrs`. "
+                    "(method: %s)",
+                    spec->name);
+            return -1;
+        }
+        if (meth->resolve_descriptors || meth->get_strided_loop
+                || meth->strided_loop || meth->unaligned_strided_loop
+                || meth->contiguous_loop || meth->unaligned_contiguous_loop) {
+            PyErr_Format(PyExc_TypeError,
+                    "if wrapping an existing method, cannot provide "
+                    "`resolve_descriptors`, `get_strided_loop`, or any loops. "
+                    "(method: %s)",
+                    spec->name);
+            return -1;
+        }
+        /* Sanity check the two methods (gufunc signatures may play in here!) */
+        if (meth->nin != meth->wrapped->method->nin
+                || meth->nout != meth->wrapped->method->nout) {
+            PyErr_Format(PyExc_TypeError,
+                    "wrapped method and new method do not have the same number "
+                    "of inputs and outputs. (method: %s)", spec->name);
+            return -1;
+        }
+        /* copy over important information and fill it in */
+        Py_INCREF(meth->wrapped);
+        meth->casting = meth->wrapped->method->casting;
+        meth->get_strided_loop = &wrapped_get_strided_loop;
+        meth->resolve_descriptors = &wrapped_resolve_descriptors;
+        return 0;
+    }
+    else {
+        if (meth->wrap_output_descrs || meth->view_input_descrs) {
+            PyErr_Format(PyExc_TypeError,
+                    "if not wrapping an existing method, cannot provide "
+                    "`wrap_output_descrs` and `view_input`descrs`. "
+                    "(method: %s)",
+                    spec->name);
+            return -1;
         }
     }
     if (meth->get_strided_loop != &npy_default_get_strided_loop) {
