@@ -872,3 +872,68 @@ class TestCReaderUnitTests:
             data, dtype=np.dtype("U10"), filelike=True,
             quote='"', comment="#", skiplines=1)
         assert_array_equal(res[:, 0], ["1", f"2{newline}", "3", "4 "])
+
+
+def test_delimiter_comment_collision_raises():
+    #NOTE: match= TBD
+    with pytest.raises(ValueError):
+        np.loadtxt(StringIO("1, 2, 3"), delimiter=",", comments=",")
+
+
+def test_delimiter_quotechar_collision_raises():
+    #NOTE: match= TBD
+    with pytest.raises(ValueError):
+        np.loadtxt(StringIO("1, 2, 3"), delimiter=",", quotechar=",")
+
+
+def test_comment_quotechar_collision_raises():
+    #NOTE: match= TBD
+    with pytest.raises(ValueError):
+        np.loadtxt(StringIO("1 2 3"), comments="#", quotechar="#")
+
+
+def test_delimiter_multichar_comment_collision_raises():
+    #NOTE: match= TBD
+    with pytest.raises(ValueError):
+        np.loadtxt(StringIO("1, 2, 3"), delimiter=",", comments="#,")
+
+
+def test_delimiter_and_multiple_comments_collision_raises():
+    #NOTE: match= TBD
+    with pytest.raises(ValueError):
+        np.loadtxt(StringIO("1, 2, 3"), delimiter=",", comments=["#", ","])
+
+
+@pytest.mark.parametrize(
+    "ws",
+    (
+        " ",  # space
+        "\t",  # tab
+        "\u2003",  # em
+        "\u00A0",  # non-break
+        "\u3000",  # ideographic space
+    )
+)
+def test_collision_with_default_delimiter_raises(ws):
+    #NOTE: match= TBD
+    with pytest.raises(ValueError):
+        np.loadtxt(StringIO(f"1{ws}2{ws}3\n4{ws}5{ws}6\n"), comments=ws)
+    #NOTE: match= TBD
+    with pytest.raises(ValueError):
+        np.loadtxt(StringIO(f"1{ws}2{ws}3\n4{ws}5{ws}6\n"), quotechar=ws)
+
+
+@pytest.mark.parametrize("nl", ("\n", "\r\n", "\r"))
+def test_delimiter_newline(nl):
+    txt = StringIO(f"1{nl}2{nl}3{nl}{nl}4{nl}5{nl}6{nl}{nl}")
+    a = np.loadtxt(txt, delimiter=nl)
+    assert_array_equal(a, [1, 2, 3, 4, 5, 6])
+
+
+@pytest.mark.parametrize("n1", ("\n", "\r\n", "\r"))
+@pytest.mark.parametrize("n2", ("\n", "\r\n", "\r"))
+def test_delimiter_comment_both_newline_raises(n1, n2):
+    txt = StringIO(f"1{n1}2{n1}3{n1}{n1}4{n1}5{n1}6{n1}{n1}")
+    #NOTE: match= TBD
+    with pytest.raises(ValueError):
+        np.loadtxt(txt, delimiter=n1, comments=n2)
