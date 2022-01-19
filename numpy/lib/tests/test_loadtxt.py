@@ -889,11 +889,6 @@ def test_comment_quotechar_collision_raises():
         np.loadtxt(StringIO("1 2 3"), comments="#", quotechar="#")
 
 
-def test_delimiter_multichar_comment_collision_raises():
-    with pytest.raises(TypeError, match="control characters.*are identical"):
-        np.loadtxt(StringIO("1, 2, 3"), delimiter=",", comments="#,")
-
-
 def test_delimiter_and_multiple_comments_collision_raises():
     with pytest.raises(
         TypeError, match="Comment characters.*cannot include the delimiter"
