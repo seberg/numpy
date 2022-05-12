@@ -99,8 +99,15 @@ abs_ptrdiff(char *a, char *b)
 
 #define IS_OUTPUT_CONT(tout) (steps[1] == sizeof(tout))
 
-#define IS_BINARY_REDUCE ((args[0] == args[2])\
-        && (steps[0] == steps[2])\
+/*
+ * For reduction loops the input and output are the same and hold a single
+ * value.  `steps == 0` means it is repeated as necessary.
+ * The assert checks that the loop should not be empty (the ufunc machinery
+ * must currently ensure that!).
+ */
+#define IS_BINARY_REDUCE (assert(*dimensions != 0),  \
+        (args[0] == args[2])  \
+        && (steps[0] == steps[2])  \
         && (steps[0] == 0))
 
 /* input contiguous (for binary reduces only) */
