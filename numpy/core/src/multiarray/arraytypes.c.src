@@ -498,14 +498,28 @@ LONGDOUBLE_setitem(PyObject *op, void *ov, void *vap)
         return convert_to_scalar_and_retry(op, ov, vap, LONGDOUBLE_setitem);
     }
 
-    if (PyArray_IsScalar(op, LongDouble)) {
+    if (PyFloat_Check(op)) {
+        temp = (npy_longdouble)PyFloat_AS_DOUBLE(op);
+    }
+    else if (PyLong_Check(op)) {
+        int overflow;
+        npy_longlong llong_val = PyLong_AsLongLongAndOverflow(op, &overflow);
+        if (error_converting(llong_val)) {
+            return -1;
+        }
+        if (overflow == 0) {
+            temp = (npy_longdouble)llong_val;
+        }
+        else {
+            /* overflowed, try parsing via string path */
+            temp = string_to_long_double(op);
+        }
+    }
+    else if (PyArray_IsScalar(op, LongDouble)) {
         temp = PyArrayScalar_VAL(op, LongDouble);
     }
     else {
-        /* In case something funny happened in PyArray_IsScalar */
-        if (PyErr_Occurred()) {
-            return -1;
-        }
+        /* if all else fails, use string path */
         temp = string_to_long_double(op);
     }
     if (PyErr_Occurred()) {
