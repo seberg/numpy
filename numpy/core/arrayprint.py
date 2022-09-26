@@ -45,21 +45,25 @@ from .overrides import array_function_dispatch, set_module
 import operator
 import warnings
 import contextlib
+import contextvars
 
-_format_options = {
-    'edgeitems': 3,  # repr N leading and trailing items of each dimension
-    'threshold': 1000,  # total items > triggers array summarization
-    'floatmode': 'maxprec',
-    'precision': 8,  # precision of floating point representations
-    'suppress': False,  # suppress printing small floating values in exp format
-    'linewidth': 75,
-    'nanstr': 'nan',
-    'infstr': 'inf',
-    'sign': '-',
-    'formatter': None,
-    # Internally stored as an int to simplify comparisons; converted from/to
-    # str/False on the way in/out.
-    'legacy': sys.maxsize}
+_format_options = contextvars.ContextVar("numpy.printoptions",
+    default={
+        'edgeitems': 3,  # repr N leading and trailing items of each dimension
+        'threshold': 1000,  # total items > triggers array summarization
+        'floatmode': 'maxprec',
+        'precision': 8,  # precision of floating point representations
+        # suppress printing small floating values in exp format
+        'suppress': False,
+        'linewidth': 75,
+        'nanstr': 'nan',
+        'infstr': 'inf',
+        'sign': '-',
+        'formatter': None,
+        # Internally stored as an int to simplify comparisons;
+        # converted from/to str/False on the way in/out.
+        'legacy': sys.maxsize,
+    })
 
 def _make_options_dict(precision=None, threshold=None, edgeitems=None,
                        linewidth=None, suppress=None, nanstr=None, infstr=None,
@@ -122,6 +126,15 @@ def set_printoptions(precision=None, threshold=None, edgeitems=None,
 
     These options determine the way floating point numbers, arrays and
     other NumPy objects are displayed.
+
+    .. note::
+
+        This function modifies behavior in a (context) global way.
+        To avoid modifying behavior unintentionally, we suggest using the
+        safer `numpy.printoptions` context::
+
+            with np.printoptions(...):
+                # code using certain formatting
 
     Parameters
     ----------
@@ -274,23 +287,37 @@ def set_printoptions(precision=None, threshold=None, edgeitems=None,
     array([ 0.  ,  1.11,  2.22, ...,  7.78,  8.89, 10.  ])
 
     """
+    # unlike the internal API, does not return the contextvar token.
+    _set_printoptions(
+        precision, threshold, edgeitems, linewidth, suppress, nanstr, infstr,
+        formatter, sign, floatmode, legacy=legacy)
+
+def _set_printoptions(
+        precision=None, threshold=None, edgeitems=None,
+        linewidth=None, suppress=None, nanstr=None, infstr=None,
+        formatter=None, sign=None, floatmode=None, *, legacy=None):
     opt = _make_options_dict(precision, threshold, edgeitems, linewidth,
                              suppress, nanstr, infstr, sign, formatter,
                              floatmode, legacy)
     # formatter is always reset
     opt['formatter'] = formatter
-    _format_options.update(opt)
+    # Copy the current options and update them:
+    new_opts = _format_options.get().copy()
+    new_opts.update(opt)
 
     # set the C variable for legacy mode
-    if _format_options['legacy'] == 113:
-        set_legacy_print_mode(113)
-        # reset the sign option in legacy mode to avoid confusion
-        _format_options['sign'] = '-'
-    elif _format_options['legacy'] == 121:
-        set_legacy_print_mode(121)
-    elif _format_options['legacy'] == sys.maxsize:
-        set_legacy_print_mode(0)
+    if "legacy" in opt:
+        if new_opts['legacy'] == 113:
+            set_legacy_print_mode(113)
+            # reset the sign option in legacy mode to avoid confusion
+            new_opts['sign'] = '-'
+        elif new_opts['legacy'] == 121:
+            set_legacy_print_mode(121)
+        elif new_opts['legacy'] == sys.maxsize:
+            set_legacy_print_mode(0)
 
+    # Store the new options in the current context:
+    return _format_options.set(new_opts)
 
 @set_module('numpy')
 def get_printoptions():
@@ -319,7 +346,7 @@ def get_printoptions():
     set_printoptions, printoptions, set_string_function
 
     """
-    opts = _format_options.copy()
+    opts = _format_options.get().copy()
     opts['legacy'] = {
         113: '1.13', 121: '1.21', sys.maxsize: False,
     }[opts['legacy']]
@@ -358,12 +385,11 @@ def printoptions(*args, **kwargs):
     set_printoptions, get_printoptions
 
     """
-    opts = np.get_printoptions()
+    token = np._set_printoptions(*args, **kwargs)
     try:
-        np.set_printoptions(*args, **kwargs)
         yield np.get_printoptions()
     finally:
-        np.set_printoptions(**opts)
+        _format_options.reset(token)
 
 
 def _leading_trailing(a, edgeitems, index=()):
@@ -711,7 +737,7 @@ def array2string(a, max_line_width=None, precision=None,
     overrides = _make_options_dict(precision, threshold, edgeitems,
                                    max_line_width, suppress_small, None, None,
                                    sign, formatter, floatmode, legacy)
-    options = _format_options.copy()
+    options = _format_options.get().copy()
     options.update(overrides)
 
     if options['legacy'] <= 113:
@@ -1010,8 +1036,8 @@ class FloatingFormat:
         # if there are non-finite values, may need to increase pad_left
         if data.size != finite_vals.size:
             neginf = self.sign != '-' or any(data[isinf(data)] < 0)
-            nanlen = len(_format_options['nanstr'])
-            inflen = len(_format_options['infstr']) + neginf
+            nanlen = len(_format_options.get()['nanstr'])
+            inflen = len(_format_options.get()['infstr']) + neginf
             offset = self.pad_right + 1  # +1 for decimal pt
             self.pad_left = max(self.pad_left, nanlen - offset, inflen - offset)
 
@@ -1020,10 +1046,10 @@ class FloatingFormat:
             with errstate(invalid='ignore'):
                 if np.isnan(x):
                     sign = '+' if self.sign == '+' else ''
-                    ret = sign + _format_options['nanstr']
+                    ret = sign + _format_options.get()['nanstr']
                 else:  # isinf
                     sign = '-' if x < 0 else '+' if self.sign == '+' else ''
-                    ret = sign + _format_options['infstr']
+                    ret = sign + _format_options.get()['infstr']
                 return ' '*(self.pad_left + self.pad_right + 1 - len(ret)) + ret
 
         if self.exp_format:
@@ -1096,7 +1122,7 @@ def format_float_scientific(x, precision=None, unique=True, trim='k',
         identify the value may be printed and rounded unbiased.
 
         -- versionadded:: 1.21.0
-        
+
     Returns
     -------
     rep : string
@@ -1181,7 +1207,7 @@ def format_float_positional(x, precision=None, unique=True,
         Minimum number of digits to print. Only has an effect if `unique=True`
         in which case additional digits past those necessary to uniquely
         identify the value may be printed, rounding the last additional digit.
-        
+
         -- versionadded:: 1.21.0
 
     Returns
@@ -1390,7 +1416,7 @@ def _void_scalar_repr(x):
     scalartypes.c.src code, and is placed here because it uses the elementwise
     formatters defined above.
     """
-    return StructuredVoidFormat.from_data(array(x), **_format_options)(x)
+    return StructuredVoidFormat.from_data(array(x), **_format_options.get())(x)
 
 
 _typelessdata = [int_, float_, complex_, bool_]
@@ -1426,7 +1452,7 @@ def dtype_is_implied(dtype):
     array([1, 2, 3], dtype=int8)
     """
     dtype = np.dtype(dtype)
-    if _format_options['legacy'] <= 113 and dtype.type == bool_:
+    if _format_options.get()['legacy'] <= 113 and dtype.type == bool_:
         return False
 
     # not just void types can be structured, and names are not part of the repr
@@ -1469,7 +1495,7 @@ def _array_repr_implementation(
         array2string=array2string):
     """Internal version of array_repr() that allows overriding array2string."""
     if max_line_width is None:
-        max_line_width = _format_options['linewidth']
+        max_line_width = _format_options.get()['linewidth']
 
     if type(arr) is not ndarray:
         class_name = type(arr).__name__
@@ -1481,7 +1507,7 @@ def _array_repr_implementation(
     prefix = class_name + "("
     suffix = ")" if skipdtype else ","
 
-    if (_format_options['legacy'] <= 113 and
+    if (_format_options.get()['legacy'] <= 113 and
             arr.shape == () and not arr.dtype.names):
         lst = repr(arr.item())
     elif arr.size > 0 or arr.shape == (0,):
@@ -1502,7 +1528,7 @@ def _array_repr_implementation(
     # Note: This line gives the correct result even when rfind returns -1.
     last_line_len = len(arr_str) - (arr_str.rfind('\n') + 1)
     spacer = " "
-    if _format_options['legacy'] <= 113:
+    if _format_options.get()['legacy'] <= 113:
         if issubclass(arr.dtype.type, flexible):
             spacer = '\n' + ' '*len(class_name + "(")
     elif last_line_len + len(dtype_str) + 1 > max_line_width:
@@ -1576,7 +1602,7 @@ def _array_str_implementation(
         a, max_line_width=None, precision=None, suppress_small=None,
         array2string=array2string):
     """Internal version of array_str() that allows overriding array2string."""
-    if (_format_options['legacy'] <= 113 and
+    if (_format_options.get()['legacy'] <= 113 and
             a.shape == () and not a.dtype.names):
         return str(a.item())
 
