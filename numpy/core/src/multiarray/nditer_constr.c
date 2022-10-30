@@ -1556,7 +1556,8 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
     NIT_ITERSIZE(iter) = 1;
     for (iop = 0; iop < nop; ++iop) {
         PyArrayObject *op_cur = op[iop];
-        if (op_cur != NULL && PyArray_NDIM(op_cur) > ndim) {
+        if (op_cur != NULL && (op_axes == NULL || op_axes[iop] == NULL)
+                && PyArray_NDIM(op_cur) > ndim) {
             /*
              * Possible if op_axes are being used, but
              * op_axes[iop] is NULL
@@ -1720,7 +1721,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
         }
     }
 
-    if (NPY_UNLIKELY(broadcast_error_operand < NPY_MAXDIMS)) {
+    if (NPY_UNLIKELY(broadcast_error_operand < NPY_MAXARGS)) {
         if (broadcast_error_operand < 0) {
             goto broadcast_error;
         }
@@ -1757,8 +1758,8 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
             }
         }
         if (shape != 1) {
-            if (npy_mul_with_overflow_intp(&NIT_ITERSIZE(iter),
-                    NIT_ITERSIZE(iter), shape)) {
+            if (npy_mul_sizes_with_overflow(
+                        &NIT_ITERSIZE(iter), NIT_ITERSIZE(iter), shape)) {
                 if ((itflags & NPY_ITFLAG_HASMULTIINDEX) &&
                         !(itflags & NPY_ITFLAG_HASINDEX) &&
                         !(itflags & NPY_ITFLAG_BUFFER)) {
@@ -1901,28 +1902,12 @@ broadcast_error: {
     }
 
 operand_different_than_broadcast: {
-        npy_intp remdims[NPY_MAXDIMS];
-        PyObject *errmsg, *tmp;
-
-        if (!(op_flags[iop] & NPY_ITER_NO_BROADCAST)) {
-            /* the error must have happened due to a reduction, give details */
-            if (!npyiter_check_reduce_ok_and_set_flags(
-                    iter, flags, op_itflags, iop, maskop, idim)) {
-                return 0;
-            }
-            // TODO: had an assert here, it failed figure it out!
-        }
-
-        /* Start of error message */
-        if (op_flags[iop] & NPY_ITER_READONLY) {
-            errmsg = PyUString_FromString("non-broadcastable operand "
-                                          "with shape ");
-        }
-        else {
-            errmsg = PyUString_FromString("non-broadcastable output "
-                                          "operand with shape ");
-        }
-        if (errmsg == NULL) {
+        /* operand shape */
+        iop = broadcast_error_operand;
+        int ndims = PyArray_NDIM(op[iop]);
+        npy_intp *dims = PyArray_DIMS(op[iop]);
+        PyObject *shape1 = convert_shape_to_string(ndims, dims, "");
+        if (shape1 == NULL) {
             return 0;
         }
 
