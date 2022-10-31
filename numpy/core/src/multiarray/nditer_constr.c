@@ -1501,6 +1501,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
     npy_intp sizeof_axisdata;
     PyArrayObject **op = NIT_OPERANDS(iter);
     npy_intp broadcast_shape[NPY_MAXDIMS];
+    int defining_operand[NPY_MAXDIMS];
 
     /* First broadcast the shapes together */
     if (itershape == NULL) {
@@ -1516,6 +1517,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
             }
             else {
                 broadcast_shape[idim] = itershape[idim];
+                defining_operand[idim] = -1;
             }
         }
     }
@@ -1541,7 +1543,6 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
      * a more useful error message with the full shape found.  If no common
      * shape could be found, sets the error operand to -1.
      */
-    int defining_operand[NPY_MAXDIMS];
     int broadcast_error_operand = NPY_MAXARGS;
     int broadcast_error_dim = -1;  /* The dimension where the error occurred */
     /*
@@ -1709,10 +1710,11 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                 }
             }
             else if (*bshape == 1) {
-                /* The previous op requires broadcasting but does not allow it */
-                if (defining_operand[idim] > iop) {
-                    broadcast_error_operand = defining_operand[idim];
-                }
+                /*
+                 * The previous op requires broadcasting but does not allow it
+                 * (or it was set by the shape, in which case definig-op is -1)
+                 */
+                broadcast_error_operand = defining_operand[idim];
             }
             else {
                 /* Give a generic broadcast error, but find all dimensions */
