@@ -1619,7 +1619,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                 op_axis = npyiter_get_op_axis(
                         axes[ndim - idim - 1], &reduction_axis);
 
-                if (op_axis < 0 || (op_cur == NULL && reduction_axis)) {
+                if (reduction_axis && (op_axis < 0 || op_cur == NULL)) {
                     /* this is an explicit broadcast dimension */
                     op_shape = -1;
                 }
@@ -1712,9 +1712,13 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
             else if (*bshape == 1) {
                 /*
                  * The previous op requires broadcasting but does not allow it
-                 * (or it was set by the shape, in which case definig-op is -1)
+                 * (or it was set by the shape, and definig-op is -1)
                  */
                 broadcast_error_operand = defining_operand[idim];
+                if (broadcast_error_operand != -1) {
+                    /* report the shape as if the bad operand was broadcast: */
+                     *bshape = op_shape;
+                }
             }
             else {
                 /* Give a generic broadcast error, but find all dimensions */
@@ -1906,14 +1910,20 @@ broadcast_error: {
 operand_different_than_broadcast: {
         /* operand shape */
         iop = broadcast_error_operand;
-        int ndims = PyArray_NDIM(op[iop]);
-        npy_intp *dims = PyArray_DIMS(op[iop]);
-        PyObject *shape1 = convert_shape_to_string(ndims, dims, "");
+        int op_ndim = PyArray_NDIM(op[iop]);
+        npy_intp *op_dims = PyArray_DIMS(op[iop]);
+        PyObject *shape1 = convert_shape_to_string(op_ndim, op_dims, "");
         if (shape1 == NULL) {
             return 0;
         }
 
         /* Broadcast shape */
+        for (int i = 0; i < ndim; i++) {
+            /* broadcast dimensions end up having size 1, report them here: */
+            if (broadcast_shape[i] == -1) {
+                broadcast_shape[i] = 1;
+            }
+        }
         PyObject *shape2 = convert_shape_to_string(ndim, broadcast_shape, "");
         if (shape2 == NULL) {
             Py_DECREF(shape1);
