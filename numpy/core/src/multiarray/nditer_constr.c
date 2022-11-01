@@ -1619,7 +1619,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                 op_axis = npyiter_get_op_axis(
                         axes[ndim - idim - 1], &reduction_axis);
 
-                if (op_axis < 0) {
+                if (op_axis < 0 || (op_cur == NULL && reduction_axis)) {
                     /* this is an explicit broadcast dimension */
                     op_shape = -1;
                 }
