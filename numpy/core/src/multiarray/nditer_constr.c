@@ -1619,7 +1619,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                 op_axis = npyiter_get_op_axis(
                         axes[ndim - idim - 1], &reduction_axis);
 
-                if (reduction_axis && (op_axis < 0 || op_cur == NULL)) {
+                if (op_axis < 0 || (op_cur == NULL && reduction_axis)) {
                     /* this is an explicit broadcast dimension */
                     op_shape = -1;
                 }
@@ -1663,6 +1663,14 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                     !(op_itflags[iop] & NPY_OP_ITFLAG_NO_REDUCE))) {
                 op_shape = -1;
             }
+            else if (reduction_axis) {
+                if (op_itflags[iop] & NPY_OP_ITFLAG_WRITE) {
+                    NIT_ITFLAGS(iter) |= NPY_ITFLAG_REDUCE;
+                    op_itflags[iop] |= NPY_OP_ITFLAG_REDUCE;
+                }
+                strides[iop] = 0;
+                continue;
+            }
 
             /*
              * We do not reach this point for allocated axes (they can
@@ -1671,6 +1679,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
             if (op_shape == -1) {
                 /* This is a potential broadcast axis, mark for broadcast */
                 strides[iop] = NPY_MIN_INTP;
+                set_reduce_operands = 1;
                 continue;
             }
             if (op_shape <= 1) {
@@ -1754,12 +1763,16 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
         }
         NAD_SHAPE(axisdata) = shape;
 
-        for (iop = 0; iop < nop; iop++) {
-            if (strides[iop] == NPY_MIN_INTP) {
-                strides[iop] = 0;
-                if (shape != 1) {
-                    NIT_ITFLAGS(iter) |= NPY_ITFLAG_REDUCE;
-                    op_itflags[iop] |= NPY_OP_ITFLAG_REDUCE;
+        if (NPY_UNLIKELY(set_reduce_operands)) {
+            for (iop = 0; iop < nop; iop++) {
+                if (strides[iop] == NPY_MIN_INTP) {
+                    strides[iop] = 0;
+                    if (shape != 1) {
+                        if (!npyiter_check_reduce_ok_and_set_flags(
+                                iter, flags, op_itflags, iop, maskop, idim)) {
+                            return 0;
+                        }
+                    }
                 }
             }
         }
@@ -1910,9 +1923,9 @@ broadcast_error: {
 operand_different_than_broadcast: {
         /* operand shape */
         iop = broadcast_error_operand;
-        int op_ndim = PyArray_NDIM(op[iop]);
-        npy_intp *op_dims = PyArray_DIMS(op[iop]);
-        PyObject *shape1 = convert_shape_to_string(op_ndim, op_dims, "");
+        int ndims = PyArray_NDIM(op[iop]);
+        npy_intp *dims = PyArray_DIMS(op[iop]);
+        PyObject *shape1 = convert_shape_to_string(ndims, dims, "");
         if (shape1 == NULL) {
             return 0;
         }
