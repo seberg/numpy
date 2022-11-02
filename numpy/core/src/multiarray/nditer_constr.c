@@ -9,6 +9,7 @@
  *
  * See LICENSE.txt for the license.
  */
+#include "numpy/ndarraytypes.h"
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 
 /* Allow this .c file to include nditer_impl.h */
@@ -1546,10 +1547,12 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
      * This is likely not vital for performance in general, but retains
      * behaviour.  This has to be done once at the end.
      */
-    int set_reduce_operands = 0;
+    int check_implicit_reduce_operands = 0;
 
     NIT_ITERSIZE(iter) = 1;
     for (iop = 0; iop < nop; ++iop) {
+        int allow_implicit_broadcast = 0, broadcast_is_reduction = 0;
+
         PyArrayObject *op_cur = op[iop];
         if (op_cur != NULL && (op_axes == NULL || op_axes[iop] == NULL)
                 && PyArray_NDIM(op_cur) > ndim) {
@@ -1561,6 +1564,19 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                     "input operand has more dimensions than allowed "
                     "by the axis remapping");
             return 0;
+        }
+        /*
+         * We can broadcast if the no-broadcast flag is not used.  In that
+         * case, the operand must be either not writeable, or it must be OK
+         * to reduce it.
+         */
+        if (!(op_flags[iop] & NPY_ITER_NO_BROADCAST)
+                && (!(op_flags[iop] & NPY_OP_ITFLAG_WRITE)
+                    || ((op_flags[iop] & NPY_OP_ITFLAG_READ)
+                        && (flags & NPY_ITER_REDUCE_OK)
+                        && (iop != maskop)))) {
+            allow_implicit_broadcast = 1;
+            broadcast_is_reduction = (op_flags[iop] & NPY_OP_ITFLAG_WRITE) != 0;
         }
 
         axisdata = NIT_AXISDATA(iter);
@@ -1599,7 +1615,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                             }
                         }
                         op_axis = -1;
-                        op_shape = -1;
+                        op_shape = 1;
                     }
                     else {
                         op_axis = ondim-idim-1;
@@ -1669,7 +1685,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                 /* This is a potential broadcast axis, mark for broadcast */
                 strides[iop] = NPY_MIN_INTP;
                 //if (op_itflags[iop] & NPY_OP_ITFLAG_WRITE) {
-                    set_reduce_operands = 1;
+                    check_implicit_reduce_operands = 1;
                 //}
                 continue;
             }
@@ -1752,7 +1768,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
         }
         NAD_SHAPE(axisdata) = shape;
 
-        if (NPY_UNLIKELY(set_reduce_operands)) {
+        if (NPY_UNLIKELY(check_implicit_reduce_operands)) {
             for (iop = 0; iop < nop; iop++) {
                 if (strides[iop] == NPY_MIN_INTP) {
                     strides[iop] = 0;
