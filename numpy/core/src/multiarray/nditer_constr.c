@@ -1511,14 +1511,8 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
     }
     else {
         for (idim = 0; idim < ndim; ++idim) {
-            /* Negative shape entries are deduced from the operands */
-            if (broadcast_shape < 0) {
-                broadcast_shape[idim] = -1;
-            }
-            else {
-                broadcast_shape[idim] = itershape[idim];
-                defining_operand[idim] = -1;
-            }
+            broadcast_shape[idim] = itershape[idim];
+            defining_operand[idim] = -1;  /* only needed for non-negative */
         }
     }
 
@@ -1541,10 +1535,10 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
     /*
      * If a broadcast error occurred, still continue, so that we can report
      * a more useful error message with the full shape found.  If no common
-     * shape could be found, sets the error operand to -1.
+     * shape could be found, set the error operand to -1.
      */
     int broadcast_error_operand = NPY_MAXARGS;
-    int broadcast_error_dim = -1;  /* The dimension where the error occurred */
+
     /*
      * If there is a reduce op, we may leave an axis at -1, if it is set
      * later on, all previous operands did not set it, and will need to be
@@ -1601,7 +1595,6 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                              * (This is similar to too many op_axes).
                              */
                             if (broadcast_error_operand > iop) {
-                                broadcast_error_dim = idim;
                                 broadcast_error_operand = iop;
                             }
                         }
@@ -1619,7 +1612,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                 op_axis = npyiter_get_op_axis(
                         axes[ndim - idim - 1], &reduction_axis);
 
-                if (op_axis < 0 || (op_cur == NULL && reduction_axis)) {
+                if (op_axis < 0 || (reduction_axis && op_cur == NULL)) {
                     /* this is an explicit broadcast dimension */
                     op_shape = -1;
                 }
@@ -1630,6 +1623,18 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                 }
                 else if (op_axis < PyArray_NDIM(op_cur)) {
                     op_shape = PyArray_DIM(op_cur, op_axis);
+
+                    if (reduction_axis) {
+                        if (NPY_UNLIKELY(op_shape != 1)) {
+                            PyErr_Format(PyExc_ValueError,
+                                    "operand was set up as a reduction along axis "
+                                    "%d, but the length of the axis is %zd "
+                                    "(it has to be 1)", op_axis,
+                                    (Py_ssize_t)PyArray_DIM(op_cur, op_axis));
+                            return 0;
+                        }
+                        op_shape = -1;
+                    }
                 }
                 else {
                     PyErr_Format(PyExc_ValueError,
@@ -1639,22 +1644,6 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
                             iop, (ndim-idim-1), op_axis,
                             iop, PyArray_DIM(op_cur, op_axis));
                     return 0;
-                }
-
-                /* If this is an explicit reduction, check shape and mark it. */
-                if (reduction_axis) {
-                    if (op_shape == 1) {
-                        /* mark shape as explicit broadcast if not already -1 */
-                        op_shape = -1;
-                    }
-                    if (op_shape != -1) {
-                        PyErr_Format(PyExc_ValueError,
-                                "operand was set up as a reduction along axis "
-                                "%d, but the length of the axis is %zd "
-                                "(it has to be 1)", op_axis,
-                                (Py_ssize_t)PyArray_DIM(op_cur, op_axis));
-                        return 0;
-                    }
                 }
             }
             /* If the shape is 1, the flags may still allow broadcasting */
@@ -1679,7 +1668,9 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
             if (op_shape == -1) {
                 /* This is a potential broadcast axis, mark for broadcast */
                 strides[iop] = NPY_MIN_INTP;
-                set_reduce_operands = 1;
+                //if (op_itflags[iop] & NPY_OP_ITFLAG_WRITE) {
+                    set_reduce_operands = 1;
+                //}
                 continue;
             }
             if (op_shape <= 1) {
@@ -1711,7 +1702,6 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
             }
 
             /* At this point we have an error, but distinguish between them */
-            broadcast_error_dim = idim;
             if (op_shape == 1) {
                 /* This op requires broadcasting but does not allow it */
                 if (broadcast_error_operand > iop) {
@@ -1720,7 +1710,7 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
             }
             else if (*bshape == 1) {
                 /*
-                 * The previous op requires broadcasting but does not allow it
+                 * A previous op requires broadcasting but does not allow it
                  * (or it was set by the shape, and definig-op is -1)
                  */
                 broadcast_error_operand = defining_operand[idim];
@@ -1740,7 +1730,6 @@ npyiter_fill_axisdata(NpyIter *iter, npy_uint32 flags, npyiter_opitflags *op_itf
         if (broadcast_error_operand < 0) {
             goto broadcast_error;
         }
-        idim = broadcast_error_dim;
         goto operand_different_than_broadcast;
     }
 
