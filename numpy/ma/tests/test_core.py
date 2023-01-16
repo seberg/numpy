@@ -1238,6 +1238,10 @@ class TestMaskedArrayArithmetic:
         b = np.maximum.reduce(a)
         assert_equal(b, 3)
 
+        # TODO: This should use axis=0 (via MaskedArrayFutureWarning)!
+        a = array([[1, 3], [4, 5]], mask=[[False, False], [False, True]])
+        assert_equal(maximum.reduce(a), maximum.reduce(a, axis=-1))
+
     def test_minmax_funcs_with_output(self):
         # Tests the min/max functions with explicit outputs
         mask = np.random.rand(12).round()
@@ -2436,6 +2440,10 @@ class TestUfuncs:
         assert_equal(product(a, axis=0), 0)
         assert_equal(add.reduce(a), pi)
 
+    def test_reduce_default_axis(self):
+        a = masked_array([[1, 2], [2, 3]])
+        assert_array_equal(add.reduce(a), np.add.reduce(a._data))
+
     def test_minmax(self):
         # Tests extrema on MaskedArrays.
         a = arange(1, 13).reshape(3, 4)
@@ -3552,6 +3560,9 @@ class TestMaskedArrayMethods:
     def test_argsort(self):
         # Test argsort
         a = array([1, 5, 2, 4, 3], mask=[1, 0, 0, 1, 0])
+        assert_equal(np.argsort(a), argsort(a))
+
+        a = array([[1, 5, 2], [3, 4, 3]], mask=[[1, 0, 0], [0, 1, 0]])
         assert_equal(np.argsort(a), argsort(a))
 
     def test_squeeze(self):

@@ -81,35 +81,10 @@ __all__ = [
 MaskType = np.bool_
 nomask = MaskType(0)
 
+
+# Currently (as of 2023-01) this warning is unused:
 class MaskedArrayFutureWarning(FutureWarning):
     pass
-
-def _deprecate_argsort_axis(arr):
-    """
-    Adjust the axis passed to argsort, warning if necessary
-
-    Parameters
-    ----------
-    arr
-        The array which argsort was called on
-
-    np.ma.argsort has a long-term bug where the default of the axis argument
-    is wrong (gh-8701), which now must be kept for backwards compatibility.
-    Thankfully, this only makes a difference when arrays are 2- or more-
-    dimensional, so we only need a warning then.
-    """
-    if arr.ndim <= 1:
-        # no warning needed - but switch to -1 anyway, to avoid surprising
-        # subclasses, which are more likely to implement scalar axes.
-        return -1
-    else:
-        # 2017-04-11, Numpy 1.13.0, gh-8701: warn on axis default
-        warnings.warn(
-            "In the future the default for argsort will be axis=-1, not the "
-            "current None, to match its documentation and np.argsort. "
-            "Explicitly pass -1 or None to silence this warning.",
-            MaskedArrayFutureWarning, stacklevel=3)
-        return None
 
 
 def doc_note(initialdoc, note):
@@ -5485,7 +5460,7 @@ class MaskedArray(ndarray):
             out.__setmask__(self._mask)
         return out
 
-    def argsort(self, axis=np._NoValue, kind=None, order=None,
+    def argsort(self, axis=-1, kind=None, order=None,
                 endwith=True, fill_value=None):
         """
         Return an ndarray of indices that sort the array along the
@@ -5547,10 +5522,6 @@ class MaskedArray(ndarray):
         array([1, 0, 2])
 
         """
-
-        # 2017-04-11, Numpy 1.13.0, gh-8701: warn on axis default
-        if axis is np._NoValue:
-            axis = _deprecate_argsort_axis(self)
 
         if fill_value is None:
             if endwith:
@@ -6722,19 +6693,11 @@ class _extrema_operation(_MaskedUFunc):
 
         return where(self.compare(a, b), a, b)
 
-    def reduce(self, target, axis=np._NoValue):
+    # TODO: The ufuncs, and ma.ufunc versions use axis=0 for reductions!
+    def reduce(self, target, axis=-1):
         "Reduce target along the given axis."
         target = narray(target, copy=False, subok=True)
         m = getmask(target)
-
-        if axis is np._NoValue and target.ndim > 1:
-            # 2017-05-06, Numpy 1.13.0: warn on axis default
-            warnings.warn(
-                f"In the future the default for ma.{self.__name__}.reduce will be axis=0, "
-                f"not the current None, to match np.{self.__name__}.reduce. "
-                "Explicitly pass 0 or None to silence this warning.",
-                MaskedArrayFutureWarning, stacklevel=2)
-            axis = None
 
         if axis is not np._NoValue:
             kwargs = dict(axis=axis)
@@ -6969,13 +6932,9 @@ def power(a, b, third=None):
 argmin = _frommethod('argmin')
 argmax = _frommethod('argmax')
 
-def argsort(a, axis=np._NoValue, kind=None, order=None, endwith=True, fill_value=None):
+def argsort(a, axis=-1, kind=None, order=None, endwith=True, fill_value=None):
     "Function version of the eponymous method."
     a = np.asanyarray(a)
-
-    # 2017-04-11, Numpy 1.13.0, gh-8701: warn on axis default
-    if axis is np._NoValue:
-        axis = _deprecate_argsort_axis(a)
 
     if isinstance(a, MaskedArray):
         return a.argsort(axis=axis, kind=kind, order=order,
