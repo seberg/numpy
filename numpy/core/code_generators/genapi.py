@@ -110,11 +110,12 @@ class StealRef:
 
 
 class Function:
-    def __init__(self, name, return_type, args, doc=''):
+    def __init__(self, name, return_type, args, doc='', version_limit=None):
         self.name = name
         self.return_type = _repl(return_type)
         self.args = args
         self.doc = doc
+        self.version_limit = version_limit
 
     def _format_arg(self, typename, name):
         if typename.endswith('*'):
@@ -219,6 +220,7 @@ def find_functions(filename, tag='API'):
     else:
         fo = open(filename, 'r')
     functions = []
+    version_limit = None
     return_type = None
     function_name = None
     function_args = []
@@ -231,6 +233,14 @@ def find_functions(filename, tag='API'):
             line = line.strip()
             if state == SCANNING:
                 if line.startswith(tagcomment):
+                    version_limit = line[len(tagcomment):].strip().split("*")[0]
+                    if not version_limit:
+                        version_limit = None
+                    else:
+                        major, minor = version_limit.split(".")
+                        version_limit = 0x01 * int(major)
+                        version_limit += 0x00010000 * int(minor)
+                        version_limit = hex(version_limit)
                     if line.endswith('*/'):
                         state = STATE_RETTYPE
                     else:
@@ -265,8 +275,9 @@ def find_functions(filename, tag='API'):
                     fargs_str = ' '.join(function_args).rstrip()[:-1].rstrip()
                     fargs = split_arguments(fargs_str)
                     f = Function(function_name, return_type, fargs,
-                                 '\n'.join(doclist))
+                                 '\n'.join(doclist), version_limit=version_limit)
                     functions.append(f)
+                    version_limit = None
                     return_type = None
                     function_name = None
                     function_args = []
@@ -388,13 +399,14 @@ extern NPY_NO_EXPORT PyBoolScalarObject _PyArrayScalar_BoolValues[2];
         return astr
 
 class FunctionApi:
-    def __init__(self, name, index, annotations, return_type, args, api_name):
+    def __init__(self, name, index, annotations, return_type, args, api_name, version_limit=None):
         self.name = name
         self.index = index
         self.annotations = annotations
         self.return_type = return_type
         self.args = args
         self.api_name = api_name
+        self.version_limit = version_limit
 
     def _argtypes_string(self):
         if not self.args:
@@ -410,6 +422,13 @@ class FunctionApi:
                                 self._argtypes_string(),
                                 self.api_name,
                                 self.index)
+        if self.version_limit:
+            define =  f"""\
+#if NUMPY_TARGET_VERSION < {self.version_limit}
+{define}
+#else
+#define {self.name} (Old_NumPy_target: see https://numpy.org/some_url)
+#endif"""
         return define
 
     def array_api_define(self):

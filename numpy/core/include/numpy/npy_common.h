@@ -10,6 +10,14 @@
 #include <npy_config.h>
 #endif
 
+#ifndef NUMPY_TARGET_VERSION
+#if defined(NPY_INTERNAL_BUILD) && NPY_INTERNAL_BUILD
+    #define NUMPY_TARGET_VERSION 0x02000000  // Current one
+#else
+    #define NUMPY_TARGET_VERSION 0x01013000  // Oldest acceptable one!
+#endif
+#endif
+
 /*
  * using static inline modifiers when defining npy_math functions
  * allows the compiler to make optimizations when possible

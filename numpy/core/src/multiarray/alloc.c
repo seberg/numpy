@@ -525,7 +525,7 @@ PyDataMem_UserRENEW(void *ptr, size_t size, PyObject *mem_handler)
     return result;
 }
 
-/*NUMPY_API
+/*NUMPY_API 1.22
  * Set a new allocation policy. If the input value is NULL, will reset
  * the policy to the default. Return the previous policy, or
  * return NULL if an error has occurred. We wrap the user-provided
@@ -552,7 +552,7 @@ PyDataMem_SetHandler(PyObject *handler)
     return old_handler;
 }
 
-/*NUMPY_API
+/*NUMPY_API 1.22
  * Return the policy that will be used to allocate data
  * for the next PyArrayObject. On failure, return NULL.
  */

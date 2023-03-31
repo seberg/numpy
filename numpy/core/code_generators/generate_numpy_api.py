@@ -41,18 +41,95 @@ static void **PyArray_API=NULL;
 
 %s
 
+
+/* NPY_MAXDIMS is actually version depended (wouldn't be defined here) */
+#undef NPY_MAXDIMS
+#define NPY_MAXDIMS 64
+#define NPY_MAXDIMS_ACTUAL (*(int *)PyArray_API[308])
+
+
 #if !defined(NO_IMPORT_ARRAY) && !defined(NO_IMPORT)
+
+#if NPY_TARGET_VERSION < 0x02000000
+/*
+ * Backcompat version of a new API call, this could also be
+ * an inline function that has an `if` based on table content.
+ * In this case, the first version does a "stupid" assignment
+ * while the second one can do a proper cast (but this can be
+ * tweaked).
+ * Using `PyArray_PackIntoArr` as abstraction because it works
+ * clearer on older NumPy versions.
+ */
+static inline int  // inline, because its OK if unused...
+_NPY_PyArray_PackIntoArr(PyArrayObject *arr, char *ptr, PyObject *obj)
+{
+    return PyArray_DESCR(arr)->f->setitem(obj, ptr, arr);
+}
+#else
+#define PyArray_PackIntoArr(arr, ptr, object) \
+    PyArray_Pack(PyArray_DESCR(arr), ptr, obj)
+#endif
+
+/*
+ * This code translated the existing NumPy 1.x table to a NumPy 2
+ * one.
+ * It would be in a dedicate header and such a step is only necessary
+ * for a major release.  Ideal, would be major that there are never more
+ * than 2 major releases "backported" like this, which gives us a major
+ * release about every 3.5 years.
+ */
+static void *
+_npy_make_numpy2_table(void **c_api) {
+    printf("Creating new NumPy 2 backcompat table!\n");
+    // TODO: Basically, 304 is currently right, lets add some more:
+    // NOTE: Also add +50, so we have space in case we realize that
+    //       we need more symbols and want to add them in a 2.1!
+    //       And we make sure that this space is NULLed (Calloc).
+    void **numpy2_table = (void **)PyObject_Calloc((310+50), sizeof(void *));
+    if (numpy2_table == NULL) {
+        return NULL;
+    }
+    // For now, change nothing (we need to change our numbering, since
+    // we always use the new table/numbers)!
+    memcpy(numpy2_table, c_api, 307*sizeof(void *));
+    static int maxdims = 32;
+
+    numpy2_table[307] = &maxdims;  // MAXDIMS, make pretty!
+    numpy2_table[308] = (void *)&_NPY_PyArray_PackIntoArr;
+
+    return numpy2_table;
+}
+
+
 static int
 _import_array(void)
 {
   int st;
+  int using_numpy_2 = 0;
   PyObject *numpy = PyImport_ImportModule("numpy.core._multiarray_umath");
   PyObject *c_api = NULL;
 
   if (numpy == NULL) {
       return -1;
   }
-  c_api = PyObject_GetAttrString(numpy, "_ARRAY_API");
+  if (PyObject_HasAttrString(numpy, "_ARRAY_API2")) {
+    /* Running on NumPy 2, so can use the API table normally */
+    c_api = PyObject_GetAttrString(numpy, "_ARRAY_API2");
+    using_numpy_2 = 1;
+  }
+  else {
+#if NPY_TARGET_VERSION >= 0x02000000
+    /* compiled without support for NumPy 2.x */
+    Py_DECREF(numpy);
+    PyErr_Format(PyExc_RuntimeError,
+        "Extension module was compiled solely for use with NumPy 2 "
+        "and higher.  Please XYZ about compiling against NumPy.");
+    return -1;
+#else
+    /* Assume we are on NumPy 1.x */
+    c_api = PyObject_GetAttrString(numpy, "_ARRAY_API");
+#endif
+  }
   Py_DECREF(numpy);
   if (c_api == NULL) {
       PyErr_SetString(PyExc_AttributeError, "_ARRAY_API not found");
@@ -64,12 +141,35 @@ _import_array(void)
       Py_DECREF(c_api);
       return -1;
   }
-  PyArray_API = (void **)PyCapsule_GetPointer(c_api, NULL);
+  void **api_table = (void **)PyCapsule_GetPointer(c_api, NULL);
   Py_DECREF(c_api);
-  if (PyArray_API == NULL) {
+  if (api_table == NULL) {
       PyErr_SetString(PyExc_RuntimeError, "_ARRAY_API is NULL pointer");
       return -1;
   }
+
+  if (!using_numpy_2) {
+    /* 
+     * Translate NumPy 1 table (if not done yet).  Stuff it into the
+     * first slot (which is always a pointer to NULL).
+     * Could also make a new Capsule and attach...
+     */
+     printf("NumPy 2 table already created? %%p != 0\n", *(void **)api_table[1]);
+    if (*(void **)api_table[1] != NULL) {
+        /* We already created and tagged on a new C-API version */
+        api_table = (void **)api_table[1];
+    }
+    else {
+        api_table[1] = (void *)_npy_make_numpy2_table(api_table);
+        if (api_table[1] == NULL) {
+            return -1;
+        }
+        api_table = (void **)api_table[1];
+        printf("NumPy 2 table created? %%p != 0\n", api_table);
+    }
+  }
+
+  PyArray_API = api_table;
 
   /* Perform runtime check of C API version */
   if (NPY_VERSION != PyArray_GetNDArrayCVersion()) {
@@ -188,7 +288,7 @@ def do_generate_api(targets, sources):
         annotations = multiarray_funcs[name][1:]
         multiarray_api_dict[f.name] = FunctionApi(f.name, index, annotations,
                                                   f.return_type,
-                                                  f.args, api_name)
+                                                  f.args, api_name, version_limit=f.version_limit)
 
     for name, val in global_vars.items():
         index, type = val

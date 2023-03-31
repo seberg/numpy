@@ -309,6 +309,8 @@ else:
         elif attr == 'Tester':
             "Removed in NumPy 1.25.0"
             raise RuntimeError("Tester was removed in NumPy 1.25.")
+        elif attr == "_ARRAY_API":
+            raise RuntimeError("Importing wrong array API!!!!!!!")
 
         raise AttributeError("module {!r} has no attribute "
                              "{!r}".format(__name__, attr))

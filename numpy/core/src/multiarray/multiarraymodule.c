@@ -5106,7 +5106,7 @@ PyMODINIT_FUNC PyInit__multiarray_umath(void) {
     if (c_api == NULL) {
         goto err;
     }
-    PyDict_SetItemString(d, "_ARRAY_API", c_api);
+    PyDict_SetItemString(d, "_ARRAY_API2", c_api);
     Py_DECREF(c_api);
 
     c_api = PyCapsule_New((void *)PyUFunc_API, NULL, NULL);

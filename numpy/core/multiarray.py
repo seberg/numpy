@@ -15,13 +15,13 @@ from ._multiarray_umath import *  # noqa: F403
 # _get_ndarray_c_version is semi-public, on purpose not added to __all__
 from ._multiarray_umath import (
     fastCopyAndTranspose, _flagdict, from_dlpack, _place, _reconstruct,
-    _vec_string, _ARRAY_API, _monotonicity, _get_ndarray_c_version,
+    _vec_string, _ARRAY_API2, _monotonicity, _get_ndarray_c_version,
     _get_madvise_hugepage, _set_madvise_hugepage,
     _get_promotion_state, _set_promotion_state, _using_numpy2_behavior
     )
 
 __all__ = [
-    '_ARRAY_API', 'ALLOW_THREADS', 'BUFSIZE', 'CLIP', 'DATETIMEUNITS',
+    '_ARRAY_API2', 'ALLOW_THREADS', 'BUFSIZE', 'CLIP', 'DATETIMEUNITS',
     'ITEM_HASOBJECT', 'ITEM_IS_POINTER', 'LIST_PICKLE', 'MAXDIMS',
     'MAY_SHARE_BOUNDS', 'MAY_SHARE_EXACT', 'NEEDS_INIT', 'NEEDS_PYAPI',
     'RAISE', 'USE_GETITEM', 'USE_SETITEM', 'WRAP',
