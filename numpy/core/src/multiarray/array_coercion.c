@@ -1095,7 +1095,26 @@ PyArray_DiscoverDTypeAndShape_Recursive(
                  */
                 return -1;
             }
+            /* Clear PySequence_Size error which would corrupt further calls */
             PyErr_Clear();
+            if (!(*flags & DESCRIPTOR_WAS_SET) && DEPRECATE(
+                    "Converting a sequence like without a length to an array "
+                    "results in a scalar and not the expected unpacking.\n"
+                    "Use `list()` or `np.fromiter()` to manually convert it. "
+                    "Use `dtype=object` to accept interpreting an iterable as "
+                    "an object element.") < 0) {
+                return -1;
+            }
+        }
+    }
+    else if (Py_TYPE(obj)->tp_iter != NULL) {
+        if (!(*flags & DESCRIPTOR_WAS_SET) && DEPRECATE(
+                "Converting a non-squence iterator to an array "
+                "results in a scalar and not the expected unpacking.\n"
+                "Use `list()` or `np.fromiter()` to manually convert it. "
+                "Use `dtype=object` to accept interpreting an iterable as "
+                "an object element.") < 0) {
+            return -1;
         }
     }
     if (NPY_UNLIKELY(*flags & DISCOVER_TUPLES_AS_ELEMENTS) &&
@@ -1103,7 +1122,6 @@ PyArray_DiscoverDTypeAndShape_Recursive(
         is_sequence = NPY_FALSE;
     }
     if (curr_dims == max_dims || !is_sequence) {
-        /* Clear any PySequence_Size error which would corrupts further calls */
         max_dims = handle_scalar(
                 obj, curr_dims, &max_dims, out_descr, out_shape, fixed_DType,
                 flags, NULL);
