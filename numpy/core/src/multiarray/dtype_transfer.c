@@ -142,6 +142,54 @@ _strided_to_strided_copy_references(
     return 0;
 }
 
+/* Aligned move references from src to dst */
+NPY_NO_EXPORT int
+_aligned_strided_to_strided_move_references(
+        PyArrayMethod_Context *NPY_UNUSED(context), char *const *args,
+        const npy_intp *dimensions, const npy_intp *strides,
+        NpyAuxData *NPY_UNUSED(auxdata))
+{
+    npy_intp N = dimensions[0];
+    char *src = args[0], *dst = args[1];
+    npy_intp src_stride = strides[0], dst_stride = strides[1];
+
+    PyObject *src_ref = NULL, *dst_ref = NULL;
+    while (N > 0) {
+        Py_INCREF(*(PyObject **)src);
+        Py_XSETREF(*(PyObject **)dst, *(PyObject **)src);
+        *(PyObject **)src = NULL;
+
+        src += src_stride;
+        dst += dst_stride;
+        --N;
+    }
+    return 0;
+}
+
+/* Copies references from src to dst */
+NPY_NO_EXPORT int
+_aligned_strided_to_strided_copy_references(
+        PyArrayMethod_Context *NPY_UNUSED(context), char *const *args,
+        const npy_intp *dimensions, const npy_intp *strides,
+        NpyAuxData *NPY_UNUSED(auxdata))
+{
+    npy_intp N = dimensions[0];
+    char *src = args[0], *dst = args[1];
+    npy_intp src_stride = strides[0], dst_stride = strides[1];
+
+    PyObject *src_ref = NULL, *dst_ref = NULL;
+    while (N > 0) {
+        Py_XSETREF(*(PyObject **)dst, *(PyObject **)src);
+        *(PyObject **)src = NULL;
+
+        src += src_stride;
+        dst += dst_stride;
+        --N;
+    }
+    return 0;
+}
+
+
 /************************** ANY TO OBJECT *********************************/
 
 typedef struct {

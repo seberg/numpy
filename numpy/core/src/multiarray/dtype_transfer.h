@@ -127,6 +127,18 @@ _strided_to_strided_copy_references(
         const npy_intp *dimensions, const npy_intp *strides,
         NpyAuxData *NPY_UNUSED(auxdata));
 
+NPY_NO_EXPORT int
+_aligned_strided_to_strided_move_references(
+        PyArrayMethod_Context *NPY_UNUSED(context), char *const *args,
+        const npy_intp *dimensions, const npy_intp *strides,
+        NpyAuxData *NPY_UNUSED(auxdata));
+
+NPY_NO_EXPORT int
+_aligned_strided_to_strided_copy_references(
+        PyArrayMethod_Context *NPY_UNUSED(context), char *const *args,
+        const npy_intp *dimensions, const npy_intp *strides,
+        NpyAuxData *NPY_UNUSED(auxdata));
+
 
 NPY_NO_EXPORT int
 any_to_object_get_loop(

@@ -3870,7 +3870,7 @@ PyArray_GetGenericToObjectCastingImpl(void)
 static int
 object_to_object_get_loop(
         PyArrayMethod_Context *NPY_UNUSED(context),
-        int NPY_UNUSED(aligned), int move_references,
+        int aligned, int move_references,
         const npy_intp *NPY_UNUSED(strides),
         PyArrayMethod_StridedLoop **out_loop,
         NpyAuxData **out_transferdata,
@@ -3878,13 +3878,22 @@ object_to_object_get_loop(
 {
     *flags = NPY_METH_REQUIRES_PYAPI | NPY_METH_NO_FLOATINGPOINT_ERRORS;
     if (move_references) {
-        *out_loop = &_strided_to_strided_move_references;
-        *out_transferdata = NULL;
+        if (aligned) {
+            *out_loop = &_aligned_strided_to_strided_move_references;
+        }
+        else {
+            *out_loop = &_strided_to_strided_move_references;
+        }
     }
     else {
-        *out_loop = &_strided_to_strided_copy_references;
-        *out_transferdata = NULL;
+        if (aligned) {
+            *out_loop = &_aligned_strided_to_strided_copy_references;
+        }
+        else {
+            *out_loop = &_strided_to_strided_copy_references;
+        }
     }
+    *out_transferdata = NULL;
     return 0;
 }
 
