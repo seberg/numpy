@@ -1069,7 +1069,8 @@ class TestCreation:
                     return ind
                 else:
                     raise IndexError()
-        d = np.array([Point2(), Point2(), Point2()])
+        with pytest.warns(DeprecationWarning):
+            d = np.array([Point2(), Point2(), Point2()])
         assert_equal(d.dtype, np.dtype(object))
 
     def test_false_len_sequence(self):
@@ -1111,7 +1112,7 @@ class TestCreation:
 
         # len(d) should give 3, but len(d[0]) will fail
         d = A([1,2,3])
-        assert_equal(len(np.array(d)), 3)
+        assert_equal(len(np.array(d, dtype=int)), 3)
 
     def test_array_too_big(self):
         # Test that array creation succeeds for arrays addressable by intp
@@ -4332,7 +4333,7 @@ class TestPickling:
 
     def test_version0_object(self):
         s = b'\x80\x02cnumpy.core._internal\n_reconstruct\nq\x01cnumpy\nndarray\nq\x02K\x00\x85U\x01b\x87Rq\x03(K\x02\x85cnumpy\ndtype\nq\x04U\x02O8K\x00K\x01\x87Rq\x05(U\x01|NNJ\xff\xff\xff\xffJ\xff\xff\xff\xfftb\x89]q\x06(}q\x07U\x01aK\x01s}q\x08U\x01bK\x02setb.'
-        a = np.array([{'a': 1}, {'b': 2}])
+        a = np.array([{'a': 1}, {'b': 2}], dtype=object)
         p = self._loads(s)
         assert_equal(a, p)
 
@@ -4351,7 +4352,7 @@ class TestPickling:
 
     def test_version1_object(self):
         s = b'\x80\x02cnumpy.core._internal\n_reconstruct\nq\x01cnumpy\nndarray\nq\x02K\x00\x85U\x01b\x87Rq\x03(K\x01K\x02\x85cnumpy\ndtype\nq\x04U\x02O8K\x00K\x01\x87Rq\x05(K\x01U\x01|NNJ\xff\xff\xff\xffJ\xff\xff\xff\xfftb\x89]q\x06(}q\x07U\x01aK\x01s}q\x08U\x01bK\x02setb.'
-        a = np.array([{'a': 1}, {'b': 2}])
+        a = np.array([{'a': 1}, {'b': 2}], dtype=object)
         p = self._loads(s)
         assert_equal(a, p)
 

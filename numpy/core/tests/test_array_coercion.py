@@ -638,7 +638,7 @@ class TestBadSequences:
         # so replacing it invalidates the cache.
         obj.append([np.array(2), baditem()])
         with pytest.raises(RuntimeError):
-            np.array(obj)
+            np.array(obj, dtype=object)
 
 
 class TestArrayLikes:
