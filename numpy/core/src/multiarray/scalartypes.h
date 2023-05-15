@@ -17,7 +17,7 @@ _npy_next_larger_type_table[NPY_NTYPES];
 NPY_NO_EXPORT void
 initialize_casting_tables(void);
 
-NPY_NO_EXPORT void
+NPY_NO_EXPORT int
 initialize_numeric_types(void);
 
 NPY_NO_EXPORT void

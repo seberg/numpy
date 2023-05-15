@@ -25,6 +25,7 @@
 #include "common.h"
 #include "scalartypes.h"
 #include "_datetime.h"
+#include "datetime.h"  /* Python datetime API */
 #include "datetime_strings.h"
 #include "alloc.h"
 #include "npy_import.h"
@@ -3362,8 +3363,8 @@ static inline npy_hash_t
 
 
 /**begin repeat
- * #lname = datetime, timedelta#
- * #name = Datetime, Timedelta#
+ * #lname = timedelta#
+ * #name = Timedelta#
  */
 #if NPY_SIZEOF_HASH_T==NPY_SIZEOF_DATETIME
 static npy_hash_t
@@ -3453,39 +3454,131 @@ object_arrtype_hash(PyObject *obj)
     return PyObject_Hash(PyArrayScalar_VAL(obj, Object));
 }
 
+
+#if SIZEOF_PY_UHASH_T > 4
+#define _NpyHASH_XXPRIME_1 ((Py_uhash_t)11400714785074694791ULL)
+#define _NpyHASH_XXPRIME_2 ((Py_uhash_t)14029467366897019727ULL)
+#define _NpyHASH_XXPRIME_5 ((Py_uhash_t)2870177450012600261ULL)
+#define _NpyHASH_XXROTATE(x) ((x << 31) | (x >> 33))  /* Rotate left 31 bits */
+#else
+#define _NpyHASH_XXPRIME_1 ((Py_uhash_t)2654435761UL)
+#define _NpyHASH_XXPRIME_2 ((Py_uhash_t)2246822519UL)
+#define _NpyHASH_XXPRIME_5 ((Py_uhash_t)374761393UL)
+#define _NpyHASH_XXROTATE(x) ((x << 13) | (x >> 19))  /* Rotate left 13 bits */
+#endif
+
+/*
+ * This hashing function is basically the Python tuple hash with the type
+ * identity hash inlined. The tuple hash itself is a reduced version of xxHash.
+ *
+ * Users cannot control pointers, so we do not have to worry about DoS attacks?
+ */
+static inline Py_uhash_t
+tuple_update_uhash(Py_uhash_t acc, Py_uhash_t lane)
+{
+    acc += lane * _NpyHASH_XXPRIME_2;
+    acc = _NpyHASH_XXROTATE(acc);
+    acc *= _NpyHASH_XXPRIME_1;
+    return acc;
+}
+
+
 /* we used to just hash the pointer */
 /* now use tuplehash algorithm using voidtype_item to get the object
 */
 static npy_hash_t
 void_arrtype_hash(PyObject *obj)
 {
-    npy_hash_t x, y;
-    Py_ssize_t len, n;
-    PyVoidScalarObject *p;
-    PyObject *element;
-    npy_hash_t mult = 1000003L;
-    x = 0x345678L;
-    p = (PyVoidScalarObject *)obj;
+    PyVoidScalarObject *p = (PyVoidScalarObject *)obj;
     /* Cannot hash mutable void scalars */
     if (p->flags & NPY_ARRAY_WRITEABLE) {
        PyErr_SetString(PyExc_TypeError, "unhashable type: 'writeable void-scalar'");
        return -1;
     }
-    len = voidtype_length(p);
-    for (n=0; n < len; n++) {
-        element = voidtype_item(p, n);
-        y = PyObject_Hash(element);
+
+    Py_hash_t acc = _NpyHASH_XXPRIME_5;
+    Py_ssize_t len = voidtype_length(p);
+    for (Py_ssize_t n = 0; n < len; n++) {
+        PyObject *element = voidtype_item(p, n);
+        Py_hash_t element_hash = PyObject_Hash(element);
         Py_DECREF(element);
-        if (y == -1)
+        if (element_hash == -1) {
            return -1;
-        x = (x ^ y) * mult;
-        mult += (npy_hash_t)(82520L + len + len);
+        }
+        acc = tuple_update_uhash((Py_uhash_t)acc, (Py_uhash_t)element_hash);
     }
-    x += 97531L;
-    if (x == -1)
-        x = -2;
-    return x;
+    /* Python also adds input length */
+    acc += len ^ (_NpyHASH_XXPRIME_5 ^ 3527539UL);
+    if (acc == -1) {
+        acc = 1546275796;
+    }
+    return acc;
 }
+
+
+static inline Py_hash_t
+hash_datetime_from_struct(npy_datetimestruct* dts) {
+    /*
+     * If we cannot cast to datetime, use the datetime struct values directly
+     * and mix them similar to a tuple.
+     */
+
+    Py_uhash_t acc = _NpyHASH_XXPRIME_5;
+#if 64 <= SIZEOF_PY_UHASH_T
+    acc = tuple_update_uhash(acc, (Py_uhash_t)dts->year);
+#else
+    /* Mix lower and uper bits of the year if int64 is larger */
+    acc = tuple_update_uhash(acc, (Py_uhash_t)dts->year);
+    acc = tuple_update_uhash(acc, (Py_uhash_t)(dts->year >> SIZEOF_PY_UHASH_T));
+#endif
+    acc = tuple_update_uhash(acc, (Py_uhash_t)dts->month);
+    acc = tuple_update_uhash(acc, (Py_uhash_t)dts->day);
+    acc = tuple_update_uhash(acc, (Py_uhash_t)dts->min);
+    acc = tuple_update_uhash(acc, (Py_uhash_t)dts->sec);
+    acc = tuple_update_uhash(acc, (Py_uhash_t)dts->us);
+    acc = tuple_update_uhash(acc, (Py_uhash_t)dts->ps);
+    acc = tuple_update_uhash(acc, (Py_uhash_t)dts->as);
+    /* should be a need to mix length, as it is fixed anyway? */
+    if (acc == (Py_uhash_t)-1) {
+        acc = (Py_uhash_t)-2;
+    }
+    return acc;
+}
+
+
+Py_hash_t
+datetime_arrtype_hash(PyDatetimeScalarObject* self) {
+    npy_datetimestruct dts;
+
+    if (convert_datetime_to_datetimestruct(
+            &self->obmeta, self->obval, &dts) < 0) {
+        return -1;
+    }
+
+    if ((dts.year > 0) && (dts.year <= 9999) && (dts.ps == 0) && (dts.as == 0)) {
+        /* 
+         * Python datetime can represent the value, so use its hash to ensure
+         * equality.
+         */
+        PyObject* dt = PyDateTime_FromDateAndTime(
+            dts.year, dts.month, dts.day, dts.hour, dts.min, dts.sec, dts.us);
+        if (dt == NULL) {
+            return -1;
+        }
+        Py_hash_t hash = PyObject_Hash(dt);
+        Py_DECREF(dt);
+        return hash;
+    }
+
+    return hash_datetime_from_struct(&dts);
+}
+
+
+#undef _NpyHASH_XXPRIME_1
+#undef _NpyHASH_XXPRIME_2
+#undef _NpyHASH_XXPRIME_5
+#undef _NpyHASH_XXROTATE
+
 
 /*object arrtype getattro and setattro */
 static PyObject *
@@ -3855,9 +3948,14 @@ static PyNumberMethods clongdoubletype_as_number;
 static void init_basetypes(void);
 
 
-NPY_NO_EXPORT void
+NPY_NO_EXPORT int
 initialize_numeric_types(void)
 {
+    PyDateTime_IMPORT;
+    if (PyDateTimeAPI == NULL) {
+        return -1;
+    }
+
     init_basetypes();
     PyGenericArrType_Type.tp_dealloc = (destructor)gentype_dealloc;
     PyGenericArrType_Type.tp_as_number = &gentype_as_number;
@@ -3966,7 +4064,7 @@ initialize_numeric_types(void)
      *         Datetime, Timedelta#
      */
 
-    Py@NAME@ArrType_Type.tp_hash = @name@_arrtype_hash;
+    Py@NAME@ArrType_Type.tp_hash = (hashfunc)@name@_arrtype_hash;
 
     /**end repeat**/
 
@@ -4073,6 +4171,8 @@ initialize_numeric_types(void)
 
     PyArrayIter_Type.tp_iter = PyObject_SelfIter;
     PyArrayMapIter_Type.tp_iter = PyObject_SelfIter;
+
+    return 0;
 }
 
 typedef struct {
