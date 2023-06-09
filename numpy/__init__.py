@@ -514,9 +514,9 @@ else:
     # it is tidier organized.
     core.multiarray._multiarray_umath._reload_guard()
 
-    # TODO: Switch to defaulting to "weak".
+    # TODO: Remove the environment variable entirely now that it is "weak"
     core._set_promotion_state(
-        os.environ.get("NPY_PROMOTION_STATE", "legacy"))
+        os.environ.get("NPY_PROMOTION_STATE", "weak"))
 
     # Tell PyInstaller where to find hook-numpy.py
     def _pyinstaller_hooks_dir():
