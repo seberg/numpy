@@ -738,8 +738,7 @@ object_common_dtype(
  * @returns 0 on success, -1 on failure.
  */
 NPY_NO_EXPORT int
-dtypemeta_wrap_legacy_descriptor(PyArray_Descr *descr,
-        const char *name, const char *alias)
+dtypemeta_wrap_legacy_descriptor(PyArray_Descr *descr, const char *name)
 {
     int has_type_set = Py_TYPE(descr) == &PyArrayDescr_Type;
 
@@ -913,11 +912,34 @@ dtypemeta_wrap_legacy_descriptor(PyArray_Descr *descr,
 
         if (PyObject_CallFunction(
                 add_dtype_helper,
-                "Os", (PyObject *)dtype_class, alias) == NULL) {
+                "Os", (PyObject *)dtype_class, NULL) == NULL) {
             return -1;
         }
     }
 
+    return 0;
+}
+
+NPY_NO_EXPORT int
+make_dtypemeta_integer_alias(
+        PyArray_Descr *descr, int dtype, int base, char *name)
+{
+    PyArray_DTypeMeta *dtype_class = PyArray_DTypeFromTypeNum(base);
+    
+    Py_SET_TYPE(descr, (PyTypeObject *)dtype_class);
+    /* And it to the types submodule if it is a builtin dtype */
+    static PyObject *add_dtype_helper = NULL;
+    npy_cache_import("numpy.dtypes", "_add_dtype_helper", &add_dtype_helper);
+    if (add_dtype_helper == NULL) {
+        return -1;
+    }
+
+    /* Sets the name multiple times, but that shouldn't matter. */
+    if (PyObject_CallFunction(
+            add_dtype_helper,
+            "Os", (PyObject *)dtype_class, name) == NULL) {
+        return -1;
+    }
     return 0;
 }
 

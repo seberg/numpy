@@ -2733,19 +2733,30 @@ PyArray_InitializeNumericCasts(void)
             continue;
         }
         PyArray_DTypeMeta *from_dt = PyArray_DTypeFromTypeNum(from);
+        if (from_dt->type_num != from) {
+            Py_DECREF(from_dt);  /* This is just an integer alias */
+            continue;
+        }
 
         for (int to = 0; to < NPY_NTYPES; to++) {
             if (!PyTypeNum_ISNUMBER(to) && to != NPY_BOOL) {
                 continue;
             }
             PyArray_DTypeMeta *to_dt = PyArray_DTypeFromTypeNum(to);
+            if (to_dt->type_num != to) {
+                Py_DECREF(to_dt);  /* This is just an integer alias */
+                continue;
+            }
+
             int res = add_numeric_cast(from_dt, to_dt);
             Py_DECREF(to_dt);
             if (res < 0) {
+                printf("failed for %d, %d\n", from, to);
                 Py_DECREF(from_dt);
                 return -1;
             }
         }
+        Py_DECREF(from_dt);
     }
     return 0;
 }
@@ -3004,6 +3015,10 @@ PyArray_InitializeStringCasts(void)
             continue;
         }
         other_dt = PyArray_DTypeFromTypeNum(other);
+        if (other_dt->type_num != other) {
+            Py_CLEAR(other_dt);
+            continue;
+        }
 
         /* The functions skip string == other_dt or unicode == other_dt */
         if (add_other_to_and_from_string_cast(string, other_dt) < 0) {

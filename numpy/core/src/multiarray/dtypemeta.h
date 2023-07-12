@@ -140,7 +140,11 @@ python_builtins_are_known_scalar_types(
 
 NPY_NO_EXPORT int
 dtypemeta_wrap_legacy_descriptor(
-        PyArray_Descr *dtypem, const char *name, const char *alias);
+        PyArray_Descr *dtypem, const char *name);
+
+NPY_NO_EXPORT int
+make_dtypemeta_integer_alias(
+        PyArray_Descr *descr, int dtype, int base, char *name);
 
 #ifdef __cplusplus
 }

@@ -4166,6 +4166,9 @@ PyArray_InitializeDatetimeCasts()
         }
 
         Py_XSETREF(tmp, PyArray_DTypeFromTypeNum(num));
+        if (tmp->type_num != num) {
+            continue;  /* integer type alias */
+        }
 
         if (PyArray_AddLegacyWrapping_CastingImpl(
                 tmp, datetime, NPY_UNSAFE_CASTING) < 0) {

@@ -4608,8 +4608,8 @@ set_typeinfo(PyObject *dict)
     /**begin repeat
      *
      * #NAME = BOOL,
-     *         BYTE, UBYTE, SHORT, USHORT, INT, UINT,
-     *         LONG, ULONG, LONGLONG, ULONGLONG,
+     *         INT8, UINT8, INT16, UINT16,
+     *         INT32, UINT32, INT64, UINT64,
      *         HALF, FLOAT, DOUBLE, LONGDOUBLE,
      *         CFLOAT, CDOUBLE, CLONGDOUBLE,
      *         OBJECT, STRING, UNICODE, VOID,
@@ -4617,16 +4617,19 @@ set_typeinfo(PyObject *dict)
      */
     if (dtypemeta_wrap_legacy_descriptor(
             _builtin_descrs[NPY_@NAME@],
-            "numpy.dtypes." NPY_@NAME@_Name "DType",
-#ifdef NPY_@NAME@_alias
-            "numpy.dtypes." NPY_@NAME@_Alias "DType"
-#else
-            NULL
-#endif
-            ) < 0) {
+            "numpy.dtypes." NPY_@NAME@_Name "DType") < 0) {
         return -1;
     }
-
+    /**end repeat**/
+    /**begin repeat
+     * #NAME = BYTE, UBYTE, SHORT, USHORT, INT, UINT,
+     *         LONG, ULONG, LONGLONG, ULONGLONG#
+     */
+    if (make_dtypemeta_integer_alias(
+            _builtin_descrs[NPY_@NAME@],
+            NPY_@NAME@, NPY_@NAME@_BASE, NPY_@NAME@_Alias) < 0) {
+        return -1;
+    }
     /**end repeat**/
 
     /*

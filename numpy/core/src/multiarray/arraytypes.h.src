@@ -73,16 +73,19 @@ NPY_CPU_DISPATCH_DECLARE(NPY_NO_EXPORT int BOOL_argmax,
 
 /**begin repeat
  * #NAME = BOOL,
+ *         INT8, UINT8, INT16, UINT16, INT32, UINT32, INT64, UINT64,
  *         HALF, FLOAT, DOUBLE, LONGDOUBLE,
  *         CFLOAT, CDOUBLE, CLONGDOUBLE,
  *         STRING, UNICODE, VOID, OBJECT,
  *         DATETIME, TIMEDELTA#
  * #name = bool_,
+ *         int8, uint8, int16, uint16, int32, uint32, int64, uint64,
  *         float16, float32, float64, longdouble,
  *         complex64, complex128, clongdouble,
  *         bytes_, str_, void, object_,
  *         datetime64, timedelta64#
  * #Name = Bool,
+ *         Int8, UInt8, Int16, UInt16, Int32, UInt32, Int64, UInt64,
  *         Float16, Float32, Float64, LongDouble,
  *         Complex64, Complex128, CLongDouble,
  *         Bytes, Str, Void, Object,
@@ -129,32 +132,44 @@ NPY_CPU_DISPATCH_DECLARE(NPY_NO_EXPORT int BOOL_argmax,
  *          UByte, UShort, UInt, ULong, ULongLong#
  * #bitname = int*5, uint*5#
  * #BitName = Int*5, UInt*5#
+ * #BITNAME = INT*5, UINT*5#
  */
 
+
+/* The bitsof macro includes math, so cannot be stringified */
+#if NPY_BITSOF_@CNAME@ == 8
+    #define NPY_@NAME@_BASE NPY_@BITNAME@8
+    #define NPY_@NAME@_name "@bitname@8"
+    #define NPY_@NAME@_Name "@BitName@8"
+#elif NPY_BITSOF_@CNAME@ == 16
+    #define NPY_@NAME@_BASE NPY_@BITNAME@16
+    #define NPY_@NAME@_name "@bitname@16"
+    #define NPY_@NAME@_Name "@BitName@16"
+#elif NPY_BITSOF_@CNAME@ == 32
+    #define NPY_@NAME@_BASE NPY_@BITNAME@32
+    #define NPY_@NAME@_name "@bitname@32"
+    #define NPY_@NAME@_Name "@BitName@32"
+#elif NPY_BITSOF_@CNAME@ == 64
+    #define NPY_@NAME@_BASE NPY_@BITNAME@64
+    #define NPY_@NAME@_name "@bitname@64"
+    #define NPY_@NAME@_Name "@BitName@64"
+#else
+    #error "need to fix integer bit-length name code"
+#endif
+
+
 #ifdef @CNAME@_not_size_named
+    /* not the main bit-sized integer, so name is also the C name alias */
+    #undef NPY_@NAME@_name
+    #undef NPY_@NAME@_Name
     #define NPY_@NAME@_name "@cname@"
     #define NPY_@NAME@_Name "@CName@"
+    #define NPY_@NAME@_alias "@cname@"
+    #define NPY_@NAME@_Alias "@CName@"
 #else
     /* The C-name is considered just an alias for these: */
     #define NPY_@NAME@_alias "@cname@"
     #define NPY_@NAME@_Alias "@CName@"
-
-    /* The bitsof macro includes math, so cannot be stringified */
-    #if NPY_BITSOF_@CNAME@ == 8
-        #define NPY_@NAME@_name "@bitname@8"
-        #define NPY_@NAME@_Name "@BitName@8"
-    #elif NPY_BITSOF_@CNAME@ == 16
-        #define NPY_@NAME@_name "@bitname@16"
-        #define NPY_@NAME@_Name "@BitName@16"
-    #elif NPY_BITSOF_@CNAME@ == 32
-        #define NPY_@NAME@_name "@bitname@32"
-        #define NPY_@NAME@_Name "@BitName@32"
-    #elif NPY_BITSOF_@CNAME@ == 64
-        #define NPY_@NAME@_name "@bitname@64"
-        #define NPY_@NAME@_Name "@BitName@64"
-    #else
-        #error "need to fix integer bit-length name code"
-    #endif
 #endif
 
 /**end repeat**/
