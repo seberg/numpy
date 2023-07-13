@@ -77,3 +77,11 @@ def make_iso_8601_datetime(dt: "datetime"):
         cnp.NPY_NO_CASTING,
     )
     return result
+
+
+def get_default_integer():
+    if cnp.NPY_DEFAULT_INT == cnp.NPY_LONG:
+        return cnp.dtype("long")
+    if cnp.NPY_DEFAULT_INT == cnp.NPY_INTP:
+        return cnp.dtype("intp")
+    return None
