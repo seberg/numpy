@@ -211,7 +211,7 @@ else:
     # probably wait for NumPy 1.26 or 2.0.
     # When defined, these should possibly not be added to `__all__` to avoid
     # import with `from numpy import *`.
-    __future_scalars__ = {"bool", "long", "ulong", "str", "bytes", "object"}
+    __future_scalars__ = {"bool", "str", "bytes", "object"}
 
     __deprecated_attrs__.update({
         n: (alias, _msg.format(n=n, an=an)) for n, alias, an in _type_info})
@@ -239,11 +239,9 @@ else:
     # both `numpy.core.issubdtype` and `numpy.lib.issubdtype`.
     __all__.remove('issubdtype')
 
-    # These are exported by np.core, but are replaced by the builtins below
-    # remove them to ensure that we don't end up with `np.long == np.int_`,
-    # which would be a breaking change.
-    del long, unicode
-    __all__.remove('long')
+    # This is exported by np.core, but is not exported as it used to be the
+    # builtin unicode version.
+    del unicode
     __all__.remove('unicode')
 
     # Remove things that are in the numpy.lib but not in the numpy namespace

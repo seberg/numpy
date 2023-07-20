@@ -444,13 +444,9 @@ class TestSctypeDict:
         assert_(np.sctypeDict['c16'] is not np.clongdouble)
 
     def test_ulong(self):
-        # Test that 'ulong' behaves like 'long'. np.sctypeDict['long'] is an
-        # alias for np.int_, but np.long is not supported for historical
-        # reasons (gh-21063)
-        assert_(np.sctypeDict['ulong'] is np.uint)
-        with pytest.warns(FutureWarning):
-            # We will probably allow this in the future:
-            assert not hasattr(np, 'ulong')
+        assert np.sctypeDict['ulong'] is np.ulong
+        assert np.dtype(np.ulong) is np.dtype("ulong")
+        assert np.dtype(np.ulong).itemsize == np.dtype(np.long).itemsize
 
 class TestBitName:
     def test_abstract(self):
@@ -545,19 +541,19 @@ class TestScalarTypeNames:
     # gh-9799
 
     numeric_types = [
-        np.byte, np.short, np.intc, np.int_, np.longlong,
-        np.ubyte, np.ushort, np.uintc, np.uint, np.ulonglong,
+        np.byte, np.short, np.intc, np.int_, np.long, np.longlong,
+        np.ubyte, np.ushort, np.uintc, np.uint, np.ulong, np.ulonglong,
         np.half, np.single, np.double, np.longdouble,
         np.csingle, np.cdouble, np.clongdouble,
     ]
 
     def test_names_are_unique(self):
-        # none of the above may be aliases for each other
-        assert len(set(self.numeric_types)) == len(self.numeric_types)
+        # exactly np.int and np.uint will cause a duplicate in the above
+        assert len(set(self.numeric_types)) == len(self.numeric_types) - 2
 
-        # names must be unique
+        # names must be unique except those two
         names = [t.__name__ for t in self.numeric_types]
-        assert len(set(names)) == len(names)
+        assert len(set(names)) == len(names) - 2
 
     @pytest.mark.parametrize('t', numeric_types)
     def test_names_reflect_attributes(self, t):

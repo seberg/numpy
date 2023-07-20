@@ -155,8 +155,11 @@ def _set_up_aliases():
                   ('float_', 'double'),
                   ('intc', 'int'),
                   ('uintc', 'uint'),
-                  ('int_', 'long'),
-                  ('uint', 'ulong'),
+                  ('long', 'long'),
+                  ('ulong', 'ulong'),
+                  # Default integer is a misnomer
+                  ('int_', 'intp'),
+                  ('uint', 'uintp'),
                   ('cfloat', 'cdouble'),
                   ('longfloat', 'longdouble'),
                   ('clongfloat', 'clongdouble'),
@@ -182,14 +185,6 @@ def _set_up_aliases():
         except KeyError:
             pass
 
-    # Additional aliases in sctypeDict that should not be exposed as attributes
-    attrs_to_remove = ['ulong']
-
-    for t in attrs_to_remove:
-        try:
-            del allTypes[t]
-        except KeyError:
-            pass
 _set_up_aliases()
 
 
