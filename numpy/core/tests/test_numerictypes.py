@@ -486,7 +486,8 @@ class Test_sctype2char:
 
     def test_scalar_type(self):
         assert_equal(np.sctype2char(np.double), 'd')
-        assert_equal(np.sctype2char(np.int_), 'l')
+        assert_equal(np.sctype2char(np.long), 'l')
+        assert_equal(np.sctype2char(np.int_), np.array(0).dtype.char)
         assert_equal(np.sctype2char(np.str_), 'U')
         assert_equal(np.sctype2char(np.bytes_), 'S')
 
