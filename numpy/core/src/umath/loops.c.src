@@ -556,7 +556,7 @@ NPY_NO_EXPORT void
  * #OP = ==, !=, <, <=, >, >=#
  */
 NPY_NO_EXPORT void
-LONGLONG_Qq_bool_@kind@(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
+INT64_Kk_bool_@kind@(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
 {
     BINARY_LOOP {
         const npy_ulonglong in1 = *(npy_ulonglong *)ip1;
@@ -571,7 +571,7 @@ LONGLONG_Qq_bool_@kind@(char **args, npy_intp const *dimensions, npy_intp const 
 }
 
 NPY_NO_EXPORT void
-LONGLONG_qQ_bool_@kind@(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
+INT64_kK_bool_@kind@(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
 {
     BINARY_LOOP {
         const npy_longlong in1 = *(npy_longlong *)ip1;
@@ -841,7 +841,7 @@ TIMEDELTA_mm_m_subtract(char **args, npy_intp const *dimensions, npy_intp const 
 
 /* Note: Assuming 'q' == NPY_LONGLONG */
 NPY_NO_EXPORT void
-TIMEDELTA_mq_m_multiply(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
+TIMEDELTA_mk_m_multiply(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
 {
     BINARY_LOOP {
         const npy_timedelta in1 = *(npy_timedelta *)ip1;
@@ -857,7 +857,7 @@ TIMEDELTA_mq_m_multiply(char **args, npy_intp const *dimensions, npy_intp const 
 
 /* Note: Assuming 'q' == NPY_LONGLONG */
 NPY_NO_EXPORT void
-TIMEDELTA_qm_m_multiply(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
+TIMEDELTA_km_m_multiply(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
 {
     BINARY_LOOP {
         const npy_int64 in1 = *(npy_int64 *)ip1;
@@ -915,7 +915,7 @@ TIMEDELTA_dm_m_multiply(char **args, npy_intp const *dimensions, npy_intp const 
 
 /* Note: Assuming 'q' == NPY_LONGLONG */
 NPY_NO_EXPORT void
-TIMEDELTA_mq_m_divide(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
+TIMEDELTA_mk_m_divide(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
 {
     /* NOTE: This code is similar to array floor divide */
     BINARY_DEFS
@@ -1028,7 +1028,7 @@ TIMEDELTA_mm_m_remainder(char **args, npy_intp const *dimensions, npy_intp const
 }
 
 NPY_NO_EXPORT void
-TIMEDELTA_mm_q_floor_divide(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
+TIMEDELTA_mm_k_floor_divide(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
 {
     /* NOTE: This code is similar to array floor divide */
     BINARY_DEFS
@@ -1099,7 +1099,7 @@ TIMEDELTA_mm_q_floor_divide(char **args, npy_intp const *dimensions, npy_intp co
 }
 
 NPY_NO_EXPORT void
-TIMEDELTA_mm_qm_divmod(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
+TIMEDELTA_mm_km_divmod(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
 {
     BINARY_LOOP_TWO_OUT {
         const npy_timedelta in1 = *(npy_timedelta *)ip1;

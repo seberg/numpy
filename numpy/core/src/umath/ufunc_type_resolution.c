@@ -1441,7 +1441,7 @@ find_userloop(PyUFuncObject *ufunc,
             break;
         }
 
-        type_num = dtypes[i]->type_num;
+        type_num = NPY_DTYPE(dtypes[i])->type_num;
         if (type_num != last_userdef &&
                 (PyTypeNum_ISUSERDEF(type_num) || type_num == NPY_VOID)) {
             PyObject *key, *obj;
@@ -1468,7 +1468,7 @@ find_userloop(PyUFuncObject *ufunc,
                 int *types = funcdata->arg_types;
 
                 for (j = 0; j < nargs; ++j) {
-                    if (types[j] != dtypes[j]->type_num) {
+                    if (types[j] != NPY_DTYPE(dtypes[j])->type_num) {
                         break;
                     }
                 }
@@ -1518,7 +1518,7 @@ PyUFunc_DefaultLegacyInnerLoopSelector(PyUFuncObject *ufunc,
     for (i = 0; i < ufunc->ntypes; ++i) {
         /* Copy the types into an int array for matching */
         for (j = 0; j < nargs; ++j) {
-            if (types[j] != dtypes[j]->type_num) {
+            if (types[j] != NPY_DTYPE(dtypes[j])->type_num) {
                 break;
             }
         }
