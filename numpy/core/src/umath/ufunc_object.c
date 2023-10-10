@@ -4491,10 +4491,32 @@ static int
 resolve_descriptors(int nop,
         PyUFuncObject *ufunc, PyArrayMethodObject *ufuncimpl,
         PyArrayObject *operands[], PyArray_Descr *dtypes[],
-        PyArray_DTypeMeta *signature[], NPY_CASTING casting)
+        PyArray_DTypeMeta *signature[], PyObject *inputs_tup,
+        NPY_CASTING casting)
 {
     int retval = -1;
     PyArray_Descr *original_dtypes[NPY_MAXARGS];
+
+    if (ufuncimpl->resolve_descriptors_raw != NULL) {
+        PyObject *input_operands[NPY_MAXARGS];
+        for (int i = 0; i < nop; i++) {
+            if (operands[i] == NULL) {
+                original_dtypes[i] = NULL;
+            }
+            else {
+                original_dtypes[i] = PyArray_DTYPE(operands[i]);
+            }
+        }
+        for (int i = 0; i < ufunc->nin; i++) {
+            /* Note: We should warn that this might only pass scalar args? */
+            input_operands[i] = PyTuple_GET_ITEM(inputs_tup, i);
+        }
+
+        ufuncimpl->resolve_descriptors_raw(
+            ufuncimpl, original_operands, original_dtypes_put_warning_into_doc,
+            dtypes
+        );
+    }
 
     for (int i = 0; i < nop; ++i) {
         if (operands[i] == NULL) {
@@ -4870,7 +4892,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
 
     /* Find the correct descriptors for the operation */
     if (resolve_descriptors(nop, ufunc, ufuncimpl,
-            operands, operation_descrs, signature, casting) < 0) {
+            operands, operation_descrs, signature, full_args.in, casting) < 0) {
         goto fail;
     }
 
