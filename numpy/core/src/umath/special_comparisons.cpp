@@ -1,5 +1,4 @@
 #include <Python.h>
-#include "pyerrors.h"
 
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 #define _MULTIARRAYMODULE
@@ -93,6 +92,101 @@ fixed_result_loop(PyArrayMethod_Context *NPY_UNUSED(context),
     return 0;
 }
 
+static inline void
+get_min_max(int typenum, long long *min, unsigned long long *max)
+{
+    *min = 0;
+    switch (typenum) {
+        case NPY_BYTE:
+            *min = NPY_MIN_BYTE;
+            *max = NPY_MAX_BYTE;
+            break;
+        case NPY_UBYTE:
+            *max = NPY_MAX_UBYTE;
+            break;
+        case NPY_SHORT:
+            *min = NPY_MIN_SHORT;
+            *max = NPY_MAX_SHORT;
+            break;
+        case NPY_USHORT:
+            *max = NPY_MAX_USHORT;
+            break;
+        case NPY_INT:
+            *min = NPY_MIN_INT;
+            *max = NPY_MAX_INT;
+        case NPY_UINT:
+            *max = NPY_MAX_UINT;
+            break;
+        case NPY_LONG:
+            *min = NPY_MIN_INT;
+            *max = NPY_MAX_INT;
+            break;
+        case NPY_ULONG:
+            *max = NPY_MAX_USHORT;
+            break;
+        case NPY_LONGLONG:
+            *min = NPY_MIN_INT;
+            *max = NPY_MAX_INT;
+        case NPY_ULONGLONG:
+            *max = NPY_MAX_USHORT;
+            break;
+        default:
+            assert(0);
+    }
+}
+
+
+/*
+ * Dtermine if a Python long is within the typenums range, smaller, or larger.
+ * 
+ * Function returns -2 for errors.
+ */
+static int
+get_value_range(PyObject *value, int type_num)
+{
+    long long min;
+    unsigned long long max;
+    get_min_max(type_num, &min, &max);
+
+    int overflow;
+    long long val = PyLong_AsLongLongAndOverflow(value, &overflow);
+    if (val == -1 && overflow == 0 && PyErr_Occurred()) {
+        return (NPY_CASTING)-1;
+    }
+    if (overflow == 0) {
+        if (min < val) {
+            return -1;
+        }
+        else if (max > val) {
+            return 1;
+        }
+        return 0;
+    }
+    else if (overflow < 0) {
+        return -1; 
+    }
+    else if (max <= NPY_MAX_LONGLONG) {
+        return 1;
+    }
+    /* For unsigned long long (and equivalent) we may reach here */
+
+    PyObject *obj = PyLong_FromUnsignedLongLong(max);
+    if (obj == NULL) {
+        return -2;
+    }
+    int cmp = PyObject_RichCompareBool(value, obj, Py_GT);
+    Py_DECREF(obj);
+    if (cmp < 0) {
+        return -2;
+    }
+    if (cmp) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+
 
 static NPY_CASTING
 resolve_descriptors_raw(
@@ -103,41 +197,29 @@ resolve_descriptors_raw(
     int value_range = 0;  /* -1, 0, or 1  (<0, fits, >MAX_ULONGLONG) */
 
     if (input_scalars[1] != NULL && PyLong_CheckExact(input_scalars[1])) {
-        int overflow;
-
-        long long val = PyLong_AsLongLongAndOverflow(input_scalars[1], &overflow);
-        if (val == -1 && PyErr_Occurred()) {
-            return (NPY_CASTING)-1;  /* should not be possible */
-        }
-        if (overflow == 0) {
-            value_range = val < 0 ? -1 : 0;
-        }
-        else if (overflow < 0) {
-            value_range = -1;
-        }
-        else {
-            unsigned long long val = PyLong_AsUnsignedLongLong(input_scalars[1]);
-            if (val == (unsigned long long)-1 && PyErr_Occurred()) {
-                PyErr_Clear();  /* Seems fair to assume it is overflow */
-                value_range = 1;
-            }
-            else {
-                value_range = 0;
-            }
+        value_range = get_value_range(input_scalars[1], dtypes[0]->type_num);
+        if (value_range == -2) {
+            return (NPY_CASTING)-1;
         }
     }
+
+    /*
+     * Three way decision (with hack):
+     * 1. The value fits within dtype range, so we must use the value.
+     * 2. The value is always smaller, so we use the object dtype singleton.
+     * 3. The value is always larger and we use an object dtype that is NOT
+     *    the singleton.
+     * Using a non-singleton object is the most minimal way to distinguish
+     * it later.
+     */
     if (value_range == 0) {
         Py_INCREF(dtypes[0]->singleton);
         loop_descrs[1] = dtypes[0]->singleton;
     }
     else if (value_range < 0) {
-        /* Using the singleton here object dtype here (see below) */
         loop_descrs[1] = PyArray_DescrFromType(NPY_OBJECT);
     }
     else {
-        /* 
-         * HACK: Create a *new* dtype to indicate this is a huge value!
-         */
         loop_descrs[1] = PyArray_DescrNewFromType(NPY_OBJECT);
         if (loop_descrs[1] == NULL) {
             return (NPY_CASTING)-1;
