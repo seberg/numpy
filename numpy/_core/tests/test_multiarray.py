@@ -5015,17 +5015,28 @@ class TestClip:
             self._clip_type(
                 'uint', 1024, 10, 100, inplace=inplace)
 
-    @pytest.mark.parametrize("inplace", [False, True])
-    def test_int_range_error(self, inplace):
-        # E.g. clipping uint with negative integers fails to promote
-        # (changed with NEP 50 and may be adaptable)
-        # Similar to last check in `test_basic`
-        x = (np.random.random(1000) * 255).astype("uint8")
-        with pytest.raises(OverflowError):
-            x.clip(-1, 10, out=x if inplace else None)
-
-        with pytest.raises(OverflowError):
-            x.clip(0, 256, out=x if inplace else None)
+    @pytest.mark.parametrize("do_inplace, min, max, emin, emax", [
+        (True, -1, 10, 0, 10),
+        (True, -1, None, 0, 255),
+        (False, np.int8(-1), None, 0, 255),
+        (True, 10, 400, 10, 255),
+        (True, None, 400, 0, 255),
+        (True, -10, 256, 0, 255),
+        (False, np.int8(-10), 256, 0, 255),
+        (False, -10, np.uint16(256), 0, 255),
+    ])
+    def test_int_out_of_range(self, do_inplace, min, max, emin, emax):
+        # E.g. clipping uint with negative python integers fails to promote
+        # for ufunc, but we special-case it in _methods._clip.
+        # For numpy integers, promotion works, but then the output dtype
+        # changes, so we cannot do this in-place.
+        x = np.arange(0, 256, dtype="uint8")
+        result = x.clip(min, max)
+        self._check_range(result, emin, emax)
+        if do_inplace:
+            result2 = x.clip(min, max, out=x)
+            assert result2 is x
+            assert_array_equal(result2, result)
 
     def test_record_array(self):
         rec = np.array([(-5, 2.0, 3.0), (5.0, 4.0, 3.0)],
