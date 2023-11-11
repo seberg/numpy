@@ -1038,9 +1038,10 @@ any_array_ufunc_overrides(PyObject *args, PyObject *kwds)
     }
     in_objs = PySequence_Fast_ITEMS(fast);
     for (i = 0; i < nin; ++i) {
-        if (PyUFunc_HasOverride(in_objs[i])) {
+        int has_override = PyUFunc_HasOverride(in_objs[i]);
+        if (has_override != 0) {  /* -1 or 1 */
             Py_DECREF(fast);
-            return 1;
+            return has_override;
         }
     }
     Py_DECREF(fast);
@@ -1053,9 +1054,10 @@ any_array_ufunc_overrides(PyObject *args, PyObject *kwds)
         return -1;
     }
     for (i = 0; i < nout; i++) {
-        if (PyUFunc_HasOverride(out_objs[i])) {
+        int has_override = PyUFunc_HasOverride(out_objs[i]);
+        if (has_override != 0) {  /* -1 or 1 */
             Py_DECREF(out_kwd_obj);
-            return 1;
+            return has_override;
         }
     }
     Py_DECREF(out_kwd_obj);
@@ -1066,8 +1068,9 @@ any_array_ufunc_overrides(PyObject *args, PyObject *kwds)
             return -1;
         }
     } else {
-        if (PyUFunc_HasOverride(where_obj)){
-            return 1;
+        int has_override = PyUFunc_HasOverride(where_obj);
+        if (has_override != 0) {  /* -1 or 1 */
+            return has_override;
         }
     }
     return 0;

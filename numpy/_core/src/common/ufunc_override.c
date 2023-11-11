@@ -13,27 +13,33 @@
  * __array_ufunc__ is not the same as that of ndarray.
  *
  * Returns a new reference, the value of type(obj).__array_ufunc__ if it
- * exists and is different from that of ndarray, and NULL otherwise.
+ * exists and is different from that of ndarray, and NULL otherwise in method.
+ * The return value is -1 on error and 0 on success.
  */
-NPY_NO_EXPORT PyObject *
-PyUFuncOverride_GetNonDefaultArrayUfunc(PyObject *obj)
+NPY_NO_EXPORT int
+PyUFuncOverride_GetNonDefaultArrayUfunc(PyObject *obj, PyObject **method)
 {
     static PyObject *ndarray_array_ufunc = NULL;
     PyObject *cls_array_ufunc;
 
     /* On first entry, cache ndarray's __array_ufunc__ */
-    if (ndarray_array_ufunc == NULL) {
+    if (NPY_UNLIKELY(ndarray_array_ufunc == NULL)) {
         ndarray_array_ufunc = PyObject_GetAttrString((PyObject *)&PyArray_Type,
                                                      "__array_ufunc__");
+        if (ndarray_array_ufunc == NULL) {
+            return -1;
+        }
     }
 
     /* Fast return for ndarray */
     if (PyArray_CheckExact(obj)) {
-        return NULL;
+        *method = NULL;
+        return 0;
     }
    /* Fast return for numpy scalar types */
     if (is_anyscalar_exact(obj)) {
-        return NULL;
+        *method = NULL;
+        return 0;
     }
 
     /*
@@ -41,18 +47,17 @@ PyUFuncOverride_GetNonDefaultArrayUfunc(PyObject *obj)
      * return for basic python types, so no need to worry about those here)
      */
     cls_array_ufunc = PyArray_LookupSpecial(obj, npy_um_str_array_ufunc);
-    if (cls_array_ufunc == NULL) {
-        if (PyErr_Occurred()) {
-            PyErr_Clear(); /* TODO[gh-14801]: propagate crashes during attribute access? */
-        }
-        return NULL;
+    if (cls_array_ufunc == NULL && PyErr_Occurred()) {
+        return -1;
     }
     /* Ignore if the same as ndarray.__array_ufunc__ */
     if (cls_array_ufunc == ndarray_array_ufunc) {
         Py_DECREF(cls_array_ufunc);
-        return NULL;
+        *method = NULL;
+        return 0;
     }
-    return cls_array_ufunc;
+    *method = cls_array_ufunc;
+    return 0;
 }
 
 /*
@@ -60,13 +65,16 @@ PyUFuncOverride_GetNonDefaultArrayUfunc(PyObject *obj)
  * is not the default, i.e., the object is not an ndarray, and its
  * __array_ufunc__ is not the same as that of ndarray.
  *
- * Returns 1 if this is the case, 0 if not.
+ * Returns 1 if this is the case, 0 if not.  May return -1 on error.
  */
 
 NPY_NO_EXPORT int
 PyUFunc_HasOverride(PyObject * obj)
 {
-    PyObject *method = PyUFuncOverride_GetNonDefaultArrayUfunc(obj);
+    PyObject *method;
+    if (PyUFuncOverride_GetNonDefaultArrayUfunc(obj, &method) < 0) {
+        return -1;
+    }
     if (method) {
         Py_DECREF(method);
         return 1;

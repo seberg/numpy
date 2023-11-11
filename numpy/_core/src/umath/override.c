@@ -64,7 +64,10 @@ get_array_ufunc_overrides(PyObject *in_args, PyObject *out_args, PyObject *where
              * ignore the base ndarray.__ufunc__, so we skip any ndarray as well as
              * any ndarray subclass instances that did not override __array_ufunc__.
              */
-            PyObject *method = PyUFuncOverride_GetNonDefaultArrayUfunc(obj);
+            PyObject *method;
+            if (PyUFuncOverride_GetNonDefaultArrayUfunc(obj, &method) < 0) {
+                goto fail;
+            }
             if (method == NULL) {
                 continue;
             }
