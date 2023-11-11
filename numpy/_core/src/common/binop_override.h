@@ -136,7 +136,7 @@ binop_should_defer(PyObject *self, PyObject *other, int inplace)
         return defer;
     }
     else if (PyErr_Occurred()) {
-        PyErr_Clear(); /* TODO[gh-14801]: propagate crashes during attribute access? */
+        return -1;
     }
     /*
      * Otherwise, we need to check for the legacy __array_priority__. But if
