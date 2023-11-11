@@ -418,8 +418,14 @@ new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
          * -- use priority to determine which subtype.
          */
         if (Py_TYPE(ap2) != Py_TYPE(ap1)) {
-            prior2 = PyArray_GetPriority((PyObject *)ap2, 0.0);
-            prior1 = PyArray_GetPriority((PyObject *)ap1, 0.0);
+            prior2 = PyArray_GetArrayPriority((PyObject *)ap2, 0.0);
+            if (error_converting(prior2)) {
+                return NULL;
+            }
+            prior1 = PyArray_GetArrayPriority((PyObject *)ap1, 0.0);
+            if (error_converting(prior1)) {
+                return NULL;
+            }
             subtype = (prior2 > prior1 ? Py_TYPE(ap2) : Py_TYPE(ap1));
         }
         else {

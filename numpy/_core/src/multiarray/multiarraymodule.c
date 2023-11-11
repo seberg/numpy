@@ -156,7 +156,7 @@ PyArray_GetArrayPriority(PyObject *obj, double default_)
 
 
 /*NUMPY_API
- * Get Array Priority from object.  Deprecated, use `PyArray_GetPriorityEx`
+ * Get Array Priority from object.  Deprecated, use `PyArray_GetArrayPriority`.
  */
 NPY_NO_EXPORT double
 PyArray_GetPriority(PyObject *obj, double default_)
@@ -344,7 +344,7 @@ PyArray_Free(PyObject *op, void *ptr)
 }
 
 /*
- * Get the ndarray subclass with the highest priority
+ * Get the ndarray subclass with the highest priority (borrowed reference)
  */
 NPY_NO_EXPORT PyTypeObject *
 PyArray_GetSubType(int narrays, PyArrayObject **arrays) {
@@ -355,7 +355,10 @@ PyArray_GetSubType(int narrays, PyArrayObject **arrays) {
     /* Get the priority subtype for the array */
     for (i = 0; i < narrays; ++i) {
         if (Py_TYPE(arrays[i]) != subtype) {
-            double pr = PyArray_GetPriority((PyObject *)(arrays[i]), 0.0);
+            double pr = PyArray_GetArrayPriority((PyObject *)(arrays[i]), 0.0);
+            if (error_converting(pr)) {
+                return NULL;
+            }
             if (pr > priority) {
                 priority = pr;
                 subtype = Py_TYPE(arrays[i]);
@@ -456,6 +459,9 @@ PyArray_ConcatenateArrays(int narrays, PyArrayObject **arrays, int axis,
 
         /* Get the priority subtype for the array */
         PyTypeObject *subtype = PyArray_GetSubType(narrays, arrays);
+        if (subtype == NULL) {
+            return NULL;
+        }
         PyArray_Descr *descr = PyArray_FindConcatenationDescriptor(
                 narrays, arrays, dtype);
         if (descr == NULL) {
@@ -571,7 +577,9 @@ PyArray_ConcatenateFlattenedArrays(int narrays, PyArrayObject **arrays,
 
         /* Get the priority subtype for the array */
         PyTypeObject *subtype = PyArray_GetSubType(narrays, arrays);
-
+        if (subtype == NULL) {
+            return NULL;
+        }
         PyArray_Descr *descr = PyArray_FindConcatenationDescriptor(
                 narrays, arrays, dtype);
         if (descr == NULL) {

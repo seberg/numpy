@@ -4,6 +4,7 @@
 #include <string.h>
 #include <Python.h>
 #include "numpy/arrayobject.h"
+#include "common.h"
 
 #include "get_attr_string.h"
 
@@ -145,8 +146,14 @@ binop_should_defer(PyObject *self, PyObject *other, int inplace)
     if(PyType_IsSubtype(Py_TYPE(other), Py_TYPE(self))) {
         return 0;
     }
-    self_prio = PyArray_GetPriority((PyObject *)self, NPY_SCALAR_PRIORITY);
-    other_prio = PyArray_GetPriority((PyObject *)other, NPY_SCALAR_PRIORITY);
+    self_prio = PyArray_GetArrayPriority((PyObject *)self, NPY_SCALAR_PRIORITY);
+    if (error_converting(self_prio)) {
+        return -1;
+    }
+    other_prio = PyArray_GetArrayPriority((PyObject *)other, NPY_SCALAR_PRIORITY);
+    if (error_converting(other_prio)) {
+        return -1;
+    }
     return self_prio < other_prio;
 }
 
@@ -178,22 +185,31 @@ binop_should_defer(PyObject *self, PyObject *other, int inplace)
     (Py_TYPE(m2)->tp_as_number != NULL &&                               \
      (void*)(Py_TYPE(m2)->tp_as_number->SLOT_NAME) != (void*)(test_func))
 
-#define BINOP_GIVE_UP_IF_NEEDED(m1, m2, slot_expr, test_func)           \
-    do {                                                                \
-        if (BINOP_IS_FORWARD(m1, m2, slot_expr, test_func) &&           \
-            binop_should_defer((PyObject*)m1, (PyObject*)m2, 0)) {      \
-            Py_INCREF(Py_NotImplemented);                               \
-            return Py_NotImplemented;                                   \
-        }                                                               \
+
+#define BINOP_GIVE_UP_IF_NEEDED(m1, m2, slot_expr, test_func)                \
+    do {                                                                     \
+        if (BINOP_IS_FORWARD(m1, m2, slot_expr, test_func)) {                \
+            int _def = binop_should_defer((PyObject*)m1, (PyObject*)m2, 0);  \
+            if (_def < 0) {                                                  \
+                return NULL;                                                 \
+            }                                                                \
+            else if (_def) {                                                 \
+                Py_RETURN_NOTIMPLEMENTED;                                    \
+            }                                                                \
+        }                                                                    \
     } while (0)
 
-#define INPLACE_GIVE_UP_IF_NEEDED(m1, m2, slot_expr, test_func)         \
-    do {                                                                \
-        if (BINOP_IS_FORWARD(m1, m2, slot_expr, test_func) &&           \
-            binop_should_defer((PyObject*)m1, (PyObject*)m2, 1)) {      \
-            Py_INCREF(Py_NotImplemented);                               \
-            return Py_NotImplemented;                                   \
-        }                                                               \
+#define INPLACE_GIVE_UP_IF_NEEDED(m1, m2, slot_expr, test_func)              \
+    do {                                                                     \
+        if (BINOP_IS_FORWARD(m1, m2, slot_expr, test_func)) {                \
+            int _def = binop_should_defer((PyObject*)m1, (PyObject*)m2, 1);  \
+            if (_def < 0) {                                                  \
+                return NULL;                                                 \
+            }                                                                \
+            else if (_def) {                                                 \
+                Py_RETURN_NOTIMPLEMENTED;                                    \
+            }                                                                \
+        }                                                                    \
     } while (0)
 
 /*
@@ -204,12 +220,15 @@ binop_should_defer(PyObject *self, PyObject *other, int inplace)
  * asymmetric -- you can never have two duck-array types that each decide to
  * defer to the other.
  */
-#define RICHCMP_GIVE_UP_IF_NEEDED(m1, m2)                               \
-    do {                                                                \
-        if (binop_should_defer((PyObject*)m1, (PyObject*)m2, 0)) {      \
-            Py_INCREF(Py_NotImplemented);                               \
-            return Py_NotImplemented;                                   \
-        }                                                               \
+#define RICHCMP_GIVE_UP_IF_NEEDED(m1, m2)                                \
+    do {                                                                 \
+        int _def = binop_should_defer((PyObject*)m1, (PyObject*)m2, 0);  \
+        if (_def < 0) {                                                  \
+            return NULL;                                                 \
+        }                                                                \
+        else if (_def) {                                                 \
+            Py_RETURN_NOTIMPLEMENTED;                                    \
+        }                                                                \
     } while (0)
 
 #endif  /* NUMPY_CORE_SRC_COMMON_BINOP_OVERRIDE_H_ */
