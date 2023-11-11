@@ -3915,12 +3915,20 @@ class TestBinop:
         check(make_obj(np.ndarray, array_ufunc=None), True, False, False,
               check_scalar=False)
 
-    @pytest.mark.parametrize("priority", [None, "runtime error"])
-    def test_ufunc_binop_bad_array_priority(self, priority):
-        # Mainly checks that this does not crash.  The second array has a lower
-        # priority than -1 ("error value").  If the __radd__ actually exists,
-        # bad things can happen (I think via the scalar paths).
-        # In principle both of these can probably just be errors in the future.
+    @pytest.mark.parametrize("priority,error",
+            [(None, TypeError), ("runtime error", RuntimeError)])
+    @pytest.mark.parametrize("op", [
+            # Binop failures
+            lambda x: np.arange(3) + x,
+            lambda x: np.float64(3) + x,
+            # Richcompare:
+            lambda x: x == np.arange(3),
+            lambda x: x == np.float64(3),
+            # In ufunc, not yet fixed (happens during __wrap__ finding)
+            lambda x: (pytest.xfail(), np.add(np.arange(3), x))
+        ])
+    def test_ufunc_binop_bad_array_priority(self, priority, error, op):
+        # For a long time, NumPy did not propagate these errors correctly.
         class BadPriority:
             @property
             def __array_priority__(self):
@@ -3928,17 +3936,8 @@ class TestBinop:
                     raise RuntimeError("RuntimeError in __array_priority__!")
                 return priority
 
-            def __radd__(self, other):
-                return "result"
-
-        class LowPriority(np.ndarray):
-            __array_priority__ = -1000
-
-        # Priority failure uses the same as scalars (smaller -1000).  So the
-        # LowPriority wins with 'result' for each element (inner operation).
-        res = np.arange(3).view(LowPriority) + BadPriority()
-        assert res.shape == (3,)
-        assert res[0] == 'result'
+        with pytest.raises(error):
+            op(BadPriority())
 
 
     def test_ufunc_override_normalize_signature(self):

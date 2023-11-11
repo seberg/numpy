@@ -3254,6 +3254,30 @@ class TestSpecialMethods:
         assert_equal(res0[4], {})
         assert_equal(res1[4], {'out': (a,)})
 
+    def test_ufunc_override_fails(self):
+
+        class Meta(type):
+            @property
+            def __array_ufunc__(self):
+                raise RuntimeError("oops")
+
+        class MyArr(np.ndarray, metaclass=Meta):
+            pass
+
+        myarr = np.arange(10).view(MyArr)
+        with pytest.raises(RuntimeError, match="oops"):
+            np.add(myarr, 1)
+
+        arr = np.arange(10)
+        with pytest.raises(RuntimeError, match="oops"):
+            arr.__array_ufunc__(np.add, "__call__", arr, myarr)
+
+        with pytest.raises(RuntimeError, match="oops"):
+            arr.__array_ufunc__(np.add, "__call__", arr, arr, out=(myarr,))
+
+        with pytest.raises(RuntimeError, match="oops"):
+            arr.__array_ufunc__(np.add, "__call__", arr, arr, where=myarr)
+
     def test_ufunc_override_mro(self):
 
         # Some multi arg functions for testing.

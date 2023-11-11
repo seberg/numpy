@@ -242,6 +242,22 @@ class TestArrayFunctionDispatch:
         with assert_raises_regex(TypeError, 'no implementation found'):
             dispatched_one_arg(array)
 
+    @pytest.mark.parametrize("func",
+            [np.transpose, lambda x: np.zeros(2, like=x)])
+    def test_implementation_lookup_fails(self, func):
+
+        class Meta(type):
+            @property
+            def __array_function__(self):
+                raise RuntimeError("oops")
+
+        class MyArray(metaclass=Meta):
+            pass
+
+        array = MyArray()
+        with pytest.raises(RuntimeError, match="oops"):
+            func(array)
+
     def test_where_dispatch(self):
 
         class DuckArray:
