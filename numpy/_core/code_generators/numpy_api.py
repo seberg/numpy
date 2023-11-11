@@ -128,7 +128,7 @@ multiarray_funcs_api = {
     'PyArray_CastScalarDirect':             (64,),
     # Unused slot 65, was `PyArray_ScalarFromObject`
     'PyArray_GetCastFunc':                  (66,),
-    # Unused slot 67, was `PyArray_FromDims`
+    # Slot 67, was `PyArray_FromDims`
     # Unused slot 68, was `PyArray_FromDimsAndDataAndDescr`
     'PyArray_FromAny':                      (69, StealRef(2)),
     'PyArray_EnsureArray':                  (70, StealRef(1)),
@@ -378,6 +378,7 @@ multiarray_funcs_api = {
     'NpyDatetime_GetDatetimeISO8601StrLen':          (310, MinVersion("2.0")),
     'NpyDatetime_MakeISO8601Datetime':               (311, MinVersion("2.0")),
     'NpyDatetime_ParseISO8601Datetime':              (312, MinVersion("2.0")),
+    'PyArray_GetArrayPriority':                      (313, MinVersion("2.0")),
 }
 
 ufunc_types_api = {

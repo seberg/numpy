@@ -122,16 +122,19 @@ NPY_NO_EXPORT PyTypeObject PyBigArray_Type;
 
 
 /*NUMPY_API
- * Get Priority from object
+ * Get the __array_priority__ from an object.  If the object has no array
+ * priority defined, the value passed in is unmodified.
+ *
+ * @returns The priority (default if none was found).  When the return value
+ *          is -1, the caller must check `PyErr_Occurred()`.
  */
 NPY_NO_EXPORT double
-PyArray_GetPriority(PyObject *obj, double default_)
+PyArray_GetArrayPriority(PyObject *obj, double default_)
 {
     PyObject *ret;
-    double priority = NPY_PRIORITY;
 
     if (PyArray_CheckExact(obj)) {
-        return priority;
+        return NPY_PRIORITY;
     }
     else if (PyArray_CheckAnyScalarExact(obj)) {
         return NPY_SCALAR_PRIORITY;
@@ -140,21 +143,32 @@ PyArray_GetPriority(PyObject *obj, double default_)
     ret = PyArray_LookupSpecial_OnInstance(obj, npy_ma_str_array_priority);
     if (ret == NULL) {
         if (PyErr_Occurred()) {
-            /* TODO[gh-14801]: propagate crashes during attribute access? */
-            PyErr_Clear();
+            return -1.;
         }
+        /* no attribute found, so return default */
         return default_;
     }
 
-    priority = PyFloat_AsDouble(ret);
+    double priority = PyFloat_AsDouble(ret);
     Py_DECREF(ret);
-    if (error_converting(priority)) {
-        /* TODO[gh-14801]: propagate crashes for bad priority? */
+    return priority;
+}
+
+
+/*NUMPY_API
+ * Get Array Priority from object.  Deprecated, use `PyArray_GetPriorityEx`
+ */
+NPY_NO_EXPORT double
+PyArray_GetPriority(PyObject *obj, double default_)
+{
+    double res = PyArray_GetArrayPriority(obj, default_);
+    if (error_converting(res)) {
         PyErr_Clear();
         return default_;
     }
-    return priority;
+    return res;
 }
+
 
 /*NUMPY_API
  * Multiply a List of ints

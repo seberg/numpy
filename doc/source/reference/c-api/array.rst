@@ -3416,12 +3416,19 @@ Priority
 
     Default scalar priority (very small)
 
-.. c:function:: double PyArray_GetPriority(PyObject* obj, double def)
+.. c:function:: double PyArray_GetArrayPriority(PyObject* obj, double def)
 
     Return the :obj:`~numpy.class.__array_priority__` attribute (converted to a
     double) of *obj* or *def* if no attribute of that name
     exists. Fast returns that avoid the attribute lookup are provided
     for objects of type :c:data:`PyArray_Type`.
+
+    When the return value is ``-1``, ``PyErr_Occurred()`` must be checked.
+
+    .. versionadded:: 2.0
+        Before NumPy 2, the function ``PyArray_GetPriority`` did not return
+        errors and is deprecated.  No backport as of now, software must use
+        ``PyArray_GetPriority`` or vendor it until compiling for 2.0+)
 
 
 Default buffers

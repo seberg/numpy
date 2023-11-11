@@ -640,6 +640,8 @@ cdef extern from "numpy/arrayobject.h":
     #dtype PyArray_DescrNew (dtype)
     dtype PyArray_DescrNewFromType (int)
     double PyArray_GetPriority (object, double)  # clears errors as of 1.25
+    # `PyArray_GetArrayPriority` requires compiling for NumPy >=2.0
+    double PyArray_GetArrayPriority (object, double) except? -1
     object PyArray_IterNew (object)
     object PyArray_MultiIterNew (int, ...)
 
