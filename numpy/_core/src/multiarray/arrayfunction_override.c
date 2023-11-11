@@ -24,7 +24,8 @@ get_ndarray_array_function(void)
 
 /*
  * Get an object's __array_function__ method in the fastest way possible.
- * Never raises an exception. Returns NULL if the method doesn't exist.
+ * Returns NULL if the method doesn't exist, but caller must check for
+ * `PyErr_Occurred()`.
  */
 static PyObject *
 get_array_function(PyObject *obj)
@@ -41,12 +42,7 @@ get_array_function(PyObject *obj)
         return ndarray_array_function;
     }
 
-    PyObject *array_function = PyArray_LookupSpecial(obj, npy_ma_str_array_function);
-    if (array_function == NULL && PyErr_Occurred()) {
-        PyErr_Clear(); /* TODO[gh-14801]: propagate crashes during attribute access? */
-    }
-
-    return array_function;
+    return PyArray_LookupSpecial(obj, npy_ma_str_array_function);
 }
 
 
@@ -92,6 +88,9 @@ get_implementing_args_and_methods(PyObject *relevant_args,
         }
         if (new_class) {
             PyObject *method = get_array_function(argument);
+            if (method == NULL && PyErr_Occurred()) {
+                goto fail;
+            }
 
             if (method != NULL) {
                 int arg_index;
@@ -288,6 +287,9 @@ array_implement_c_array_function_creation(
     /* If `like` doesn't implement `__array_function__`, raise a `TypeError` */
     PyObject *method = get_array_function(like);
     if (method == NULL) {
+        if (PyErr_Occurred()) {
+            return NULL;
+        }
         return PyErr_Format(PyExc_TypeError,
                 "The `like` argument must be an array-like that "
                 "implements the `__array_function__` protocol.");
@@ -556,6 +558,9 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
 
         array_function_methods[0] = get_array_function(args[0]);
         if (array_function_methods[0] == NULL) {
+            if (PyErr_Occurred()) {
+                return NULL;
+            }
             return PyErr_Format(PyExc_TypeError,
                     "The `like` argument must be an array-like that "
                     "implements the `__array_function__` protocol.");
