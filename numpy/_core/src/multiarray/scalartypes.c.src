@@ -336,7 +336,8 @@ gentype_@name@@suff@(PyObject *m1, PyObject *m2)
             res = PyArray_GenericBinaryFunction(other_op, m2, n_ops.@ufunc@);
         }
         Py_DECREF(other_op);
-        return res;
+        /* Bug convert back to scalar (TODO: It would be nice to signal this) */
+        return PyArray_Return(res);
     }
     else {
         assert(other_op == NULL);
@@ -451,7 +452,8 @@ gentype_power(PyObject *m1, PyObject *m2, PyObject *modulo)
             res = PyArray_GenericBinaryFunction(other_op, m2, n_ops.power);
         }
         Py_DECREF(other_op);
-        return res;
+        /* Bug convert back to scalar (TODO: It would be nice to signal this) */
+        return PyArray_Return(res);
     }
     else {
         assert(other_op == NULL);
@@ -496,7 +498,7 @@ gentype_@name@(PyObject *m1)
     }
     ret = Py_TYPE(arr)->tp_as_number->nb_@name@(arr);
     Py_DECREF(arr);
-    return ret;
+    return PyArray_Return(ret);
 }
 /**end repeat**/
 
@@ -1601,7 +1603,8 @@ gentype_richcompare(PyObject *self, PyObject *other, int cmp_op)
         PyObject *res = PyObject_RichCompare(self_op, other_op, cmp_op);
         Py_DECREF(self_op);
         Py_DECREF(other_op);
-        return res;
+        /* assume if other was an array-like, we deferred above. */
+        return PyArray_Return(res);
     }
     else if (self_op != NULL) {
         /* Try again, since other is an object scalar and this one mutated */
@@ -2034,6 +2037,7 @@ gentype_getarray(PyObject *scalar, PyObject *args)
     ret = PyArray_FromScalar(scalar, outcode);
     return ret;
 }
+
 
 static char doc_sc_wraparray[] = "sc.__array_wrap__(obj) return scalar from array";
 

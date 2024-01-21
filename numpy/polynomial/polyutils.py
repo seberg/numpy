@@ -26,6 +26,7 @@ import numpy as np
 
 from numpy._core.multiarray import dragon4_positional, dragon4_scientific
 from numpy.exceptions import RankWarning
+from ._polybase import ABCPolyBase
 
 __all__ = [
     'as_series', 'trimseq', 'trimcoef', 'getdomain', 'mapdomain', 'mapparms',
@@ -349,10 +350,12 @@ def mapdomain(x, old, new):
     array([-1.0+1.j , -0.6+0.6j, -0.2+0.2j,  0.2-0.2j,  0.6-0.6j,  1.0-1.j ]) # may vary
 
     """
-    if type(x) not in (int, float, complex) and not isinstance(x, np.generic):
-        x = np.asanyarray(x)
+    # TODO: Maybe there is a better way?  We don't want np.asarray() as it
+    #       wraps polynomials into 0-D and polynomials don't support ufuncs.
     off, scl = mapparms(old, new)
-    return off + scl*x
+    if isinstance(x, ABCPolyBase):
+        return off + scl * x
+    return off + np.multiply(scl, x)
 
 
 def _nth_slice(i, ndim):
