@@ -298,13 +298,19 @@ def logspace(start, stop, num=50, endpoint=True, base=10.0, dtype=None,
     >>> plt.show()
 
     """
-    ndmax = np.broadcast(start, stop, base).ndim
+    conv = _array_converter(start, stop, base)
+    start, stop, base = conv
+    # Find and expand to common number of dimension (but not for pyscalars)
+    ndmax = max(a.ndim for a in conv if isinstance(a, np.ndarray))
     start, stop, base = (
-        np.array(a, copy=False, subok=True, ndmin=ndmax)
+        a if not isinstance(a, np.ndarray) else (
+            np.array(a, copy=False, subok=True, ndmin=ndmax))
         for a in (start, stop, base)
     )
+
     y = linspace(start, stop, num=num, endpoint=endpoint, axis=axis)
-    base = np.expand_dims(base, axis=axis)
+    if isinstance(base, np.ndarray):
+        base = np.expand_dims(base, axis=axis)
     if dtype is None:
         return _nx.power(base, y)
     return _nx.power(base, y).astype(dtype, copy=False)

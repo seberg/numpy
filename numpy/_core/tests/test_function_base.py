@@ -123,6 +123,13 @@ class TestLogspace:
         assert type(ls) is PhysicalQuantity2
         assert_equal(ls, logspace(1.0, 7.0, 1))
 
+    def test_scalar_base_promotion(self):
+        # The default base is a scalar
+        start = np.array([0, 2], dtype=np.float16)
+        stop = np.array([2, 0], dtype=np.float16)
+        out = np.logspace(start, stop, axis=1)
+        assert out.dtype == np.float16
+
 
 class TestGeomspace:
 
