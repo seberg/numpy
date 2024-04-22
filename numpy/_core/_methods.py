@@ -93,12 +93,39 @@ def _clip(a, min=None, max=None, out=None, **kwargs):
     if min is None and max is None:
         raise ValueError("One of max or min must be given")
 
-    if min is None:
-        return um.minimum(a, max, out=out, **kwargs)
-    elif max is None:
-        return um.maximum(a, min, out=out, **kwargs)
-    else:
-        return um.clip(a, min, max, out=out, **kwargs)
+    try:
+        if min is None:
+            return um.minimum(a, max, out=out, **kwargs)
+        elif max is None:
+            return um.maximum(a, min, out=out, **kwargs)
+        else:
+            return um.clip(a, min, max, out=out, **kwargs)
+    except OverflowError:
+        # If there were python ints, an OverflowError due NEP-50 casting
+        # might be responsible. In that case, we try again.
+        # (We do not do this up front since this is a rare case, and
+        # we do not want to slow down the common path.)
+        if a.dtype.kind not in "iu":
+            raise
+
+        # Circular import if done on top.
+        from numpy._core.getlimits import iinfo
+        a_info = iinfo(a.dtype)
+        changed = False
+        if isinstance(min, int) and min < a_info.min:
+            min = a_info.min
+            changed = True
+        if isinstance(max, int) and max > a_info.max:
+            max = a_info.max
+            changed = True
+        if not changed:
+            raise
+        # try/except just in case the error was unrelated somehow.
+        try:
+            return _clip(a, min, max, out=out, **kwargs)
+        except Exception:
+            pass
+        raise
 
 def _mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
     arr = asanyarray(a)
