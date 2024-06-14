@@ -66,6 +66,45 @@ dbg_stack_trace()
 #define STACK_TRACE do { dbg_stack_trace(); } while (0)
 #endif
 
+
+/*
+ * Defining our own xerbla may (depending on linkage, etc.) replace invalid
+ * parameters to BLAS functions with proper ones.
+ * There is no guarantee this actually works, so if this happens this is
+ * always a NumPy bug.  See e.g. the netlib/lapack xerbla docs:
+ * https://netlib.org/lapack/explore-html-3.6.1/d1/dc0/_b_l_a_s_2_s_r_c_2xerbla_8f.html
+ *
+ * The original reference docs explained the parameters as follows:
+ *
+ * srname: Subroutine name to use in error message, maximum six characters.
+ *          Spaces at the end are skipped.
+ * info: Number of the invalid parameter.
+ */
+CBLAS_INT BLAS_FUNC(xerbla)(char *srname, CBLAS_INT *info)
+{
+        PyGILState_STATE save;
+        /* length of subroutine name */
+        int len = 0;
+
+        /* NOTE(seberg): likely null terminated, but no need to gamble... */
+        while (len < 6 && srname[len] != '\0') {
+            len++;
+        }
+        while (len && srname[len-1] == ' ') {
+            len--;
+        }
+        save = PyGILState_Ensure();
+        /* It seems plausible that scipy also picks up our version */
+        PyErr_Format(PyExc_RuntimeError,
+            "On entry to %.*s parameter number %d had an illegal value "
+            "(this is an issue in the library calling LAPACK).",
+            len, srname, (int)*info);
+        PyGILState_Release(save);
+
+        return 0;
+}
+
+
 /*
  *****************************************************************************
  *                    BLAS/LAPACK calling macros                             *
