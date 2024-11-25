@@ -796,7 +796,8 @@ static int
 npyiter_check_op_axes(int nop, int oa_ndim, int **op_axes,
                         const npy_intp *itershape)
 {
-    char axes_dupcheck[NPY_MAXDIMS];
+    assert(NPY_MAXDIMS <= 64);
+    npy_uint64 axes_dupcheck;
     int iop, idim;
 
     if (oa_ndim < 0) {
@@ -831,7 +832,7 @@ npyiter_check_op_axes(int nop, int oa_ndim, int **op_axes,
     for (iop = 0; iop < nop; ++iop) {
         int *axes = op_axes[iop];
         if (axes != NULL) {
-            memset(axes_dupcheck, 0, NPY_MAXDIMS);
+            axes_dupcheck = 0;
             for (idim = 0; idim < oa_ndim; ++idim) {
                 int i = npyiter_get_op_axis(axes[idim], NULL);
 
@@ -844,7 +845,7 @@ npyiter_check_op_axes(int nop, int oa_ndim, int **op_axes,
                                 "values %d", iop, i);
                         return 0;
                     }
-                    else if (axes_dupcheck[i] == 1) {
+                    else if (axes_dupcheck & 1 << i) {
                         PyErr_Format(PyExc_ValueError,
                                 "The 'op_axes' provided to the iterator "
                                 "constructor for operand %d "
@@ -853,7 +854,7 @@ npyiter_check_op_axes(int nop, int oa_ndim, int **op_axes,
                         return 0;
                     }
                     else {
-                        axes_dupcheck[i] = 1;
+                        axes_dupcheck |= 1 << i;
                     }
                 }
             }
@@ -905,39 +906,28 @@ npyiter_check_per_op_flags(npy_uint32 op_flags, npyiter_opitflags *op_itflags)
     }
 
     /* Check the read/write flags */
-    if (op_flags & NPY_ITER_READONLY) {
-        /* The read/write flags are mutually exclusive */
-        if (op_flags & (NPY_ITER_READWRITE|NPY_ITER_WRITEONLY)) {
+    switch (op_flags & (NPY_ITER_READONLY|NPY_ITER_READWRITE|NPY_ITER_WRITEONLY)) {
+        case NPY_ITER_READONLY:
+           *op_itflags = NPY_OP_ITFLAG_READ;
+            break;
+        case NPY_ITER_READWRITE:
+            *op_itflags = NPY_OP_ITFLAG_READ|NPY_OP_ITFLAG_WRITE;
+            break;
+        case NPY_ITER_WRITEONLY:
+            *op_itflags = NPY_OP_ITFLAG_WRITE;
+            break;
+        case 0:
+            PyErr_SetString(PyExc_ValueError,
+                    "None of the iterator flags READWRITE, "
+                    "READONLY, or WRITEONLY were "
+                    "specified for an operand");
+            return 0;
+        default:
             PyErr_SetString(PyExc_ValueError,
                     "Only one of the iterator flags READWRITE, "
                     "READONLY, and WRITEONLY may be "
                     "specified for an operand");
             return 0;
-        }
-
-        *op_itflags = NPY_OP_ITFLAG_READ;
-    }
-    else if (op_flags & NPY_ITER_READWRITE) {
-        /* The read/write flags are mutually exclusive */
-        if (op_flags & NPY_ITER_WRITEONLY) {
-            PyErr_SetString(PyExc_ValueError,
-                    "Only one of the iterator flags READWRITE, "
-                    "READONLY, and WRITEONLY may be "
-                    "specified for an operand");
-            return 0;
-        }
-
-        *op_itflags = NPY_OP_ITFLAG_READ|NPY_OP_ITFLAG_WRITE;
-    }
-    else if(op_flags & NPY_ITER_WRITEONLY) {
-        *op_itflags = NPY_OP_ITFLAG_WRITE;
-    }
-    else {
-        PyErr_SetString(PyExc_ValueError,
-                "None of the iterator flags READWRITE, "
-                "READONLY, or WRITEONLY were "
-                "specified for an operand");
-        return 0;
     }
 
     /* Check the flags for temporary copies */
@@ -1066,7 +1056,7 @@ npyiter_prepare_one_operand(PyArrayObject **op,
     }
 
 
-    if (PyArray_Check(*op)) {
+    if (PyArray_CheckExact(*op) || PyArray_Check(*op)) {
 
         if ((*op_itflags) & NPY_OP_ITFLAG_WRITE
             && PyArray_FailUnlessWriteable(*op, "operand array with iterator "
