@@ -1563,8 +1563,9 @@ NpyIter_DebugPrint(NpyIter *iter)
         if (itflags&NPY_ITFLAG_REDUCE) {
             printf("|   REDUCE Pos: %d\n",
                         (int)NBF_REDUCE_POS(bufferdata));
+            /* Also used for non-reduce to advance */
             printf("|   REDUCE OuterSize: %d\n",
-                        (int)NBF_REDUCE_OUTERSIZE(bufferdata));
+                        (int)NBF_OUTERSIZE(bufferdata));
             printf("|   REDUCE OuterDim: %d\n",
                         (int)NBF_OUTERDIM(bufferdata));
         }
@@ -1865,7 +1866,7 @@ npyiter_fill_buffercopy_params(
          */
         assert(NAD_STRIDES(axisdata)[iop] == 0);
         *ndim_transfer = 1;
-        *op_transfersize = NBF_REDUCE_OUTERSIZE(bufferdata);
+        *op_transfersize = NBF_OUTERSIZE(bufferdata);
         *buf_stride = NBF_REDUCE_OUTERSTRIDES(bufferdata)[iop];
 
         *op_shape = op_transfersize;
@@ -1950,9 +1951,10 @@ npyiter_copy_from_buffers(NpyIter *iter)
     }
 
     if (itflags & NPY_ITFLAG_REDUCE) {
+        assert(NBF_OUTERSIZE(bufferdata) >= 1);
         npy_intp sizeof_axisdata = NIT_AXISDATA_SIZEOF(itflags, ndim, nop);
         outer_axisdata = NIT_INDEX_AXISDATA(axisdata, NBF_OUTERDIM(bufferdata));
-        transfersize *= NBF_REDUCE_OUTERSIZE(bufferdata);
+        transfersize *= NBF_OUTERSIZE(bufferdata);
     }
 
     NPY_IT_DBG_PRINT("Iterator: Copying buffers to outputs\n");
@@ -2136,9 +2138,9 @@ npyiter_copy_to_buffers(NpyIter *iter, char **prev_dataptrs)
 
     NPY_IT_DBG_PRINT("Iterator: Buffer transfersize=%zd\n", transfersize);
 
+    NBF_OUTERSIZE(bufferdata) = transfersize / bufferdata->coresize;
     if (itflags & NPY_ITFLAG_REDUCE) {
-        NBF_REDUCE_OUTERSIZE(bufferdata) = transfersize / bufferdata->coresize;
-        if (NBF_REDUCE_OUTERSIZE(bufferdata) > 1) {
+        if (NBF_OUTERSIZE(bufferdata) > 1) {
             /* WARNING: bufferdata->size does not include reduce-outersize */
             bufferdata->size = bufferdata->coresize;
             NBF_BUFITEREND(bufferdata) = iterindex + bufferdata->coresize;

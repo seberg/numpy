@@ -279,7 +279,7 @@ struct NpyIter_BufferData_tag {
 #define NBF_REDUCE_POS(bufferdata) ((bufferdata)->reduce_pos)
 #define NBF_CORESIZE(bufferdata) ((bufferdata)->coresize)
 #define NBF_COREOFFSET(bufferdata) ((bufferdata)->coreoffset)
-#define NBF_REDUCE_OUTERSIZE(bufferdata) ((bufferdata)->outersize)
+#define NBF_OUTERSIZE(bufferdata) ((bufferdata)->outersize)
 #define NBF_OUTERDIM(bufferdata) ((bufferdata)->outerdim)
 #define NBF_STRIDES(bufferdata) ( \
         &(bufferdata)->bd_flexdata + 0)

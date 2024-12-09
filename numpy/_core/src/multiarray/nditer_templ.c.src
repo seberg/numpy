@@ -119,6 +119,66 @@ npyiter_iternext_itflags@tag_itflags@_dims@tag_ndim@_iters@tag_nop@(
 /**end repeat**/
 
 
+static inline void
+npyiter_advance_iter_buffered(NpyIter *iter, NpyIter_BufferData *bufferdata)
+{
+    npy_uint32 itflags = NPY_ITFLAG_BUFFER;  /* only for access macros */
+
+    int ndim = NIT_NDIM(iter);
+    int nop = NIT_NOP(iter);
+    npy_intp sizeof_axisdata = NIT_AXISDATA_SIZEOF(itflags, ndim, nop);
+    NpyIter_AxisData *axisdata = NIT_AXISDATA(iter);
+
+    if (NPY_UNLIKELY(NBF_COREOFFSET(bufferdata) != 0)) {
+        /*
+         * If coreoffset was set, advancing innner dims is more complicated.
+         * since this should normally happen at most once, use slow path.
+         */
+        npyiter_goto_iterindex(iter, NIT_ITERINDEX(iter));
+        return;
+    }
+
+    char **ptrs = NIT_DATAPTRS(iter);
+
+    /* We always advance only on the outerdim (and beyond) so skip forward: */
+    int idim = NBF_OUTERDIM(bufferdata);
+    assert(idim < ndim);  /* Function should never be called otherwise. */
+    NIT_ADVANCE_AXISDATA(axisdata, idim);
+
+    npy_intp outer_size = NBF_OUTERSIZE(bufferdata);
+    NAD_INDEX(axisdata) += outer_size;
+    for (int iop = 0; iop < nop; iop++) {
+        ptrs[iop] += outer_size * NAD_STRIDES(axisdata)[iop];
+    }
+    if (NAD_INDEX(axisdata) < NAD_SHAPE(axisdata)) {
+        return;
+    }
+    else {
+        /* The buffering size is chosen to guarantee a simple advance: */
+        assert(NAD_INDEX(axisdata) == NAD_SHAPE(axisdata));
+    }
+
+    for (; idim < ndim; idim++) {
+        /* rewind the current (overflown) axis */
+        NAD_INDEX(axisdata) = 0;
+        for (int iop = 0; iop < nop; iop++) {
+            ptrs[iop] -= NAD_SHAPE(axisdata) * NAD_STRIDES(axisdata)[iop];
+        }
+
+        /* advance to next axis and increment it */
+        NIT_ADVANCE_AXISDATA(axisdata, 1);
+        NAD_INDEX(axisdata) += 1;
+        for (int iop = 0; iop < nop; iop++) {
+            ptrs[iop] += NAD_STRIDES(axisdata)[iop];
+        }
+
+        if (NAD_INDEX(axisdata) < NAD_SHAPE(axisdata)) {
+            return;
+        }
+    }
+}
+
+
 /**begin repeat
  * #const_nop = 1, 2, 3, 4, NPY_MAXDIMS#
  * #tag_nop = 1, 2, 3, 4, ANY#
@@ -170,7 +230,7 @@ npyiter_buffered_reduce_iternext_iters@tag_nop@(NpyIter *iter)
     NPY_IT_DBG_PRINT1("Iterator: Finished iteration %d of outer reduce loop\n",
                             (int)NBF_REDUCE_POS(bufferdata));
     /* The outer increment for the reduce double loop */
-    if (++NBF_REDUCE_POS(bufferdata) < NBF_REDUCE_OUTERSIZE(bufferdata)) {
+    if (++NBF_REDUCE_POS(bufferdata) < NBF_OUTERSIZE(bufferdata)) {
         npy_intp *reduce_outerstrides = NBF_REDUCE_OUTERSTRIDES(bufferdata);
         char **reduce_outerptrs = NBF_REDUCE_OUTERPTRS(bufferdata);
         for (iop = 0; iop < nop; ++iop) {
@@ -198,7 +258,7 @@ npyiter_buffered_reduce_iternext_iters@tag_nop@(NpyIter *iter)
     }
     /* Increment to the next buffer */
     else {
-        npyiter_goto_iterindex(iter, NIT_ITERINDEX(iter));
+        npyiter_advance_iter_buffered(iter, bufferdata);
     }
 
     /* Prepare the next buffers and set iterend/size */
@@ -258,7 +318,7 @@ npyiter_buffered_iternext(NpyIter *iter)
     }
     /* Increment to the next buffer */
     else {
-        npyiter_goto_iterindex(iter, NIT_ITERINDEX(iter));
+        npyiter_advance_iter_buffered(iter, bufferdata);
     }
 
     /* Prepare the next buffers and set iterend/size */
