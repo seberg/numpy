@@ -1352,6 +1352,9 @@ NpyIter_GetAxisStrideArray(NpyIter *iter, int axis)
  * which will always be fixed in the inner loop, then choose optimized
  * inner loop functions which take advantage of those fixed strides.
  *
+ * NOTE: Within NumPy we use the fact that this is unnecessary and the inner
+ *       strides array is fixed as soon as setup is finished.
+ *
  * This function may be safely called without holding the Python GIL.
  */
 NPY_NO_EXPORT void

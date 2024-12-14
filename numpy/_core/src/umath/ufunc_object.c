@@ -1109,20 +1109,19 @@ execute_ufunc_loop(PyArrayMethod_Context *context, int masked,
      */
     PyArrayMethod_StridedLoop *strided_loop;
     NpyAuxData *auxdata;
-    npy_intp fixed_strides[NPY_MAXARGS];
 
-    NpyIter_GetInnerFixedStrideArray(iter, fixed_strides);
+    npy_intp *strides = NpyIter_GetInnerStrideArray(iter);
     NPY_ARRAYMETHOD_FLAGS flags = 0;
     if (masked) {
         if (PyArrayMethod_GetMaskedStridedLoop(context,
-                1, fixed_strides, &strided_loop, &auxdata, &flags) < 0) {
+                1, strides, &strided_loop, &auxdata, &flags) < 0) {
             NpyIter_Deallocate(iter);
             return -1;
         }
     }
     else {
         if (context->method->get_strided_loop(context,
-                1, 0, fixed_strides, &strided_loop, &auxdata, &flags) < 0) {
+                1, 0, strides, &strided_loop, &auxdata, &flags) < 0) {
             NpyIter_Deallocate(iter);
             return -1;
         }
@@ -1136,7 +1135,6 @@ execute_ufunc_loop(PyArrayMethod_Context *context, int masked,
         return -1;
     }
     char **dataptr = NpyIter_GetDataPtrArray(iter);
-    npy_intp *strides = NpyIter_GetInnerStrideArray(iter);
     npy_intp *countptr = NpyIter_GetInnerLoopSizePtr(iter);
 
     NPY_BEGIN_THREADS_DEF;
