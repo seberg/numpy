@@ -2111,6 +2111,7 @@ npyiter_copy_to_buffers(NpyIter *iter, char **prev_dataptrs)
     if (bufferdata->coreoffset) {
         prev_dataptrs = NULL;  /* No way we can re-use the buffers safely. */
         transfersize = bufferdata->coresize - bufferdata->coreoffset;
+        NBF_OUTERSIZE(bufferdata) = 1;
         NPY_IT_DBG_PRINT("    Shrunk transfersize due to coreoffset=%zd: %zd\n",
                          bufferdata->coreoffset, transfersize);
     }
@@ -2120,6 +2121,7 @@ npyiter_copy_to_buffers(NpyIter *iter, char **prev_dataptrs)
          * a reduction, it is unclear that this is necessary.
          */
         transfersize = bufferdata->coresize * remaining_outersize;
+        NBF_OUTERSIZE(bufferdata) = remaining_outersize;
         NPY_IT_DBG_PRINT("    Shrunk transfersize outer size: %zd\n", transfersize);
     }
 
@@ -2138,6 +2140,7 @@ npyiter_copy_to_buffers(NpyIter *iter, char **prev_dataptrs)
 
     NPY_IT_DBG_PRINT("Iterator: Buffer transfersize=%zd\n", transfersize);
 
+    // TODO: We can avoid this at least if the size is the same as before?
     NBF_OUTERSIZE(bufferdata) = transfersize / bufferdata->coresize;
     if (itflags & NPY_ITFLAG_REDUCE) {
         if (NBF_OUTERSIZE(bufferdata) > 1) {
