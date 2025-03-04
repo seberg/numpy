@@ -627,6 +627,10 @@ _pep3118_unsupported_map = {
     'X': 'function pointers',
 }
 
+_time_unit_map = ("Y", "M", "W", "<invalid>", "D", "h", "m", "s", "ms",
+                  "us", "ns", "ps", "fs", "as", "generic")
+
+
 class _Stream:
     def __init__(self, s):
         self.s = s
@@ -721,6 +725,31 @@ def __dtype_from_pep3118(stream, is_subdtype):
         if stream.consume('T{'):
             value, align = __dtype_from_pep3118(
                 stream, is_subdtype=True)
+        elif stream.consume("[numpy$"):
+            # TODO: Clearly, we would need a registration and a C callback
+            #       probably, i.e. a slot that is called based on the name.
+            dtype_str = stream.consume_until("]")
+            module, name, *params = dtype_str.split(":", 2)
+            numpy_byteorder = {'@': '=', '^': '='}.get(
+                stream.byteorder, stream.byteorder)
+            if module == "numpy.dtypes":
+                if name == "TimeDelta64DType":
+                    unit, num = [int(i, 16) for i in params[0].split(":")]
+                    unit = _time_unit_map[unit]
+                    value = dtype(f"{numpy_byteorder}m8[{num}{unit}]")
+                elif name == "StringDType":
+                    # Just stores the Python object (ignores any other state).
+                    # (We could always do this, but I think it is nice to avoid
+                    # objects when possible..)
+                    import ctypes
+                    value = ctypes.cast(int(params[0], 16), ctypes.py_object).value
+                    if type(value) != StringDType:
+                        raise SystemError("Critical error, dtype not a StringDType.")
+                else:
+                    raise NotImplementedError(f"Unknown NumPy dtype: {module}:{name}")
+                align = value.alignment
+            else:
+                raise NotImplementedError(f"Unknown NumPy dtype: {module}:{name}")
         elif stream.next in type_map_chars:
             if stream.next == 'Z':
                 typechar = stream.advance(2)
