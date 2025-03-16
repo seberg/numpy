@@ -7,6 +7,8 @@
 # Author: Dag Sverre Seljebotn
 #
 
+cimport cython
+
 from cpython.ref cimport Py_INCREF
 from cpython.object cimport PyObject, PyTypeObject, PyObject_TypeCheck
 cimport libc.stdio as stdio
@@ -1221,6 +1223,7 @@ cdef extern from "numpy/ndarraytypes.h":
     ctypedef struct npy_string_allocator:
         pass
 
+    @cython.extended_buffer_regex("numpy", r"numpy.dtypes.StringDType:[\da-f]+")
     ctypedef struct npy_packed_static_string:
         pass
 

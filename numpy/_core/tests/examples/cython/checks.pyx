@@ -4,6 +4,9 @@
 Functions in this module give python-space wrappers for cython functions
 exposed in numpy/__init__.pxd, so they can be tested in test_cython.py
 """
+from libc.stdint cimport uintptr_t
+from cpython.ref cimport Py_INCREF
+
 cimport numpy as cnp
 cnp.import_array()
 
@@ -356,6 +359,38 @@ def npystring_allocators_other_types(arr1, arr2):
 
     cnp.NpyString_release_allocators(2, allocators)
     return ret
+
+
+cdef cnp.PyArray_StringDTypeObject *string_dtype_from_format(char *fmt):
+    # This helper should be part of the numpy.pyd of course (but needs to be
+    # in it's own `.pyd` for NumPy backwards compatibility).
+    cdef cnp.PyArray_StringDTypeObject descr
+    cdef uintptr_t ptr
+    if not fmt.startswith(b"[numpy$numpy.dtypes:StringDType:"):
+        raise NotImplementedError("not able to parse this format (yet)")
+    fmt = fmt + len(b"[numpy$numpy.dtypes:StringDType:")
+    len_fmt = len(fmt)
+    assert fmt[len_fmt-1] == "]"
+    ptr = int(fmt[:len_fmt-1], 16)
+    return <cnp.PyArray_StringDTypeObject *>ptr
+
+
+def npystring_write_memview(cnp.npy_packed_static_string[:] mview):
+    cdef char *string = "Hello world, hello Pythonistas"
+    cdef size_t size = len(string)
+    cdef size_t i
+
+    cdef cnp.PyArray_StringDTypeObject *descr = string_dtype_from_format(mview.format)
+    allocator = cnp.NpyString_acquire_allocator(descr)
+
+    # copy string->packed_string, the pointer to the underlying array buffer
+    for i in range(mview.shape[0]):
+        ret = cnp.NpyString_pack(allocator, &mview[i], string, size)
+        if ret < 0:
+            break
+
+    cnp.NpyString_release_allocator(allocator)
+    return 1
 
 
 def check_npy_uintp_type_enum():
