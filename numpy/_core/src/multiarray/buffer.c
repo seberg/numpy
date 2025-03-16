@@ -18,6 +18,8 @@
 #include "arrayobject.h"
 #include "scalartypes.h"
 #include "dtypemeta.h"
+#include "descriptor.h"
+#include "_datetime.h"
 
 /*************************************************************************
  ****************   Implement Buffer Protocol ****************************
@@ -417,6 +419,21 @@ _buffer_format_string(PyArray_Descr *descr, _tmp_string_t *str,
             /* Insert padding bytes */
             char buf[128];
             PyOS_snprintf(buf, sizeof(buf), "%" NPY_INTP_FMT "x", descr->elsize);
+            if (_append_str(str, buf) < 0) return -1;
+            break;
+        }
+        case NPY_TIMEDELTA: {
+            char buf[128];
+            PyArray_DatetimeMetaData *meta = get_datetime_metadata_from_dtype(descr);
+            PyOS_snprintf(buf, sizeof(buf), "[numpy$numpy.dtypes:TimeDelta64DType:%x:%x]",
+                          meta->base, meta->num);
+            if (_append_str(str, buf) < 0) return -1;
+            break;
+        }
+        case NPY_VSTRING: {
+            char buf[128];
+            PyOS_snprintf(buf, sizeof(buf), "[numpy$numpy.dtypes:StringDType:%zx]",
+                          (Py_uintptr_t)descr);
             if (_append_str(str, buf) < 0) return -1;
             break;
         }

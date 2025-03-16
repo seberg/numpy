@@ -329,6 +329,14 @@ def test_npystring_multiple_allocators(install_temp):
     assert arr1[-1] is None
     assert arr2[0] == "test this"
 
+def test_pystring_pack_mview(install_temp):
+    """Test basic memoryview interface"""
+    import checks
+
+    dt = np.dtypes.StringDType(na_object=None)
+    arr = np.array(['abcd', 'b', 'c'], dtype=dt)
+    checks.npystring_write_memview(arr)
+    assert (arr == "Hello world, hello Pythonistas").all()
 
 def test_npystring_allocators_other_dtype(install_temp):
     """Check that allocators for non-StringDType arrays is NULL."""
