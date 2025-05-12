@@ -4770,6 +4770,14 @@ initialize_thread_unsafe_state(void) {
         npy_thread_unsafe_state.warn_if_no_mem_policy = 0;
     }
 
+    env = getenv("NUMPY_DISLIKE_SCALARS");
+    if ((env != NULL) && (strncmp(env, "1", 1) == 0)) {
+        npy_thread_unsafe_state.dislike_scalars = 1;
+    }
+    else {
+        npy_thread_unsafe_state.dislike_scalars = 0;
+    }
+
     return 0;
 }
 

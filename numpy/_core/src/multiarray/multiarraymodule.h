@@ -76,6 +76,7 @@ typedef struct npy_thread_unsafe_state_struct {
      * if there is no memory policy set
      */
     int warn_if_no_mem_policy;
+    int dislike_scalars;
 
 } npy_thread_unsafe_state_struct;
 

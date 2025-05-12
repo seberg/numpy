@@ -18,6 +18,7 @@
 #include "ctors.h"
 #include "descriptor.h"
 #include "dtypemeta.h"
+#include "multiarraymodule.h"
 #include "scalartypes.h"
 
 #include "common.h"
@@ -631,7 +632,9 @@ PyArray_Scalar(void *data, PyArray_Descr *descr, PyObject *base)
 NPY_NO_EXPORT PyObject *
 PyArray_Return(PyArrayObject *mp)
 {
-
+    if (npy_thread_unsafe_state.dislike_scalars) {
+        return (PyObject *)mp;
+    }
     if (mp == NULL) {
         return NULL;
     }

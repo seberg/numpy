@@ -29,6 +29,7 @@
 /* TODO: Only for `NpyIter_GetTransferFlags` until it is public */
 #define NPY_ITERATOR_IMPLEMENTATION_CODE
 #include "nditer_impl.h"
+#include "multiarraymodule.h"
 
 #include "umathmodule.h"
 
@@ -1302,7 +1303,7 @@ array_item_asarray(PyArrayObject *self, npy_intp i)
 NPY_NO_EXPORT PyObject *
 array_item(PyArrayObject *self, Py_ssize_t i)
 {
-    if (PyArray_NDIM(self) == 1) {
+    if (PyArray_NDIM(self) == 1 && !npy_thread_unsafe_state.dislike_scalars) {
         char *item;
         npy_index_info index;
 
@@ -1485,7 +1486,7 @@ array_subscript(PyArrayObject *self, PyObject *op)
     }
 
     /* Full integer index */
-    else if (index_type == HAS_INTEGER) {
+    else if (index_type == HAS_INTEGER && !npy_thread_unsafe_state.dislike_scalars) {
         char *item;
         if (get_item_pointer(self, &item, indices, index_num) < 0) {
             goto finish;

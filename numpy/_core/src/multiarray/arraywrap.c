@@ -14,6 +14,7 @@
 
 #include "arraywrap.h"
 #include "npy_static_data.h"
+#include "multiarraymodule.h"
 
 /*
  * Find the array wrap or array prepare method that applies to the inputs.
@@ -138,6 +139,8 @@ npy_apply_wrap(
     PyObject *new_wrap = NULL;
     PyArrayObject *arr = NULL;
     PyObject *err_type, *err_value, *traceback;
+
+    return_scalar = (return_scalar && !npy_thread_unsafe_state.dislike_scalars);
 
     /* If provided, we prefer the actual out objects wrap: */
     if (original_out != NULL && original_out != Py_None) {
