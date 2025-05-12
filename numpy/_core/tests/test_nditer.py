@@ -1059,7 +1059,7 @@ def test_iter_object_arrays_basic():
         assert_equal(sys.getrefcount(obj), rc)
 
     i = nditer(a, ['refs_ok'], ['readonly'])
-    vals = [x_[()] for x_ in i]
+    vals = [x_.to_scalar() for x_ in i]
     assert_equal(np.array(vals, dtype='O'), a)
     vals, i, x = [None] * 3
     if HAS_REFCOUNT:
@@ -1068,7 +1068,7 @@ def test_iter_object_arrays_basic():
     i = nditer(a.reshape(2, 2).T, ['refs_ok', 'buffered'],
                         ['readonly'], order='C')
     assert_(i.iterationneedsapi)
-    vals = [x_[()] for x_ in i]
+    vals = [x_.to_scalar() for x_ in i]
     assert_equal(np.array(vals, dtype='O'), a.reshape(2, 2).ravel(order='F'))
     vals, i, x = [None] * 3
     if HAS_REFCOUNT:
@@ -1120,7 +1120,7 @@ def test_iter_object_arrays_conversions():
     i = nditer(a, ['refs_ok', 'buffered'], ['readwrite'],
                     casting='unsafe', op_dtypes='O')
     with i:
-        ob = i[0][()]
+        ob = i[0, ...].to_scalar()
         if HAS_REFCOUNT:
             rc = sys.getrefcount(ob)
         for x in i:
@@ -1356,42 +1356,42 @@ def test_iter_copy():
     # Simple iterator
     i = nditer(a)
     j = i.copy()
-    assert_equal([x[()] for x in i], [x[()] for x in j])
+    assert_equal([x.to_scalar() for x in i], [x.to_scalar() for x in j])
 
     i.iterindex = 3
     j = i.copy()
-    assert_equal([x[()] for x in i], [x[()] for x in j])
+    assert_equal([x.to_scalar() for x in i], [x.to_scalar() for x in j])
 
     # Buffered iterator
     i = nditer(a, ['buffered', 'ranged'], order='F', buffersize=3)
     j = i.copy()
-    assert_equal([x[()] for x in i], [x[()] for x in j])
+    assert_equal([x.to_scalar() for x in i], [x.to_scalar() for x in j])
 
     i.iterindex = 3
     j = i.copy()
-    assert_equal([x[()] for x in i], [x[()] for x in j])
+    assert_equal([x.to_scalar() for x in i], [x.to_scalar() for x in j])
 
     i.iterrange = (3, 9)
     j = i.copy()
-    assert_equal([x[()] for x in i], [x[()] for x in j])
+    assert_equal([x.to_scalar() for x in i], [x.to_scalar() for x in j])
 
     i.iterrange = (2, 18)
     next(i)
     next(i)
     j = i.copy()
-    assert_equal([x[()] for x in i], [x[()] for x in j])
+    assert_equal([x.to_scalar() for x in i], [x.to_scalar() for x in j])
 
     # Casting iterator
     with nditer(a, ['buffered'], order='F', casting='unsafe',
                 op_dtypes='f8', buffersize=5) as i:
         j = i.copy()
-    assert_equal([x[()] for x in j], a.ravel(order='F'))
+    assert_equal([x.to_scalar() for x in j], a.ravel(order='F'))
 
     a = arange(24, dtype='<i4').reshape(2, 3, 4)
     with nditer(a, ['buffered'], order='F', casting='unsafe',
                 op_dtypes='>f8', buffersize=5) as i:
         j = i.copy()
-    assert_equal([x[()] for x in j], a.ravel(order='F'))
+    assert_equal([x.to_scalar() for x in j], a.ravel(order='F'))
 
 
 @pytest.mark.parametrize("dtype", np.typecodes["All"])
@@ -1757,20 +1757,20 @@ def test_iter_iterrange():
     i = nditer(a, ['ranged'], ['readonly'], order='F',
                 buffersize=buffersize)
     assert_equal(i.iterrange, (0, 24))
-    assert_equal([x[()] for x in i], a_fort)
+    assert_equal([x.to_scalar() for x in i], a_fort)
     for r in [(0, 24), (1, 2), (3, 24), (5, 5), (0, 20), (23, 24)]:
         i.iterrange = r
         assert_equal(i.iterrange, r)
-        assert_equal([x[()] for x in i], a_fort[r[0]:r[1]])
+        assert_equal([x.to_scalar() for x in i], a_fort[r[0]:r[1]])
 
     i = nditer(a, ['ranged', 'buffered'], ['readonly'], order='F',
                 op_dtypes='f8', buffersize=buffersize)
     assert_equal(i.iterrange, (0, 24))
-    assert_equal([x[()] for x in i], a_fort)
+    assert_equal([x.to_scalar() for x in i], a_fort)
     for r in [(0, 24), (1, 2), (3, 24), (5, 5), (0, 20), (23, 24)]:
         i.iterrange = r
         assert_equal(i.iterrange, r)
-        assert_equal([x[()] for x in i], a_fort[r[0]:r[1]])
+        assert_equal([x.to_scalar() for x in i], a_fort[r[0]:r[1]])
 
     def get_array(i):
         val = np.array([], dtype='f8')
@@ -1862,7 +1862,7 @@ def test_iter_buffering_delayed_alloc():
         assert_equal(i[0], 0)
         i[1] = 1
         assert_equal(i[0:2], [0, 1])
-        assert_equal([[x[0][()], x[1][()]] for x in i], list(zip(range(6), [1] * 6)))
+        assert_equal([[x[0, ...].to_scalar(), x[1, ...].to_scalar()] for x in i], list(zip(range(6), [1] * 6)))
 
 def test_iter_buffered_cast_simple():
     # Test that buffering can handle a simple cast
@@ -2015,7 +2015,7 @@ def test_iter_buffered_cast_structured_type():
     i = nditer(a, ['buffered', 'refs_ok'], ['readonly'],
                     casting='unsafe',
                     op_dtypes='i4')
-    assert_equal([x_[()] for x_ in i], [5, 8])
+    assert_equal([x_.to_scalar() for x_ in i], [5, 8])
 
     # make sure multi-field struct type -> simple doesn't work
     sdt = [('a', 'f4'), ('b', 'i8'), ('d', 'O')]

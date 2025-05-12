@@ -2797,6 +2797,27 @@ array_class_getitem(PyObject *cls, PyObject *args)
     return Py_GenericAlias(cls, args);
 }
 
+static PyObject *
+array_to_scalar(PyArrayObject *mp, PyObject *NPY_UNUSED(args))
+{
+    /* TODO, just a silly copy of PyArray_Result, as I disabled that! */
+    Py_INCREF(mp);
+    if (!PyArray_Check(mp)) {
+        return (PyObject *)mp;
+    }
+    if (PyArray_NDIM(mp) == 0) {
+        PyObject *ret;
+        ret = PyArray_ToScalar(PyArray_DATA(mp), mp);
+        Py_DECREF(mp);
+        return ret;
+    }
+    else {
+        return (PyObject *)mp;
+    }
+}
+
+
+
 NPY_NO_EXPORT PyMethodDef array_methods[] = {
 
     /* for subtypes */
@@ -3025,6 +3046,9 @@ NPY_NO_EXPORT PyMethodDef array_methods[] = {
     {"to_device",
         (PyCFunction)array_to_device,
         METH_VARARGS | METH_KEYWORDS, NULL},
+    {"to_scalar",
+        (PyCFunction)array_to_scalar,
+        METH_NOARGS, NULL},
 
     {NULL, NULL, 0, NULL}           /* sentinel */
 };

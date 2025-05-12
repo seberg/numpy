@@ -851,7 +851,7 @@ def _formatArray(a, format_function, line_width, next_line_prefix,
         axes_left = a.ndim - axis
 
         if axes_left == 0:
-            return format_function(a[index])
+            return format_function(a[index + (...,)].to_scalar())
 
         # when recursing, add a space to align with the [ added, and reduce the
         # length of the line by 1
@@ -1709,7 +1709,7 @@ def _array_str_implementation(
         # obtain a scalar and call str on it, avoiding problems for subclasses
         # for which indexing with () returns a 0d instead of a scalar by using
         # ndarray's getindex. Also guard against recursive 0d object arrays.
-        return _guarded_repr_or_str(np.ndarray.__getitem__(a, ()))
+        return _guarded_repr_or_str(np.ndarray.to_scalar(a))
 
     return array2string(a, max_line_width, precision, suppress_small, ' ', "")
 

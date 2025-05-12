@@ -2591,6 +2591,12 @@ integer_is_integer(PyObject *self, PyObject *NPY_UNUSED(args)) {
     Py_RETURN_TRUE;
 }
 
+static PyObject *
+gentype_to_scalar(PyObject *self, PyObject *NPY_UNUSED(args)) {
+    Py_INCREF(self);
+    return self;
+}
+
 /*
  * need to fill in doc-strings for these methods on import -- copy from
  * array docstrings
@@ -2789,6 +2795,9 @@ static PyMethodDef gentype_methods[] = {
     {"to_device",
         (PyCFunction)array_to_device,
         METH_VARARGS | METH_KEYWORDS, NULL},
+    {"to_scalar",
+        (PyCFunction)gentype_to_scalar,
+        METH_NOARGS, NULL},
 
     {NULL, NULL, 0, NULL} /* sentinel */
 };
