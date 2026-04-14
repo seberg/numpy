@@ -41,6 +41,7 @@ dtypemeta_dealloc(PyArray_DTypeMeta *self) {
     Py_XDECREF(self->scalar_type);
     Py_XDECREF(self->singleton);
     Py_XDECREF(NPY_DT_SLOTS(self)->castingimpls);
+    Py_XDECREF(NPY_DT_SLOTS(self)->descr_name);
     PyMem_Free(self->dt_slots);
     PyType_Type.tp_dealloc((PyObject *) self);
 }
@@ -180,6 +181,59 @@ PyArray_ArrFuncs default_funcs = {
 };
 
 /*
+ * Register a name for a DType in the global dtype name registry.
+ *
+ * Uses PyDict_SetDefaultRef so that the first registration wins.
+ * Issues a UserWarning (not an error) if the name is already taken.
+ * Stores the name as descr_name on the DType if not yet set.
+ * Silently skips names that are not valid Python identifiers.
+ *
+ * Returns 0 on success, -1 on error.
+ */
+NPY_NO_EXPORT int
+dtypemeta_register_name(PyArray_DTypeMeta *DType, const char *name)
+{
+    if (npy_static_pydata.dtype_name_registry == NULL) {
+        return 0;
+    }
+    PyObject *name_str = PyUnicode_FromString(name);
+    if (name_str == NULL) {
+        return -1;
+    }
+    if (!PyUnicode_IsIdentifier(name_str)) {
+        Py_DECREF(name_str);
+        return 0;
+    }
+
+    PyObject *existing = NULL;
+    int result = PyDict_SetDefaultRef(
+            npy_static_pydata.dtype_name_registry,
+            name_str, (PyObject *)DType, &existing);
+    Py_XDECREF(existing);
+    if (result < 0) {
+        Py_DECREF(name_str);
+        return -1;
+    }
+    if (result == 1) {
+        int warn_result = PyErr_WarnFormat(PyExc_UserWarning, 1,
+                "DType name '%s' is already registered; "
+                "existing registration takes precedence.", name);
+        Py_DECREF(name_str);
+        return warn_result;
+    }
+
+    /* result == 0: successfully inserted; store as descr_name if first */
+    if (NPY_DT_SLOTS(DType)->descr_name == NULL) {
+        NPY_DT_SLOTS(DType)->descr_name = name_str;
+    }
+    else {
+        Py_DECREF(name_str);
+    }
+    return 0;
+}
+
+
+/*
  * Internal version of PyArrayInitDTypeMeta_FromSpec.
  *
  * See the documentation of that function for more details.
@@ -219,6 +273,8 @@ dtypemeta_initialize_struct_from_spec(
     NPY_DT_SLOTS(DType)->get_fill_zero_loop = NULL;
     NPY_DT_SLOTS(DType)->finalize_descr = NULL;
     NPY_DT_SLOTS(DType)->get_constant = default_get_constant;
+    NPY_DT_SLOTS(DType)->protocol_descr = NULL;
+    NPY_DT_SLOTS(DType)->descr_name = NULL;
     NPY_DT_SLOTS(DType)->f = default_funcs;
 
     PyType_Slot *spec_slot = spec->slots;
@@ -380,6 +436,13 @@ dtypemeta_initialize_struct_from_spec(
         }
 
         if (res < 0) {
+            return -1;
+        }
+    }
+
+    /* Register the DType name if one was provided in the spec */
+    if (spec->type_registration_name != NULL) {
+        if (dtypemeta_register_name(DType, spec->type_registration_name) < 0) {
             return -1;
         }
     }
@@ -1277,6 +1340,19 @@ dtypemeta_wrap_legacy_descriptor(
     else {
         // ensure the within dtype cast is populated for legacy user dtypes
         if (PyArray_GetCastingImpl(dtype_class, dtype_class) == NULL) {
+            return NULL;
+        }
+        /*
+         * Register the scalar type name for user-defined legacy DTypes.
+         * Built-in types are registered separately with their canonical names.
+         */
+        const char *scalar_name = descr->typeobj->tp_name;
+        const char *dot = strrchr(scalar_name, '.');
+        if (dot) {
+            scalar_name = dot + 1;
+        }
+        if (dtypemeta_register_name(dtype_class, scalar_name) < 0) {
+            Py_DECREF(dtype_class);
             return NULL;
         }
     }

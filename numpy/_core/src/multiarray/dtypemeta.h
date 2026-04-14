@@ -73,6 +73,18 @@ typedef struct {
      */
     PyArrayDTypeMeta_GetConstant *get_constant;
     /*
+     * Optional slot for the `.descr` attribute.
+     * When NULL, the default implementation is used (which builds
+     * a (typestr, None) tuple from the descr_name, or falls back
+     * to the legacy list-of-tuples format).
+     */
+    PyArrayDTypeMeta_ProtocolDescr *protocol_descr;
+    /*
+     * Registered short name for this DType class (a Python str),
+     * or NULL if not registered.  Used by `.descr` and `from_descr`.
+     */
+    PyObject *descr_name;
+    /*
      * The casting implementation (ArrayMethod) to convert between two
      * instances of this DType, stored explicitly for fast access:
      */
@@ -103,7 +115,7 @@ typedef struct {
 
 // This must be updated if new slots before within_dtype_castingimpl
 // are added
-#define NPY_NUM_DTYPE_SLOTS 12
+#define NPY_NUM_DTYPE_SLOTS 13
 #define NPY_NUM_DTYPE_PYARRAY_ARRFUNCS_SLOTS 22
 #define NPY_DT_MAX_ARRFUNCS_SLOT \
   NPY_NUM_DTYPE_PYARRAY_ARRFUNCS_SLOTS + _NPY_DT_ARRFUNCS_OFFSET
@@ -164,6 +176,9 @@ dtypemeta_discover_as_default(
 
 NPY_NO_EXPORT int
 dtypemeta_initialize_struct_from_spec(PyArray_DTypeMeta *DType, PyArrayDTypeMeta_Spec *spec, int priv);
+
+NPY_NO_EXPORT int
+dtypemeta_register_name(PyArray_DTypeMeta *DType, const char *name);
 
 NPY_NO_EXPORT int
 python_builtins_are_known_scalar_types(

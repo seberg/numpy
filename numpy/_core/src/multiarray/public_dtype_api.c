@@ -116,7 +116,6 @@ PyArrayInitDTypeMeta_FromSpec(
         return -1;
     }
 
-    /* And finally, we have to register all the casts! */
     return 0;
 }
 

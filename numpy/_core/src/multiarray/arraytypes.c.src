@@ -4596,6 +4596,15 @@ set_typeinfo(PyObject *dict)
     NPY_DT_SLOTS(dtypemeta)->setitem = @NAME@_setitem;
     NPY_DT_SLOTS(dtypemeta)->get_constant = @NAME@_get_constant;
 
+    if (dtypemeta_register_name(dtypemeta, NPY_@NAME@_name) < 0) {
+        return -1;
+    }
+#ifdef NPY_@NAME@_alias
+    if (dtypemeta_register_name(dtypemeta, NPY_@NAME@_alias) < 0) {
+        return -1;
+    }
+#endif
+
     /**end repeat**/
 
     initialize_legacy_dtypemeta_aliases(_builtin_descrs);

@@ -155,6 +155,12 @@ typedef struct npy_static_pydata_struct {
     PyObject *dl_call_kwnames;
     PyObject *dl_cpu_device_tuple;
     PyObject *dl_max_version;
+
+    /*
+     * Registry mapping dtype name (str) -> DType class (PyArray_DTypeMeta *).
+     * Populated at DType registration time; used by dtype.from_descr().
+     */
+    PyObject *dtype_name_registry;
 } npy_static_pydata_struct;
 
 

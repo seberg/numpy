@@ -2049,3 +2049,103 @@ class TestDTypeSignatures:
 
         params_actual = set(sig.parameters)
         assert params_actual == params_expect
+
+
+class TestFromDescr:
+    """Tests for np.dtype.from_descr(descr)."""
+
+    def test_from_descr_list_structured(self):
+        descr = [("x", "<f4"), ("y", "<f4")]
+        dt = np.dtype.from_descr(descr)
+        expected = np.dtype(descr)
+        assert dt == expected
+
+    def test_from_descr_tuple_simple(self):
+        dt = np.dtype.from_descr(("=float64", None))
+        assert dt == np.dtype("float64")
+
+    def test_from_descr_tuple_with_byteorder(self):
+        dt = np.dtype.from_descr((">float64", None))
+        assert dt.byteorder in ('>', '=')
+        assert dt.kind == 'f'
+        assert dt.itemsize == 8
+
+    def test_from_descr_tuple_little_endian(self):
+        dt = np.dtype.from_descr(("<int32", None))
+        assert dt.byteorder in ('<', '=')
+        assert dt.kind == 'i'
+        assert dt.itemsize == 4
+
+    def test_from_descr_tuple_no_byteorder_prefix(self):
+        dt = np.dtype.from_descr(("bool", None))
+        assert dt == np.dtype("bool")
+
+    def test_from_descr_tuple_with_dict(self):
+        dt = np.dtype.from_descr(("=float64", {}))
+        assert dt == np.dtype("float64")
+
+    def test_from_descr_roundtrip_new_format(self):
+        for name in ["float64", "int32", "complex128"]:
+            dt = np.dtype(name)
+            descr = ("=" + name, None)
+            rt = np.dtype.from_descr(descr)
+            assert rt.kind == dt.kind
+            assert rt.itemsize == dt.itemsize
+
+    def test_from_descr_unknown_name(self):
+        with pytest.raises(KeyError, match="No DType registered"):
+            np.dtype.from_descr(("=__nonexistent_dtype__", None))
+
+    def test_from_descr_bad_typestr(self):
+        with pytest.raises(TypeError, match="typestr.*must be a string"):
+            np.dtype.from_descr((123, None))
+
+    def test_from_descr_bad_kwargs(self):
+        with pytest.raises(TypeError, match="kwargs.*must be.*dict or None"):
+            np.dtype.from_descr(("=float64", 42))
+
+    def test_from_descr_bad_arg_type(self):
+        with pytest.raises(TypeError, match="2-tuple.*or a list"):
+            np.dtype.from_descr(42)
+
+
+class TestDTypeNameRegistry:
+    """Tests for np.dtype('name') and np.dtype('>name') via the registry."""
+
+    @pytest.mark.parametrize("name,kind,size", [
+        ("float64", "f", 8),
+        ("int32", "i", 4),
+        ("complex128", "c", 16),
+        ("bool", "b", 1),
+    ])
+    def test_dtype_from_registered_name(self, name, kind, size):
+        dt = np.dtype(name)
+        assert dt.kind == kind
+        assert dt.itemsize == size
+
+    @pytest.mark.parametrize("prefix", [">", "<", "=", "|"])
+    def test_dtype_with_byteorder_prefix(self, prefix):
+        dt = np.dtype(prefix + "float64")
+        assert dt.kind == "f"
+        assert dt.itemsize == 8
+
+    def test_dtype_big_endian_name(self):
+        dt = np.dtype(">int32")
+        assert dt.byteorder in (">", "=")
+        assert dt.kind == "i"
+        assert dt.itemsize == 4
+
+    def test_dtype_little_endian_name(self):
+        dt = np.dtype("<int32")
+        assert dt.byteorder in ("<", "=")
+        assert dt.kind == "i"
+        assert dt.itemsize == 4
+
+    def test_dtype_pipe_bool(self):
+        dt = np.dtype("|bool")
+        assert dt == np.dtype("bool")
+
+    @pytest.mark.parametrize("alias", ["intc", "byte", "ubyte", "longlong"])
+    def test_dtype_alias_names(self, alias):
+        dt = np.dtype(alias)
+        assert isinstance(dt, np.dtype)

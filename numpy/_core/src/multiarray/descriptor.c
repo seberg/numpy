@@ -1872,6 +1872,30 @@ _convert_from_str(PyObject *obj, int align)
     if ((check_num == NPY_NOTYPE + 10) ||
             (ret = PyArray_DescrFromType(check_num)) == NULL) {
         PyErr_Clear();
+
+        /*
+         * Try the dtype name registry first (takes precedence over
+         * sctypeDict).  Supports registered names like "float64" with
+         * optional byteorder prefix ">float64".
+         */
+        PyObject *name_key = PyUnicode_FromString(type);
+        if (name_key == NULL) {
+            return NULL;
+        }
+        PyObject *dtype_cls = PyDict_GetItemWithError(
+                npy_static_pydata.dtype_name_registry, name_key);
+        Py_DECREF(name_key);
+        if (dtype_cls != NULL) {
+            ret = NPY_DT_CALL_default_descr((PyArray_DTypeMeta *)dtype_cls);
+            if (ret == NULL) {
+                return NULL;
+            }
+            goto apply_endian;
+        }
+        if (PyErr_Occurred()) {
+            return NULL;
+        }
+
         /* Now check to see if the object is registered in typeDict */
         if (typeDict == NULL) {
             goto fail;
@@ -1910,6 +1934,8 @@ _convert_from_str(PyObject *obj, int align)
         }
         ret->elsize = elsize;
     }
+
+apply_endian:
     if (endian != '=' && PyArray_ISNBO(endian)) {
         endian = '=';
     }
@@ -2194,6 +2220,45 @@ arraydescr_protocol_descr_get(PyArray_Descr *self, void *NPY_UNUSED(ignored))
     PyObject *dobj, *res;
     PyObject *_numpy_internal;
 
+    PyArray_DTypeMeta *meta = NPY_DTYPE(self);
+    if (meta->dt_slots != NULL && !NPY_DT_is_legacy(meta)) {
+        /* User DType with explicit protocol_descr slot */
+        PyArrayDTypeMeta_ProtocolDescr *slot =
+                NPY_DT_SLOTS(meta)->protocol_descr;
+        if (slot != NULL) {
+            return slot(self);
+        }
+        /*
+         * Non-legacy DType without the slot: if it has a registered
+         * name, return (byteorder+name, None).
+         */
+        PyObject *name = NPY_DT_SLOTS(meta)->descr_name;
+        if (name != NULL) {
+            char endian = self->byteorder;
+            if (endian == '=') {
+                endian = '<';
+                if (!PyArray_IsNativeByteOrder(endian)) {
+                    endian = '>';
+                }
+            }
+            else if (endian == '\0' || endian == '|') {
+                endian = '|';
+            }
+            const char *name_utf8 = PyUnicode_AsUTF8(name);
+            if (name_utf8 == NULL) {
+                return NULL;
+            }
+            PyObject *typestr = PyUnicode_FromFormat("%c%s", endian, name_utf8);
+            if (typestr == NULL) {
+                return NULL;
+            }
+            res = PyTuple_Pack(2, typestr, Py_None);
+            Py_DECREF(typestr);
+            return res;
+        }
+    }
+
+    /* Legacy path: old list-of-tuples format */
     if (!PyDataType_HASFIELDS(self)) {
         /* get default */
         dobj = PyTuple_New(2);
@@ -3392,6 +3457,118 @@ arraydescr_newbyteorder(PyArray_Descr *self, PyObject *args)
     return (PyObject *)PyArray_DescrNewByteorder(self, endian);
 }
 
+/*
+ * classmethod  dtype.from_descr(descr)
+ *
+ * Reconstruct a dtype from its ``.descr`` representation.
+ *
+ * Accepts two formats:
+ *   - New tuple format ``(typestr, kwargs_or_None)`` where *typestr* is
+ *     ``"<byteorder><name>"`` (e.g. ``">float64"``).  The name is looked
+ *     up in the registry, and the DType is called as
+ *     ``DType(**kwargs)`` (or ``DType()`` when kwargs is None).
+ *   - Old list-of-tuples format (structured/void), passed through to
+ *     ``np.dtype(descr)``.
+ */
+static PyObject *
+arraydescr_from_descr(PyObject *NPY_UNUSED(cls), PyObject *descr)
+{
+    /* Old list-of-tuples structured format */
+    if (PyList_Check(descr)) {
+        return PyObject_CallOneArg(
+                (PyObject *)&PyArrayDescr_Type, descr);
+    }
+
+    /* New tuple format: (typestr, kwargs_or_None) */
+    if (!PyTuple_Check(descr) || PyTuple_GET_SIZE(descr) != 2) {
+        PyErr_Format(PyExc_TypeError,
+                "dtype.from_descr() argument must be a 2-tuple "
+                "(typestr, kwargs) or a list, not %.200s",
+                Py_TYPE(descr)->tp_name);
+        return NULL;
+    }
+
+    PyObject *typestr_obj = PyTuple_GET_ITEM(descr, 0);
+    PyObject *kwargs_obj = PyTuple_GET_ITEM(descr, 1);
+
+    if (!PyUnicode_Check(typestr_obj)) {
+        PyErr_SetString(PyExc_TypeError,
+                "dtype.from_descr() typestr (first element) must be a string");
+        return NULL;
+    }
+    if (kwargs_obj != Py_None && !PyDict_Check(kwargs_obj)) {
+        PyErr_SetString(PyExc_TypeError,
+                "dtype.from_descr() kwargs (second element) must be "
+                "a dict or None");
+        return NULL;
+    }
+
+    Py_ssize_t len;
+    const char *typestr = PyUnicode_AsUTF8AndSize(typestr_obj, &len);
+    if (typestr == NULL) {
+        return NULL;
+    }
+
+    /*
+     * Parse optional byteorder prefix.  Accept '<', '>', '=', '|',
+     * or no prefix (native).  The remainder is the registered name.
+     */
+    const char *name_start = typestr;
+    char byteorder = '=';
+    if (len >= 2 && (typestr[0] == '<' || typestr[0] == '>'
+                     || typestr[0] == '=' || typestr[0] == '|')) {
+        byteorder = typestr[0];
+        name_start = typestr + 1;
+    }
+
+    PyObject *name_obj = PyUnicode_FromString(name_start);
+    if (name_obj == NULL) {
+        return NULL;
+    }
+
+    PyObject *dtype_cls = PyDict_GetItemWithError(
+            npy_static_pydata.dtype_name_registry, name_obj);
+    Py_DECREF(name_obj);
+    if (dtype_cls == NULL) {
+        if (!PyErr_Occurred()) {
+            PyErr_Format(PyExc_KeyError,
+                    "No DType registered with name '%s'", name_start);
+        }
+        return NULL;
+    }
+
+    /* Call DType(**kwargs) or DType() */
+    PyObject *result;
+    if (kwargs_obj != Py_None && PyDict_Size(kwargs_obj) > 0) {
+        PyObject *empty_args = PyTuple_New(0);
+        if (empty_args == NULL) {
+            return NULL;
+        }
+        result = PyObject_Call(dtype_cls, empty_args, kwargs_obj);
+        Py_DECREF(empty_args);
+    }
+    else {
+        result = PyObject_CallNoArgs(dtype_cls);
+    }
+
+    if (result == NULL) {
+        return NULL;
+    }
+
+    /*
+     * Apply byteorder if it differs from native.  For legacy types
+     * this creates a new descriptor with the requested byte order.
+     */
+    if (byteorder != '=' && PyArray_DescrCheck(result)) {
+        PyArray_Descr *newdt = PyArray_DescrNewByteorder(
+                (PyArray_Descr *)result, byteorder);
+        Py_DECREF(result);
+        result = (PyObject *)newdt;
+    }
+
+    return result;
+}
+
 static PyObject *
 arraydescr_class_getitem(PyObject *cls, PyObject *args)
 {
@@ -3417,6 +3594,9 @@ static PyMethodDef arraydescr_methods[] = {
     {"newbyteorder",
         (PyCFunction)arraydescr_newbyteorder,
         METH_VARARGS, NULL},
+    {"from_descr",
+        (PyCFunction)arraydescr_from_descr,
+        METH_CLASS | METH_O, NULL},
     /* for typing; requires python >= 3.9 */
     {"__class_getitem__",
         (PyCFunction)arraydescr_class_getitem,

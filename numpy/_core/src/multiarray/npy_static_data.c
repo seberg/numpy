@@ -213,6 +213,11 @@ initialize_static_globals(void)
         return -1;
     }
 
+    npy_static_pydata.dtype_name_registry = PyDict_New();
+    if (npy_static_pydata.dtype_name_registry == NULL) {
+        return -1;
+    }
+
     /*
      * Initialize contents of npy_static_cdata struct
      *

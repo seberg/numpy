@@ -395,6 +395,7 @@ typedef int (PyArrayMethod_PromoterFunction)(PyObject *ufunc,
 #define NPY_DT_get_fill_zero_loop 10
 #define NPY_DT_finalize_descr 11
 #define NPY_DT_get_constant 12
+#define NPY_DT_protocol_descr 13
 
 // These PyArray_ArrFunc slots will be deprecated and replaced eventually
 // getitem and setitem can be defined as a performance optimization;
@@ -450,6 +451,13 @@ typedef struct {
     PyType_Slot *slots;
     /* Baseclass or NULL (will always subclass `np.dtype`) */
     PyTypeObject *baseclass;
+    /*
+     * Optional UTF-8 name for this DType, used for the dtype name registry.
+     * When non-NULL this is stored as a Python str and registered in a
+     * process-wide dict so that ``dtype.from_descr(name, ...)`` can look
+     * up the DType class.  Must be unique across all registered DTypes.
+     */
+    const char *type_registration_name;
 } PyArrayDTypeMeta_Spec;
 
 
@@ -530,6 +538,18 @@ typedef PyArray_Descr *(PyArrayDTypeMeta_FinalizeDescriptor)(PyArray_Descr *dtyp
  * @returns 1 on success, 0 if the constant is not available, or -1 with an error set.
  */
 typedef int (PyArrayDTypeMeta_GetConstant)(PyArray_Descr *descr, int ID, void *data);
+
+/*
+ * Optional function to produce the ``.descr`` attribute for a dtype
+ * instance.  When defined, the ``.descr`` property calls this instead
+ * of the default logic.
+ *
+ * Should return a new reference to a 2-tuple ``(typestr, kwargs_or_None)``
+ * where *typestr* is a string like ``">name"`` (byteorder + registered
+ * name) and *kwargs* is either a dict of parameters or ``None``.
+ * Returns NULL with an exception set on error.
+ */
+typedef PyObject *(PyArrayDTypeMeta_ProtocolDescr)(PyArray_Descr *descr);
 
 /*
  * TODO: These two functions are currently only used for experimental DType
