@@ -2112,21 +2112,41 @@ arraydescr_subdescr_get(PyArray_Descr *self, void *NPY_UNUSED(ignored))
 NPY_NO_EXPORT PyObject *
 arraydescr_protocol_typestr_get(PyArray_Descr *self, void *NPY_UNUSED(ignored))
 {
+    char endian = self->byteorder;
+    if (endian == '=') {
+        endian = NPY_NATBYTE;
+    }
+    else if (endian == '\0' || endian == '|') {
+        endian = '|';
+    }
+
+    /*
+     * For non-parametric user-defined or new-style DTypes with a registered
+     * name, use "<name>" instead of the kind+size format.  Parametric types
+     * fall back to the opaque format since the bare name would silently
+     * lose parameters when parsed back via np.dtype(typestr).
+     * Legacy built-in types keep the traditional "<f8" style.
+     */
+    PyArray_DTypeMeta *meta = NPY_DTYPE(self);
+    PyObject *descr_name = NPY_DT_SLOTS(meta)->descr_name;
+    if (descr_name != NULL
+            && (!NPY_DT_is_legacy(meta) || PyTypeNum_ISUSERDEF(self->type_num))
+            && !NPY_DT_is_parametric(meta)) {
+        const char *name_utf8 = PyUnicode_AsUTF8(descr_name);
+        if (name_utf8 == NULL) {
+            return NULL;
+        }
+        return PyUnicode_FromFormat("%c%s", endian, name_utf8);
+    }
+
     if (!PyDataType_ISLEGACY(self)) {
         return (PyObject *) Py_TYPE(self)->tp_str((PyObject *)self);
     }
 
     char basic_ = self->kind;
-    char endian = self->byteorder;
     int size = self->elsize;
     PyObject *ret;
 
-    if (endian == '=') {
-        endian = '<';
-        if (!PyArray_IsNativeByteOrder(endian)) {
-            endian = '>';
-        }
-    }
     if (self->type_num == NPY_UNICODE) {
         size >>= 2;
     }
@@ -2222,24 +2242,11 @@ arraydescr_protocol_descr_get(PyArray_Descr *self, void *NPY_UNUSED(ignored))
 
     PyArray_DTypeMeta *meta = NPY_DTYPE(self);
     if (meta->dt_slots != NULL && !NPY_DT_is_legacy(meta)) {
-        /* User DType with explicit protocol_descr slot */
-        PyArrayDTypeMeta_ProtocolDescr *slot =
-                NPY_DT_SLOTS(meta)->protocol_descr;
-        if (slot != NULL) {
-            return slot(self);
-        }
-        /*
-         * Non-legacy DType without the slot: if it has a registered
-         * name, return (byteorder+name, None).
-         */
         PyObject *name = NPY_DT_SLOTS(meta)->descr_name;
         if (name != NULL) {
             char endian = self->byteorder;
             if (endian == '=') {
-                endian = '<';
-                if (!PyArray_IsNativeByteOrder(endian)) {
-                    endian = '>';
-                }
+                endian = NPY_NATBYTE;
             }
             else if (endian == '\0' || endian == '|') {
                 endian = '|';
@@ -2252,8 +2259,27 @@ arraydescr_protocol_descr_get(PyArray_Descr *self, void *NPY_UNUSED(ignored))
             if (typestr == NULL) {
                 return NULL;
             }
-            res = PyTuple_Pack(2, typestr, Py_None);
+
+            /*
+             * The get_configuration slot returns kwargs (or None) for the
+             * DType's parameters.  The typestr is always constructed here.
+             */
+            PyObject *kwargs = Py_None;
+            PyArrayDTypeMeta_GetConfiguration *slot =
+                    NPY_DT_SLOTS(meta)->get_configuration;
+            if (slot != NULL) {
+                kwargs = slot(self);
+                if (kwargs == NULL) {
+                    Py_DECREF(typestr);
+                    return NULL;
+                }
+            }
+
+            res = PyTuple_Pack(2, typestr, kwargs);
             Py_DECREF(typestr);
+            if (slot != NULL) {
+                Py_DECREF(kwargs);
+            }
             return res;
         }
     }
@@ -2823,10 +2849,7 @@ arraydescr_reduce(PyArray_Descr *self, PyObject *NPY_UNUSED(args))
      */
     endian = self->byteorder;
     if (endian == '=') {
-        endian = '<';
-        if (!PyArray_IsNativeByteOrder(endian)) {
-            endian = '>';
-        }
+        endian = NPY_NATBYTE;
     }
     if (PyDataType_ISDATETIME(self)) {
         PyObject *newobj;
@@ -3537,17 +3560,58 @@ arraydescr_from_descr(PyObject *NPY_UNUSED(cls), PyObject *descr)
         return NULL;
     }
 
-    /* Call DType(**kwargs) or DType() */
-    PyObject *result;
+    /*
+     * Build the kwargs dict for the DType call.  For non-legacy types,
+     * pass a non-native byteorder as byteorder=">" (or "<") kwarg.
+     */
+    PyObject *call_kwargs = NULL;
     if (kwargs_obj != Py_None && PyDict_Size(kwargs_obj) > 0) {
-        PyObject *empty_args = PyTuple_New(0);
-        if (empty_args == NULL) {
+        call_kwargs = PyDict_Copy(kwargs_obj);
+        if (call_kwargs == NULL) {
             return NULL;
         }
-        result = PyObject_Call(dtype_cls, empty_args, kwargs_obj);
+    }
+
+    int is_legacy = PyObject_TypeCheck(dtype_cls, &PyArrayDTypeMeta_Type)
+            && NPY_DT_is_legacy((PyArray_DTypeMeta *)dtype_cls);
+
+    if (!is_legacy && byteorder != '=' && byteorder != '|'
+            && !(byteorder == '<' && PyArray_IsNativeByteOrder('<'))
+            && !(byteorder == '>' && PyArray_IsNativeByteOrder('>'))) {
+        if (call_kwargs == NULL) {
+            call_kwargs = PyDict_New();
+            if (call_kwargs == NULL) {
+                return NULL;
+            }
+        }
+        char bo_str[2] = {byteorder, '\0'};
+        PyObject *bo_obj = PyUnicode_FromString(bo_str);
+        if (bo_obj == NULL) {
+            Py_DECREF(call_kwargs);
+            return NULL;
+        }
+        if (PyDict_SetItemString(call_kwargs, "byteorder", bo_obj) < 0) {
+            Py_DECREF(bo_obj);
+            Py_DECREF(call_kwargs);
+            return NULL;
+        }
+        Py_DECREF(bo_obj);
+    }
+
+    /* Call DType(**kwargs) or DType() */
+    PyObject *result;
+    if (call_kwargs != NULL && PyDict_Size(call_kwargs) > 0) {
+        PyObject *empty_args = PyTuple_New(0);
+        if (empty_args == NULL) {
+            Py_DECREF(call_kwargs);
+            return NULL;
+        }
+        result = PyObject_Call(dtype_cls, empty_args, call_kwargs);
         Py_DECREF(empty_args);
+        Py_DECREF(call_kwargs);
     }
     else {
+        Py_XDECREF(call_kwargs);
         result = PyObject_CallNoArgs(dtype_cls);
     }
 
@@ -3555,11 +3619,8 @@ arraydescr_from_descr(PyObject *NPY_UNUSED(cls), PyObject *descr)
         return NULL;
     }
 
-    /*
-     * Apply byteorder if it differs from native.  For legacy types
-     * this creates a new descriptor with the requested byte order.
-     */
-    if (byteorder != '=' && PyArray_DescrCheck(result)) {
+    /* For legacy types, apply byteorder via DescrNewByteorder */
+    if (is_legacy && byteorder != '=' && PyArray_DescrCheck(result)) {
         PyArray_Descr *newdt = PyArray_DescrNewByteorder(
                 (PyArray_Descr *)result, byteorder);
         Py_DECREF(result);

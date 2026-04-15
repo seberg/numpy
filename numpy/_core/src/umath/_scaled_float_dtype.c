@@ -125,6 +125,29 @@ sfloat_setitem(PyArray_Descr *descr_, PyObject *obj, char *data)
 }
 
 
+static PyObject *
+sfloat_get_configuration(PyArray_Descr *descr)
+{
+    PyArray_SFloatDescr *self = (PyArray_SFloatDescr *)descr;
+    PyObject *kwargs = PyDict_New();
+    if (kwargs == NULL) {
+        return NULL;
+    }
+    PyObject *scaling = PyFloat_FromDouble(self->scaling);
+    if (scaling == NULL) {
+        Py_DECREF(kwargs);
+        return NULL;
+    }
+    if (PyDict_SetItemString(kwargs, "scaling", scaling) < 0) {
+        Py_DECREF(scaling);
+        Py_DECREF(kwargs);
+        return NULL;
+    }
+    Py_DECREF(scaling);
+    return kwargs;
+}
+
+
 /* Special DType methods and the descr->f slot storage */
 NPY_DType_Slots sfloat_slots = {
     .discover_descr_from_pyobject = &sfloat_discover_from_pyobject,
@@ -133,6 +156,7 @@ NPY_DType_Slots sfloat_slots = {
     .common_dtype = &sfloat_common_dtype,
     .common_instance = &sfloat_common_instance,
     .setitem = &sfloat_setitem,
+    .get_configuration = &sfloat_get_configuration,
     .f = {
         .getitem = (PyArray_GetItemFunc *)&sfloat_getitem,
         .setitem = NULL,
@@ -1104,6 +1128,14 @@ get_sfloat_dtype(PyObject *NPY_UNUSED(mod), PyObject *NPY_UNUSED(args))
     }
 
     if (sfloat_init_ufuncs() < 0) {
+        return NULL;
+    }
+
+    /*
+     * Normally the name is set via spec->type_registration_name through
+     * PyArrayInitDTypeMeta_FromSpec, but SFloat doesn't use the spec path.
+     */
+    if (dtypemeta_register_name(&PyArray_SFloatDType, "sfloat") < 0) {
         return NULL;
     }
 

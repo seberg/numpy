@@ -73,12 +73,12 @@ typedef struct {
      */
     PyArrayDTypeMeta_GetConstant *get_constant;
     /*
-     * Optional slot for the `.descr` attribute.
-     * When NULL, the default implementation is used (which builds
-     * a (typestr, None) tuple from the descr_name, or falls back
-     * to the legacy list-of-tuples format).
+     * Optional slot returning the DType's configuration (a dict of kwargs
+     * for ``DType(**kwargs)``, or ``Py_None``).  Used by ``.descr`` and
+     * serialization.  The typestr is constructed by the caller.
+     * When NULL, the default (None) is used.
      */
-    PyArrayDTypeMeta_ProtocolDescr *protocol_descr;
+    PyArrayDTypeMeta_GetConfiguration *get_configuration;
     /*
      * Registered short name for this DType class (a Python str),
      * or NULL if not registered.  Used by `.descr` and `from_descr`.

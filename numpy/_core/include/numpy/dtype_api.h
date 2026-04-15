@@ -395,7 +395,7 @@ typedef int (PyArrayMethod_PromoterFunction)(PyObject *ufunc,
 #define NPY_DT_get_fill_zero_loop 10
 #define NPY_DT_finalize_descr 11
 #define NPY_DT_get_constant 12
-#define NPY_DT_protocol_descr 13
+#define NPY_DT_get_configuration 13
 
 // These PyArray_ArrFunc slots will be deprecated and replaced eventually
 // getitem and setitem can be defined as a performance optimization;
@@ -544,12 +544,14 @@ typedef int (PyArrayDTypeMeta_GetConstant)(PyArray_Descr *descr, int ID, void *d
  * instance.  When defined, the ``.descr`` property calls this instead
  * of the default logic.
  *
- * Should return a new reference to a 2-tuple ``(typestr, kwargs_or_None)``
- * where *typestr* is a string like ``">name"`` (byteorder + registered
- * name) and *kwargs* is either a dict of parameters or ``None``.
+ * Should return a new reference to a dict of keyword arguments (the
+ * "configuration" in Zarr V3 terminology) that can be passed to
+ * ``DType(**kwargs)`` to recreate the descriptor, or ``Py_None`` if
+ * no parameters are needed.  The typestr (byteorder + registered name)
+ * is constructed by the caller.
  * Returns NULL with an exception set on error.
  */
-typedef PyObject *(PyArrayDTypeMeta_ProtocolDescr)(PyArray_Descr *descr);
+typedef PyObject *(PyArrayDTypeMeta_GetConfiguration)(PyArray_Descr *descr);
 
 /*
  * TODO: These two functions are currently only used for experimental DType

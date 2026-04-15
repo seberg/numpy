@@ -273,7 +273,7 @@ dtypemeta_initialize_struct_from_spec(
     NPY_DT_SLOTS(DType)->get_fill_zero_loop = NULL;
     NPY_DT_SLOTS(DType)->finalize_descr = NULL;
     NPY_DT_SLOTS(DType)->get_constant = default_get_constant;
-    NPY_DT_SLOTS(DType)->protocol_descr = NULL;
+    NPY_DT_SLOTS(DType)->get_configuration = NULL;
     NPY_DT_SLOTS(DType)->descr_name = NULL;
     NPY_DT_SLOTS(DType)->f = default_funcs;
 

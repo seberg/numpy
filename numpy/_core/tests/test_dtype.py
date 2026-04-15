@@ -2149,3 +2149,34 @@ class TestDTypeNameRegistry:
     def test_dtype_alias_names(self, alias):
         dt = np.dtype(alias)
         assert isinstance(dt, np.dtype)
+
+    def test_user_dtype_str_uses_registered_name(self):
+        dt = np.dtype(rational)
+        assert dt.str == "<rational" or dt.str == ">rational"
+        assert "rational" in dt.str
+
+    def test_user_dtype_descr_uses_registered_name(self):
+        dt = np.dtype(rational)
+        descr = dt.descr
+        assert isinstance(descr, list)
+        assert len(descr) == 1
+        name_str, typestr = descr[0]
+        assert name_str == ""
+        assert "rational" in typestr
+
+    def test_newstyle_parametric_dtype_str_falls_back(self):
+        SF = np._core._multiarray_umath._get_sfloat_dtype()
+        dt = SF(2.5)
+        # Parametric DTypes don't use the registered name in .str
+        # because the bare name would silently lose parameters.
+        assert "sfloat" not in dt.str
+
+    def test_newstyle_dtype_descr_roundtrip(self):
+        SF = np._core._multiarray_umath._get_sfloat_dtype()
+        dt = SF(2.5)
+        descr = dt.descr
+        assert isinstance(descr, tuple)
+        assert descr[0] == "|sfloat"
+        assert descr[1] == {"scaling": 2.5}
+        restored = np.dtype.from_descr(descr)
+        assert restored.get_scaling() == 2.5
