@@ -171,7 +171,7 @@ class finfo:
             raise TypeError("dtype must not be None")
 
         try:
-            obj = cls._finfo_cache.get(dtype)  # most common path
+            obj = cls._finfo_cache.get((type(dtype), dtype))  # most common path
             if obj is not None:
                 return obj
         except TypeError:
@@ -183,7 +183,7 @@ class finfo:
             # In case a float instance was given
             dtype = numeric.dtype(type(dtype))
 
-        obj = cls._finfo_cache.get(dtype)
+        obj = cls._finfo_cache.get((type(dtype), dtype))
         if obj is not None:
             return obj
         dtypes = [dtype]
@@ -193,7 +193,7 @@ class finfo:
             dtypes.append(newdtype)
             dtype = newdtype
 
-        obj = cls._finfo_cache.get(dtype)
+        obj = cls._finfo_cache.get((type(dtype), dtype))
         if obj is not None:
             return obj
 
@@ -205,17 +205,17 @@ class finfo:
                 dtypes.append(newdtype)
                 dtype = newdtype
 
-                obj = cls._finfo_cache.get(dtype, None)
+                obj = cls._finfo_cache.get((type(dtype), dtype), None)
                 if obj is not None:
                     # the original dtype was not in the cache, but the new
                     # dtype is in the cache. we add the original dtypes to
                     # the cache and return the result
                     for dt in dtypes:
-                        cls._finfo_cache[dt] = obj
+                        cls._finfo_cache[(type(dtype), dtype)] = obj
                     return obj
         obj = object.__new__(cls)._init(dtype)
         for dt in dtypes:
-            cls._finfo_cache[dt] = obj
+            cls._finfo_cache[(type(dtype), dtype)] = obj
         return obj
 
     def _init(self, dtype):
